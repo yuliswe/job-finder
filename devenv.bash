@@ -4,6 +4,7 @@ unset npm_config_prefix NPM_CONFIG_PREFIX
 VIRTUAL_ENV_DISABLE_PROMPT=1
 NODE_VIRTUAL_ENV_DISABLE_PROMPT=1
 source "$WS_DIR/.nodevenv/bin/activate"
+source "$WS_DIR/.venv/bin/activate"
 
 NPM_BIN="$(npx -y npm@8 bin)"
 
@@ -20,3 +21,5 @@ pathadd() {
 }
 
 pathadd "$NPM_BIN"
+
+alias deactivate="deactivate && deactivate_node"

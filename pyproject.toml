@@ -6,8 +6,9 @@ authors = ["Yu Li <github@yuli.se>"]
 license = "MIT"
 
 [tool.poetry.dependencies]
-python = ">=3.7"
+python = ">=3.10,<4.0"
 nodeenv = "^1.7.0"
+python-jobspy = "^1.1.82"
 
 [tool.poetry.dev-dependencies]
 
