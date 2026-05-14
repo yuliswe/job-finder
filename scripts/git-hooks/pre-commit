@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -ex
+
+npx prettier --check .
+npx eslint .

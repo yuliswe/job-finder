@@ -1,0 +1,14 @@
+.zcompdump
+.zsh_history
+.venv/
+.nodevenv/
+node_modules/
+dist/
+build/
+.DS_Store
+*.local
+*.local.*
+*.temp
+*.temp.*
+*.tmp
+*.tmp.*
