@@ -383,6 +383,7 @@ export default [
     },
   },
 
+
   // Testing library configuration (simplified)
   {
     files: ['**/__tests__/**/*.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
