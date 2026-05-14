@@ -21,5 +21,6 @@ pathadd() {
 }
 
 pathadd "$NPM_BIN"
+pathadd "$WS_DIR/bin"
 
 alias deactivate="deactivate && deactivate_node"
