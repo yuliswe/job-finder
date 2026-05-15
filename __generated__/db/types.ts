@@ -3,13 +3,12 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from 'kysely';
-import type { Bool, Timestamp } from 'src/db/customTypes';
+import type { ColumnType } from "kysely";
+import type { Bool, Timestamp } from "src/db/customTypes";
 
-export type Generated<T> =
-  T extends ColumnType<infer S, infer I, infer U>
-    ? ColumnType<S, I | undefined, U>
-    : ColumnType<T, T | undefined, T>;
+export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S, I | undefined, U>
+  : ColumnType<T, T | undefined, T>;
 
 export interface JobListSource {
   createdAt: Generated<Timestamp>;
@@ -17,7 +16,7 @@ export interface JobListSource {
   isActive: Generated<Bool>;
   isProcessed: Generated<Bool>;
   ofJobSourceId: string;
-  parserScript: string;
+  parserScript: string | null;
   updatedAt: Generated<Timestamp>;
   url: string;
 }

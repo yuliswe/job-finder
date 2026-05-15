@@ -7,8 +7,6 @@ import type { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
 import { withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
-const MAX_PAGE_TEXT_CHARS = 16_000;
-
 /**
  * Open Google in a new tab of `context`, run a search for `query`, capture the
  * results page text, and pass it to the LLM to extract a typed response that
@@ -56,8 +54,6 @@ export async function webSearch<
     return { pageText: text, pageTitle: title };
   });
 
-  const truncated = pageText.slice(0, MAX_PAGE_TEXT_CHARS);
-
   const memory = new Memory([{ system: systemPrompt }]);
   const { result } = await feedbackLoop<S, R>({
     memory,
@@ -65,7 +61,7 @@ export async function webSearch<
 Page title: ${pageTitle}
 
 Search results page text (may include ads, snippets, and link text):
-${truncated}`,
+${pageText}`,
     schema,
     maxAttempts,
     model,

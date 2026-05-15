@@ -38,7 +38,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       c.notNull().defaultTo(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
     )
     .addColumn('url', 'text', c => c.notNull().unique())
-    .addColumn('parserScript', 'text', c => c.notNull())
+    .addColumn('parserScript', 'text')
     .addColumn('isActive', sql`integer_boolean`, c =>
       c.notNull().defaultTo(Bool.True)
     )
