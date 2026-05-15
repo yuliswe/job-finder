@@ -17,9 +17,9 @@ When creating a new CLI command for `src/cli/bin/cli`, follow this checklist:
 
 ## After Writing the Command
 
-- [ ] **Regenerate `src/cli/_completion.zsh`** by running `./src/cli/bin/cli completion zsh`. The generator walks the commander tree and inlines every option's `argChoices`, so static enums get tab-completion automatically — DO NOT hand-edit `_completion.zsh`.
+- [ ] **Regenerate `__generated__/cli/_completion.zsh`** by running `./src/cli/bin/cli completion-script-dump`. The generator walks the commander tree and inlines every option's `argChoices`, so static enums get tab-completion automatically — DO NOT hand-edit `_completion.zsh`.
 
-- [ ] If the new command takes a dynamic value that can't be expressed as static choices (e.g. needs a DB or network lookup at completion time), extend `src/cli/commands/completion.ts`:
+- [ ] If the new command takes a dynamic value that can't be expressed as static choices (e.g. needs a DB or network lookup at completion time), extend `src/cli/commands/completion-script-dump.ts`:
   1. Add a helper function (e.g. `_cli_<thing>`) that calls a hidden `cli complete <thing>` subcommand and pipes the lines into `_describe`.
   2. Add a hidden `complete` subcommand (set `_hidden = true`) that prints the values, one per line, to stdout.
   3. Reference the helper in `formatOptionSpec` / `formatArgumentSpec` so the generator emits it for matching option/argument names.

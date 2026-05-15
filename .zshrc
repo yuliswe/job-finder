@@ -19,6 +19,6 @@ If you are setting up the repo for the first time, following these steps:
 
 EOS
 else
-source "$(dirname $0/)/devenv.bash"
+source "$WS_DIR/devenv.bash"
+source "$WS_DIR/__generated__/cli/_completion.zsh"
 fi
-
