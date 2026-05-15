@@ -59,16 +59,45 @@ Print the supported sites and job types (useful as a reference for `--site` / `-
 ./src/cli/bin/cli sites
 ```
 
-## `completion`
+## `pipeline seed`
 
-Generate the Zsh completion script and write it to `src/cli/_completion.zsh`.
+Read `seeds/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.
+
+```bash
+./src/cli/bin/cli pipeline seed
+```
+
+Requires:
+
+- `OPENROUTER_API_KEY` set in the environment.
+- `LLM_SEEDING_MODEL` set in `src/llm/config.ts` (empty by default).
+- `seeds/interests.md` populated with the user's job-search interests.
+
+## `help-menu-dump`
+
+Dump the full command tree (commands, subcommands, options, choices, defaults) as JSON. Useful for tooling that needs a machine-readable view of the CLI surface.
+
+```bash
+# Print to stdout
+./src/cli/bin/cli help-menu-dump
+
+# Write canonical dump file
+./src/cli/bin/cli help-menu-dump -o __generated__/cli/help-menu.json
+
+# Compact (single-line) JSON
+./src/cli/bin/cli help-menu-dump --no-pretty
+```
+
+## `completion-script-dump`
+
+Generate the Zsh completion script and write it to `__generated__/cli/_completion.zsh`.
 
 ```bash
 # One-off for current shell
-source <(./src/cli/bin/cli completion zsh)
+source <(./src/cli/bin/cli completion-script-dump)
 
 # Persistent — add to ~/.zshrc
-echo 'source ~/lab/job-finder/src/cli/_completion.zsh' >> ~/.zshrc
+echo 'source ~/lab/job-finder/__generated__/cli/_completion.zsh' >> ~/.zshrc
 ```
 
 Regenerate after adding or changing any command/flag — never hand-edit `_completion.zsh`.

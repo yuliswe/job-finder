@@ -291,6 +291,12 @@ export default [
         },
         {
           selector:
+            "MemberExpression[object.object.name='process'][object.property.name='env']",
+          message:
+            'Do not read process.env directly. Use `Env` from src/utils/env.js instead.',
+        },
+        {
+          selector:
             "CallExpression[callee.object.name='router'][callee.property.name='back']",
           message:
             'Do not use router.back(). Use `routerDismissTo` or `routerBackOrDismissTo` instead.',
@@ -336,6 +342,14 @@ export default [
         },
       ],
       'import/no-named-as-default-member': 'off',
+    },
+  },
+
+  // Env loader is the only allowed reader of process.env
+  {
+    files: ['src/utils/env.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
     },
   },
 
