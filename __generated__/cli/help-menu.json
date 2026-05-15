@@ -163,6 +163,11 @@
           "name": "seed",
           "description": "Seed SourceSeed table from seeds/interests.md via an LLM-driven jobspy call",
           "usage": "[options]"
+        },
+        {
+          "name": "sourcing",
+          "description": "Discover JobSource rows from recent SourceSeed URLs via headless browse + LLM",
+          "usage": "[options]"
         }
       ]
     },

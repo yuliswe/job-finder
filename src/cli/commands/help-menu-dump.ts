@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { Command, Option } from 'commander';
 
+import { terminal } from 'src/utils/terminal.js';
+
 type OptionDump = {
   flags: string;
   description?: string;
@@ -129,6 +131,6 @@ export function createHelpMenuDumpCommand(program: Command): Command {
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, rendered, 'utf-8');
       process.stdout.write(rendered);
-      process.stderr.write(`\n# wrote ${outputPath}\n`);
+      terminal.log(`# wrote ${outputPath}`);
     });
 }

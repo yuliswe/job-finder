@@ -5,14 +5,14 @@ import * as v from 'valibot';
 
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { feedbackLoop, Memory, type Logger } from 'src/llm/base.js';
+import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LLM_SEEDING_MODEL } from 'jobfinder.config.js';
 import {
   JobspyError,
   scrapeJobs,
   type JobResult,
 } from 'src/python-jobspy/index.js';
-import { terminal } from 'src/utils/console';
+import { terminal } from 'src/utils/terminal';
 
 const SITES = [
   'linkedin',
@@ -58,12 +58,6 @@ If a previous attempt fails, read the error feedback and adjust: try different s
 
 const MAX_ATTEMPTS = 5;
 
-const stderrLogger: Logger = {
-  log: msg => console.error(msg),
-  warn: msg => console.error(msg),
-  error: msg => console.error(msg),
-};
-
 export function createSeedCommand(): Command {
   return new Command('seed')
     .description(
@@ -87,7 +81,7 @@ export function createSeedCommand(): Command {
         schema: ScrapeArgsSchema,
         maxAttempts: MAX_ATTEMPTS,
         model: LLM_SEEDING_MODEL,
-        logger: stderrLogger,
+        logger: terminal,
         validate: async args => {
           terminal.log(`Call jobspy with \n${JSON.stringify(args)}`);
 

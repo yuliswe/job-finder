@@ -37,13 +37,14 @@ _jobfinder_pipeline() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seed)' \
+    '1:subcommand:(seed sourcing)' \
     '*:: :->args'
 
   case $state in
     args)
       case $line[1] in
     seed) _normal ;;
+    sourcing) _normal ;;
       esac
       ;;
   esac

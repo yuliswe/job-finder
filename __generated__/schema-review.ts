@@ -33,6 +33,7 @@ type JobListSource = {
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
+  isProcessed: Bool | DEFAULT<0>;
   parserScript: Text;
   url: Text;
   // ── relations ──
@@ -51,6 +52,7 @@ type JobPost = {
   createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
+  isProcessed: Bool | DEFAULT<0>;
   title: Text;
   url: Text;
   company?: Text;
@@ -84,6 +86,7 @@ type JobSource = {
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
+  isProcessed: Bool | DEFAULT<0>;
   name: Text;
   url: Text;
   // ── indexes ──
@@ -99,6 +102,7 @@ type SourceSeed = {
   createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
+  isProcessed: Bool | DEFAULT<0>;
   name: Text;
   title: Text;
   url: Text;

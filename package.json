@@ -15,7 +15,8 @@
     "db:migrate:create": "node --import tsx scripts/db/create-migration.ts",
     "db:reset": "node --import tsx scripts/db/migrate.ts reset",
     "db:codegen": "kysely-codegen --url ${DB_PATH:-jobs.db}",
-    "db:schema-review": "node --import tsx scripts/db/generate-schema-review.ts"
+    "db:schema-review": "node --import tsx scripts/db/generate-schema-review.ts",
+    "sql": "litecli ${DB_PATH:-jobs.db}"
   },
   "repository": {},
   "keywords": [],
@@ -32,6 +33,8 @@
     "dotenv": "^17.4.2",
     "ink": "^6.8.0",
     "kysely": "^0.28.17",
+    "p-limit": "^7.3.0",
+    "patchright": "^1.59.4",
     "react": "^19.1.7",
     "uuidv7": "^1.2.1",
     "valibot": "^1.4.0"

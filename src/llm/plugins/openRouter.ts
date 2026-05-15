@@ -25,7 +25,7 @@ export class OpenRouterPlugin {
   }
 
   async send(args: LlmSendArgs): Promise<LlmRawResponse> {
-    const { model, messages, reasoning, responseFormat } = args;
+    const { model, messages, reasoningEffort, responseFormat } = args;
 
     const response = await this.getClient().chat.send({
       chatRequest: {
@@ -40,7 +40,7 @@ export class OpenRouterPlugin {
           },
         },
         messages,
-        ...(reasoning ? { reasoning: { effort: reasoning } } : {}),
+        ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
       },
     });
 

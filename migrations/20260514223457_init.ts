@@ -1,5 +1,7 @@
 import { Kysely, sql } from 'kysely';
 
+import { Bool } from 'src/db/customTypes.js';
+
 export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable('JobSource')
@@ -12,7 +14,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
     .addColumn('name', 'text', c => c.notNull())
     .addColumn('url', 'text', c => c.notNull().unique())
-    .addColumn('isActive', sql`integer_boolean`, c => c.notNull().defaultTo(1))
+    .addColumn('isActive', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.True)
+    )
+    .addColumn('isProcessed', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.False)
+    )
     .execute();
 
   await db.schema
@@ -32,7 +39,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
     .addColumn('url', 'text', c => c.notNull().unique())
     .addColumn('parserScript', 'text', c => c.notNull())
-    .addColumn('isActive', sql`integer_boolean`, c => c.notNull().defaultTo(1))
+    .addColumn('isActive', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.True)
+    )
+    .addColumn('isProcessed', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.False)
+    )
     .addColumn('ofJobSourceId', 'text', c =>
       c.notNull().references('JobSource.id').onDelete('cascade')
     )
@@ -72,6 +84,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('salaryMax', 'real')
     .addColumn('salaryCurrency', 'text')
     .addColumn('salaryInterval', 'text')
+    .addColumn('isProcessed', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.False)
+    )
     .addColumn('ofJobSourceId', 'text', c =>
       c.notNull().references('JobSource.id').onDelete('cascade')
     )
@@ -116,6 +131,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn('url', 'text', c => c.notNull().unique())
     .addColumn('name', 'text', c => c.notNull())
     .addColumn('title', 'text', c => c.notNull())
+    .addColumn('isProcessed', sql`integer_boolean`, c =>
+      c.notNull().defaultTo(Bool.False)
+    )
     .execute();
 }
 

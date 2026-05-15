@@ -1,2 +1,5 @@
 export type Timestamp = string;
-export type Bool = 0 | 1;
+export enum Bool {
+  False = 0,
+  True = 1,
+}

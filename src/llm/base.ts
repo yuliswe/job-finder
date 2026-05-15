@@ -4,7 +4,11 @@ import { toJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 
 import { plugin } from 'jobfinder.config.js';
-import type { LlmMessage, LlmReasoning } from 'src/llm/plugins/interface.js';
+import type {
+  LlmMessage,
+  LlmReasoningEffort,
+} from 'src/llm/plugins/interface.js';
+import { COLOURS, type Terminal } from 'src/utils/terminal';
 
 const schemaNameCache = new WeakMap<v.GenericSchema, string>();
 
@@ -52,12 +56,6 @@ function strictifyJsonSchema(
   return result;
 }
 
-export type Logger = {
-  log: (msg: string) => void;
-  warn: (msg: string) => void;
-  error: (msg: string) => void;
-};
-
 type MemoryInit = ({ system: string } | { user: string })[];
 
 export class Memory {
@@ -93,9 +91,9 @@ export async function llmSend<S extends v.GenericSchema>(args: {
   schema: S;
   model: string;
   messages: LlmMessage[];
-  reasoning?: LlmReasoning;
+  reasoningEffort?: LlmReasoningEffort;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { schema, model, messages, reasoning } = args;
+  const { schema, model, messages, reasoningEffort } = args;
   const responseFormat = {
     name: getSchemaName(schema),
     schema: strictifyJsonSchema(
@@ -105,7 +103,7 @@ export async function llmSend<S extends v.GenericSchema>(args: {
   const { content, totalTokens } = await plugin.send({
     model,
     messages,
-    reasoning,
+    reasoningEffort,
     responseFormat,
   });
   if (!content) throw new Error('LLM returned empty response');
@@ -120,10 +118,10 @@ export async function sendWithRetry<S extends v.GenericSchema>(args: {
   memory: Memory;
   schema: S;
   model: string;
-  logger: Logger;
-  reasoning?: LlmReasoning;
+  logger: Terminal;
+  reasoningEffort?: LlmReasoningEffort;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { memory, schema, model, logger, reasoning } = args;
+  const { memory, schema, model, logger, reasoningEffort } = args;
 
   let totalTokens = 0;
   for (let retry = 0; retry < MAX_SEND_RETRIES; retry++) {
@@ -132,7 +130,7 @@ export async function sendWithRetry<S extends v.GenericSchema>(args: {
         schema,
         model,
         messages: memory.toMessages(),
-        reasoning,
+        reasoningEffort,
       });
       totalTokens += sendResult.totalTokens;
       return { result: sendResult.result, totalTokens };
@@ -169,12 +167,12 @@ export async function feedbackLoop<
   initialPrompt: string;
   schema: S;
   maxAttempts: number;
-  logger: Logger;
+  logger: Terminal;
   model: string;
   validate: (
     parsed: v.InferOutput<S>
   ) => Promise<ValidateResult<R>> | ValidateResult<R>;
-  reasoning?: LlmReasoning;
+  reasoningEffort?: LlmReasoningEffort;
 }): Promise<{ result: R; totalTokens: number }> {
   const {
     memory,
@@ -184,7 +182,7 @@ export async function feedbackLoop<
     maxAttempts,
     logger,
     model,
-    reasoning,
+    reasoningEffort,
   } = args;
 
   memory.add(initialPrompt);
@@ -196,7 +194,7 @@ export async function feedbackLoop<
       schema,
       model,
       logger,
-      reasoning,
+      reasoningEffort,
     });
     totalTokens += sendResult.totalTokens;
 
@@ -210,10 +208,17 @@ export async function feedbackLoop<
 
     const { feedback } = validateResult;
 
-    logger.warn(`Attempt ${attempt}/${maxAttempts} failed: ${feedback}`);
+    logger.warn(
+      `Attempt ${attempt}/${maxAttempts} failed. Telling LLM to revise: "${feedback}"`,
+      COLOURS.gray
+    );
 
     if (attempt < maxAttempts) {
       memory.add(feedback);
+    } else {
+      logger.error(
+        `All ${maxAttempts} attempts failed. No more retries left. Lasts LLM response was:\n${JSON.stringify(sendResult.result, null, 2)}`
+      );
     }
   }
 

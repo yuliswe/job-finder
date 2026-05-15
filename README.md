@@ -59,6 +59,19 @@ Print the supported sites and job types (useful as a reference for `--site` / `-
 ./src/cli/bin/cli sites
 ```
 
+## `pipeline sourcing`
+
+For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.
+
+```bash
+./src/cli/bin/cli pipeline sourcing
+```
+
+Requires:
+
+- A locally installed Chrome/Chromium (run `npx puppeteer browsers install chrome` once if not).
+- `LLM_SOURCING_MODEL` set in `jobfinder.config.ts`.
+
 ## `pipeline seed`
 
 Read `seeds/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { Command } from 'commander';
 
+import { terminal } from 'src/utils/terminal.js';
+
 type OptionLike = {
   long?: string;
   short?: string;
@@ -172,6 +174,6 @@ export function createCompletionScriptDumpCommand(program: Command): Command {
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, content, 'utf-8');
       process.stdout.write(content);
-      process.stderr.write(`\n# wrote ${outputPath}\n`);
+      terminal.log(`# wrote ${outputPath}`);
     });
 }

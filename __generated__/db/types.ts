@@ -15,6 +15,7 @@ export interface JobListSource {
   createdAt: Generated<Timestamp>;
   id: string;
   isActive: Generated<Bool>;
+  isProcessed: Generated<Bool>;
   ofJobSourceId: string;
   parserScript: string;
   updatedAt: Generated<Timestamp>;
@@ -26,6 +27,7 @@ export interface JobPost {
   createdAt: Generated<Timestamp>;
   description: string | null;
   id: string;
+  isProcessed: Generated<Bool>;
   isRemote: Bool | null;
   jobType: string | null;
   location: string | null;
@@ -46,6 +48,7 @@ export interface JobSource {
   createdAt: Generated<Timestamp>;
   id: string;
   isActive: Generated<Bool>;
+  isProcessed: Generated<Bool>;
   name: string;
   updatedAt: Generated<Timestamp>;
   url: string;
@@ -54,6 +57,7 @@ export interface JobSource {
 export interface SourceSeed {
   createdAt: Generated<Timestamp>;
   id: string;
+  isProcessed: Generated<Bool>;
   name: string;
   title: string;
   updatedAt: Generated<Timestamp>;

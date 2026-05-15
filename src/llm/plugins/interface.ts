@@ -5,7 +5,12 @@ export type LlmMessage = {
   content: string;
 };
 
-export type LlmReasoning = 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type LlmReasoningEffort =
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh';
 
 export type LlmResponseFormat = {
   name: string;
@@ -15,7 +20,7 @@ export type LlmResponseFormat = {
 export type LlmSendArgs = {
   model: string;
   messages: LlmMessage[];
-  reasoning?: LlmReasoning;
+  reasoningEffort?: LlmReasoningEffort;
   responseFormat: LlmResponseFormat;
 };
 
