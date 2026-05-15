@@ -103,9 +103,24 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .on('JobPost')
     .column('createdAt')
     .execute();
+
+  await db.schema
+    .createTable('SourceSeed')
+    .addColumn('id', 'text', c => c.primaryKey().notNull())
+    .addColumn('createdAt', sql`text_datetime`, c =>
+      c.notNull().defaultTo(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+    )
+    .addColumn('updatedAt', sql`text_datetime`, c =>
+      c.notNull().defaultTo(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+    )
+    .addColumn('url', 'text', c => c.notNull().unique())
+    .addColumn('name', 'text', c => c.notNull())
+    .addColumn('title', 'text', c => c.notNull())
+    .execute();
 }
 
 export async function down(db: Kysely<unknown>): Promise<void> {
+  await db.schema.dropTable('SourceSeed').execute();
   await db.schema.dropTable('JobPost').execute();
   await db.schema.dropTable('JobListSource').execute();
   await db.schema.dropTable('JobSource').execute();

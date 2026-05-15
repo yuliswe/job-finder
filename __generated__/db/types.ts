@@ -51,8 +51,18 @@ export interface JobSource {
   url: string;
 }
 
+export interface SourceSeed {
+  createdAt: Generated<Timestamp>;
+  id: string;
+  name: string;
+  title: string;
+  updatedAt: Generated<Timestamp>;
+  url: string;
+}
+
 export interface DB {
   JobListSource: JobListSource;
   JobPost: JobPost;
   JobSource: JobSource;
+  SourceSeed: SourceSeed;
 }

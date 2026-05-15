@@ -92,3 +92,18 @@ type JobSource = {
     url: [JobSource['url']] | UNIQUE;
   };
 };
+
+type SourceSeed = {
+  // ── base ──
+  id: Text | PK;
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  // ── fields ──
+  name: Text;
+  title: Text;
+  url: Text;
+  // ── indexes ──
+  _indexes: {
+    url: [SourceSeed['url']] | UNIQUE;
+  };
+};
