@@ -4,15 +4,17 @@
 export {}
 
 // ── Column type flags ──
-type Integer = 'Integer'
 type Text = 'Text'
+type Real = 'Real'
+type Timestamp = 'Timestamp'
+type Bool = 'Bool'
 
 // ── Column modifier flags ──
 type PK = { _pk: true }
-type Default<V> = { _default: V }
+type DEFAULT<V> = { _default: V }
 
 // ── OnDelete flags ──
-namespace OnDelete {
+namespace ON_DELETE {
   export type CASCADE = { _onDelete: 'cascade' }
   export type SET_NULL = { _onDelete: 'set null' }
   export type SET_DEFAULT = { _onDelete: 'set default' }
@@ -21,16 +23,72 @@ namespace OnDelete {
 }
 
 // ── Index flags ──
-type Unique = { _unique: true }
-type PartialIdx = { _partial: true }
+type UNIQUE = { _unique: true }
+type PARTIAL_IDX = { _partial: true }
 
-type Job = {
+type JobListSource = {
   // ── base ──
-  id?: Integer | PK
-  createdAt: Text | Default<'CURRENT_TIMESTAMP'>
+  id: Text | PK
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
   // ── fields ──
-  company: Text
+  isActive: Bool | DEFAULT<1>
+  parserScript: Text
+  url: Text
+  // ── relations ──
+  ofJobSourceId: Text | ON_DELETE.CASCADE | JobSource['id']
+  // ── indexes ──
+  _indexes: {
+    isActive: [JobListSource['isActive']]
+    ofJobSourceId: [JobListSource['ofJobSourceId']]
+    url: [JobListSource['url']] | UNIQUE
+  }
+}
+
+type JobPost = {
+  // ── base ──
+  id: Text | PK
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
+  // ── fields ──
   title: Text
+  url: Text
+  company?: Text
+  description?: Text
+  isRemote?: Bool
+  jobType?: Text
   location?: Text
-  url?: Text
+  postedAt?: Timestamp
+  salaryCurrency?: Text
+  salaryInterval?: Text
+  salaryMax?: Real
+  salaryMin?: Real
+  summary?: Text
+  // ── relations ──
+  ofJobSourceId: Text | ON_DELETE.CASCADE | JobSource['id']
+  ofJobListSourceId?: Text | ON_DELETE.SET_NULL | JobListSource['id']
+  // ── indexes ──
+  _indexes: {
+    createdAt: [JobPost['createdAt']]
+    postedAt: [JobPost['postedAt']]
+    ofJobListSourceId: [JobPost['ofJobListSourceId']]
+    ofJobSourceId: [JobPost['ofJobSourceId']]
+    url: [JobPost['url']] | UNIQUE
+  }
+}
+
+type JobSource = {
+  // ── base ──
+  id: Text | PK
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">
+  // ── fields ──
+  isActive: Bool | DEFAULT<1>
+  name: Text
+  url: Text
+  // ── indexes ──
+  _indexes: {
+    isActive: [JobSource['isActive']]
+    url: [JobSource['url']] | UNIQUE
+  }
 }

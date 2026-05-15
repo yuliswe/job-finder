@@ -67,6 +67,8 @@ const foreignKeys = (t: string) =>
 
 function typeFlag(declared: string): string {
   const t = declared.toUpperCase();
+  if (t === 'TEXT_DATETIME') return 'Timestamp';
+  if (t === 'INTEGER_BOOLEAN') return 'Bool';
   if (t.includes('INT')) return 'Integer';
   if (t.includes('TEXT') || t.includes('CHAR') || t.includes('CLOB'))
     return 'Text';
@@ -76,12 +78,20 @@ function typeFlag(declared: string): string {
   return 'Numeric';
 }
 
+function tsStringLiteral(s: string): string {
+  const hasSingle = s.includes("'");
+  const hasDouble = s.includes('"');
+  if (hasSingle && !hasDouble) return `"${s}"`;
+  if (hasDouble && !hasSingle) return `'${s}'`;
+  return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
 const ON_DELETE_FLAG: Record<string, string> = {
-  CASCADE: 'OnDelete.CASCADE',
-  'SET NULL': 'OnDelete.SET_NULL',
-  'SET DEFAULT': 'OnDelete.SET_DEFAULT',
-  RESTRICT: 'OnDelete.RESTRICT',
-  'NO ACTION': 'OnDelete.NO_ACTION',
+  CASCADE: 'ON_DELETE.CASCADE',
+  'SET NULL': 'ON_DELETE.SET_NULL',
+  'SET DEFAULT': 'ON_DELETE.SET_DEFAULT',
+  RESTRICT: 'ON_DELETE.RESTRICT',
+  'NO ACTION': 'ON_DELETE.NO_ACTION',
 };
 
 const COMMON_FIELDS = ['id', 'createdAt', 'updatedAt'];
@@ -116,17 +126,25 @@ function main(): void {
     '// ── Column type flags ──',
   ];
 
-  const knownFlags = ['Integer', 'Text', 'Real', 'Blob', 'Numeric'];
+  const knownFlags = [
+    'Integer',
+    'Text',
+    'Real',
+    'Blob',
+    'Numeric',
+    'Timestamp',
+    'Bool',
+  ];
   for (const f of knownFlags)
     if (usedFlags.has(f)) lines.push(`type ${f} = '${f}'`);
 
   lines.push('');
   lines.push('// ── Column modifier flags ──');
   lines.push('type PK = { _pk: true }');
-  lines.push('type Default<V> = { _default: V }');
+  lines.push('type DEFAULT<V> = { _default: V }');
   lines.push('');
   lines.push('// ── OnDelete flags ──');
-  lines.push('namespace OnDelete {');
+  lines.push('namespace ON_DELETE {');
   lines.push("  export type CASCADE = { _onDelete: 'cascade' }");
   lines.push("  export type SET_NULL = { _onDelete: 'set null' }");
   lines.push("  export type SET_DEFAULT = { _onDelete: 'set default' }");
@@ -135,8 +153,8 @@ function main(): void {
   lines.push('}');
   lines.push('');
   lines.push('// ── Index flags ──');
-  lines.push('type Unique = { _unique: true }');
-  lines.push('type PartialIdx = { _partial: true }');
+  lines.push('type UNIQUE = { _unique: true }');
+  lines.push('type PARTIAL_IDX = { _partial: true }');
   lines.push('');
 
   for (const tableName of tables) {
@@ -177,18 +195,16 @@ function main(): void {
       if (c.dflt_value !== null && c.dflt_value !== 'NULL') {
         const raw = c.dflt_value;
         if (/^-?\d+(\.\d+)?$/.test(raw)) {
-          flags.push(`Default<${raw}>`);
-        } else if (/^'.*'$/.test(raw)) {
-          const inner = raw.slice(1, -1).replace(/'/g, "\\'");
-          flags.push(`Default<'${inner}'>`);
+          flags.push(`DEFAULT<${raw}>`);
         } else {
-          flags.push(`Default<'${raw.replace(/'/g, "\\'")}'>`);
+          const inner = /^'.*'$/.test(raw) ? raw.slice(1, -1) : raw;
+          flags.push(`DEFAULT<${tsStringLiteral(inner)}>`);
         }
       }
       const fk = fkByCol.get(c.name);
       if (fk && !EXCLUDED_TABLES.has(fk.table)) {
         flags.push(
-          ON_DELETE_FLAG[fk.on_delete.toUpperCase()] ?? 'OnDelete.NO_ACTION'
+          ON_DELETE_FLAG[fk.on_delete.toUpperCase()] ?? 'ON_DELETE.NO_ACTION'
         );
         flags.push(`${fk.table}['${fk.to}']`);
       }
@@ -217,12 +233,16 @@ function main(): void {
         const colNames = (tableIndexCols.get(idx.name) ?? []).map(c => c.name);
         const colRefs = colNames.map(n => `${tableName}['${n}']`).join(', ');
         let baseName = idx.name;
-        if (baseName.startsWith(prefix))
-          baseName = baseName.slice(prefix.length);
-        baseName = baseName.replace(/_(idx|key)$/, '');
+        if (baseName.startsWith('sqlite_autoindex_')) {
+          baseName = colNames.join('_');
+        } else {
+          if (baseName.startsWith(prefix))
+            baseName = baseName.slice(prefix.length);
+          baseName = baseName.replace(/_(idx|key)$/, '');
+        }
         const allFlags: string[] = [`[${colRefs}]`];
-        if (idx.unique) allFlags.push('Unique');
-        if (idx.partial) allFlags.push('PartialIdx');
+        if (idx.unique) allFlags.push('UNIQUE');
+        if (idx.partial) allFlags.push('PARTIAL_IDX');
         lines.push(`    ${baseName}: ${allFlags.join(' | ')}`);
       }
       lines.push('  }');

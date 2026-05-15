@@ -4,20 +4,54 @@
  */
 
 import type { ColumnType } from "kysely";
+import type { Bool, Timestamp } from "src/db/customTypes";
 
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
-export interface Job {
-  company: string;
-  createdAt: Generated<string>;
-  id: Generated<number | null>;
+export interface JobListSource {
+  createdAt: Generated<Timestamp>;
+  id: string;
+  isActive: Generated<Bool>;
+  ofJobSourceId: string;
+  parserScript: string;
+  updatedAt: Generated<Timestamp>;
+  url: string;
+}
+
+export interface JobPost {
+  company: string | null;
+  createdAt: Generated<Timestamp>;
+  description: string | null;
+  id: string;
+  isRemote: Bool | null;
+  jobType: string | null;
   location: string | null;
+  ofJobListSourceId: string | null;
+  ofJobSourceId: string;
+  postedAt: Timestamp | null;
+  salaryCurrency: string | null;
+  salaryInterval: string | null;
+  salaryMax: number | null;
+  salaryMin: number | null;
+  summary: string | null;
   title: string;
-  url: string | null;
+  updatedAt: Generated<Timestamp>;
+  url: string;
+}
+
+export interface JobSource {
+  createdAt: Generated<Timestamp>;
+  id: string;
+  isActive: Generated<Bool>;
+  name: string;
+  updatedAt: Generated<Timestamp>;
+  url: string;
 }
 
 export interface DB {
-  Job: Job;
+  JobListSource: JobListSource;
+  JobPost: JobPost;
+  JobSource: JobSource;
 }
