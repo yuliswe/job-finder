@@ -37,9 +37,7 @@
             "naukri",
             "bdjobs"
           ],
-          "default": [
-            "indeed"
-          ],
+          "default": ["indeed"],
           "hidden": false
         },
         {
@@ -217,10 +215,7 @@
           "variadic": false,
           "mandatory": false,
           "negate": false,
-          "choices": [
-            "markdown",
-            "html"
-          ],
+          "choices": ["markdown", "html"],
           "default": null,
           "hidden": false
         },
@@ -332,10 +327,7 @@
           "variadic": false,
           "mandatory": false,
           "negate": false,
-          "choices": [
-            "json",
-            "csv"
-          ],
+          "choices": ["json", "csv"],
           "default": "json",
           "hidden": false
         },

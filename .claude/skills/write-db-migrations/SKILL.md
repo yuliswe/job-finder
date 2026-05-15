@@ -20,12 +20,15 @@ Use this skill when adding or modifying database tables in this repo.
 ## Workflow
 
 1. **Scaffold** the migration file. Don't hand-create the timestamp:
+
    ```bash
    npm run db:migrate:create -- <descriptive_name>
    ```
+
    This writes `migrations/<UTC-timestamp>_<slug>.ts` with `up`/`down` stubs.
 
 2. **Fill in** `up` and `down` using Kysely's schema builder. Both directions must be reversible.
+
    ```ts
    import { Kysely, sql } from 'kysely';
 
@@ -46,11 +49,13 @@ Use this skill when adding or modifying database tables in this repo.
    ```
 
 3. **Apply** the migration:
+
    ```bash
    npm run db:migrate
    ```
 
 4. **Regenerate** the type files (both required, in this order):
+
    ```bash
    npm run db:codegen         # → __generated__/db/types.ts
    npm run db:schema-review   # → __generated__/schema-review.ts

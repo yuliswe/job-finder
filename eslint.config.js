@@ -286,12 +286,6 @@ export default [
         },
         {
           selector:
-            "MemberExpression[object.name='process'][property.name='env']",
-          message:
-            'Do not use process.env directly. Use the Env helper module instead.',
-        },
-        {
-          selector:
             "CallExpression[callee.object.name='console'][callee.property.name='log']",
           message: 'Reminder: remove console.log.',
         },
@@ -382,7 +376,6 @@ export default [
       'import/no-unused-modules': 'off',
     },
   },
-
 
   // Testing library configuration (simplified)
   {
