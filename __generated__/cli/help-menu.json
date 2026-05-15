@@ -160,7 +160,7 @@
       "usage": "[options] [command]",
       "commands": [
         {
-          "name": "seed",
+          "name": "seeding",
           "description": "Seed SourceSeed table from seeds/interests.md via an LLM-driven jobspy call",
           "usage": "[options]"
         },

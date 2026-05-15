@@ -72,12 +72,12 @@ Requires:
 - A locally installed Chrome/Chromium (run `npx puppeteer browsers install chrome` once if not).
 - `LLM_SOURCING_MODEL` set in `jobfinder.config.ts`.
 
-## `pipeline seed`
+## `pipeline seeding`
 
 Read `seeds/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.
 
 ```bash
-./src/cli/bin/cli pipeline seed
+./src/cli/bin/cli pipeline seeding
 ```
 
 Requires:

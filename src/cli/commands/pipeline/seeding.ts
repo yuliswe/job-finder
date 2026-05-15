@@ -58,8 +58,8 @@ If a previous attempt fails, read the error feedback and adjust: try different s
 
 const MAX_ATTEMPTS = 5;
 
-export function createSeedCommand(): Command {
-  return new Command('seed')
+export function createSeedingCommand(): Command {
+  return new Command('seeding')
     .description(
       'Seed SourceSeed table from seeds/interests.md via an LLM-driven jobspy call'
     )
