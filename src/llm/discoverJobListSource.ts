@@ -8,6 +8,7 @@ import {
   PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE,
 } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
+import { CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT } from 'src/prompts/classifyAndRankLinks.js';
 import { withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
@@ -60,7 +61,7 @@ export async function findJobListPage(args: {
       continue;
     }
 
-    let decision: v.InferOutput<typeof CrawlDecisionSchema>;
+    let decision: Awaited<ReturnType<typeof classifyAndRankLinks>>;
     try {
       decision = await classifyAndRankLinks({ url, page });
     } catch (err) {
@@ -86,13 +87,6 @@ export async function findJobListPage(args: {
   return null;
 }
 
-const CrawlDecisionSchema = v.object({
-  isJobListingPage: v.boolean(),
-  jobPostUrls: v.array(v.object({ url: v.string(), title: v.string() })),
-  candidateLinks: v.array(v.string()),
-  reason: v.string(),
-});
-
 /**
  * Ask the LLM to classify `page` as a job-listing page and rank its outgoing
  * links by likelihood of leading to one. Wrapped in a feedback loop that asks
@@ -102,25 +96,20 @@ const CrawlDecisionSchema = v.object({
 async function classifyAndRankLinks(args: {
   url: string;
   page: PageSnapshot;
-}): Promise<v.InferOutput<typeof CrawlDecisionSchema>> {
+}): Promise<{
+  isJobListingPage: boolean;
+  jobPostUrls: { url: string; title: string }[];
+  candidateLinks: string[];
+  reason: string;
+}> {
   const { url, page } = args;
   const linksOnPageSet = new Set(page.links);
 
   const memory = new Memory([
-    {
-      system: `You analyze pages on a company website to find their job-listing page.
-Return:
-- "isJobListingPage": true if this page lists current job openings. Usually it should have the UI for searching / filtering jobs by location, title, departments, etc. It must contain some job listings not just a button linking to the listing page, like "View Jobs" or "See Open Positions".
-- "jobPostUrls": if "isJobListingPage" is true, return a list of URLs to job posts. Must not be empty if "isJobListingPage" is true.
-- "candidateLinks": All URLs FROM THE LINKS LIST that are most likely to lead to the company's careers/jobs/openings page. IMPORTANT: Place the most likely ones first.
-- "reason": one-line explanation.`,
-    },
+    { system: CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT },
   ]);
 
-  const { result } = await feedbackLoop<
-    typeof CrawlDecisionSchema,
-    v.InferOutput<typeof CrawlDecisionSchema>
-  >({
+  const { result } = await feedbackLoop({
     memory,
     initialPrompt: `URL: ${url}
 Page title: ${page.title}
@@ -130,7 +119,41 @@ ${page.text}
 
 Links on page:
 ${page.links.join('\n')}`,
-    schema: CrawlDecisionSchema,
+    schema: v.object({
+      isJobListingPage: v.pipe(
+        v.boolean(),
+        v.description(
+          'True if THIS page already lists current job openings (multiple postings visible with a job-search/filter UI). False for homepages, About pages, careers landing pages without postings, etc.'
+        )
+      ),
+      jobPostUrls: v.pipe(
+        v.array(
+          v.object({
+            url: v.pipe(
+              v.string(),
+              v.description('Absolute URL of one visible job post.')
+            ),
+            title: v.pipe(
+              v.string(),
+              v.description('Display title of that job post.')
+            ),
+          })
+        ),
+        v.description(
+          'When isJobListingPage=true, every job posting visible on the page as { url, title }. Must be non-empty when isJobListingPage=true; ignored otherwise.'
+        )
+      ),
+      candidateLinks: v.pipe(
+        v.array(v.string()),
+        v.description(
+          'URLs copied verbatim FROM THE LINKS LIST above that are most likely to lead to the company careers/jobs page. Order them most-likely first. Empty only if this page IS the listing page or there are truly no plausible candidates.'
+        )
+      ),
+      reason: v.pipe(
+        v.string(),
+        v.description('One-line explanation of your classification.')
+      ),
+    }),
     maxAttempts: MAX_CRAWL_DECISION_ATTEMPTS,
     model: LLM_LISTING_MODEL,
     logger: terminal,
@@ -180,13 +203,35 @@ async function loadPage(
       );
     }
     const title = await page.title();
-    const text = await page.evaluate(() => document.body.innerText);
-    const links = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll('a[href]'))
-        .map(a => (a as HTMLAnchorElement).href)
-        .filter(h => /^https?:\/\//i.test(h))
-        .slice(0, 300);
-    });
+
+    // Only read text/anchors from the main frame — if listings live in an
+    // iframe (Ashby, Greenhouse, Lever, Workday…), we want BFS to navigate to
+    // that ATS URL and classify it on its own, rather than the wrapper page
+    // claiming credit for content it merely embeds.
+    const main = page.mainFrame();
+    const text = await main
+      .evaluate(() => document.body.innerText)
+      .catch(() => '');
+    const mainLinks = await main
+      .evaluate(() =>
+        Array.from(document.querySelectorAll('a[href]'))
+          .map(a => (a as HTMLAnchorElement).href)
+          .filter(h => /^https?:\/\//i.test(h))
+      )
+      .catch(() => [] as string[]);
+
+    // Each iframe's src is a candidate next hop — that's where the embedded
+    // listing actually lives.
+    const iframeSrcs = page
+      .frames()
+      .filter(f => f !== main)
+      .map(f => f.url())
+      .filter(u => /^https?:\/\//i.test(u));
+
+    const links = Array.from(new Set([...mainLinks, ...iframeSrcs])).slice(
+      0,
+      300
+    );
     return { title, text, links };
   });
 }
