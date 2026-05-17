@@ -7,37 +7,13 @@ import {
 } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { webSearch } from 'src/llm/webSearch.js';
+import { DISCOVER_JOB_SOURCE_SYSTEM_PROMPT } from 'src/prompts/discoverJobSource.js';
+import { FIND_COMPANY_WEBSITE_SYSTEM_PROMPT } from 'src/prompts/findCompanyWebsite.js';
 import { withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 const MAX_DISCOVER_ATTEMPTS = 3;
 const MAX_WEB_SEARCH_ATTEMPTS = 2;
-
-const DiscoverResultSchema = v.object({
-  name: v.string(),
-  url: v.string(),
-  reason: v.string(),
-});
-
-const SYSTEM_PROMPT = `You read job-posting webpages and identify the hiring company.
-
-Return:
-- "name": the company's display name (e.g. "Acme Corp"). If you can't tell, return an empty string.
-- "url": the company's primary website URL (e.g. "https://acme.com"). Prefer the company's own site over the job board hosting the post. If you can't tell, return an empty string.
-- "reason": If you returned empty "name" or "url", explain why (e.g. "page only lists the job title, no employer named"). If both are filled in confidently, return an empty string.
-
-According to the webpage, what is the company hiring and what is their URL?`;
-
-const WebSearchResultSchema = v.object({
-  url: v.string(),
-  reason: v.string(),
-});
-
-const WEB_SEARCH_SYSTEM_PROMPT = `You read Google search result pages and find a company's primary website URL.
-
-Return:
-- "url": the company's primary corporate website (e.g. "https://acme.com"). Prefer the company's own homepage over Wikipedia, LinkedIn, Crunchbase, or job-board pages. If you can't find a confident match in the results, return an empty string.
-- "reason": If "url" is empty, explain why; otherwise return an empty string.`;
 
 export type JobSource = {
   name: string;
@@ -73,21 +49,37 @@ export async function discoverJobSource(args: {
     `Page title: ${pageTitle} | Page text length: ${pageText.length}`
   );
 
-  const memory = new Memory([{ system: SYSTEM_PROMPT }]);
+  const memory = new Memory([{ system: DISCOVER_JOB_SOURCE_SYSTEM_PROMPT }]);
   let lastReason = '';
 
   try {
-    const { result } = await feedbackLoop<
-      typeof DiscoverResultSchema,
-      JobSource
-    >({
+    const { result } = await feedbackLoop({
       memory,
       initialPrompt: `Job posting URL: ${url}
 Page title: ${pageTitle}
 
 Page body:
 ${pageText}`,
-      schema: DiscoverResultSchema,
+      schema: v.object({
+        name: v.pipe(
+          v.string(),
+          v.description(
+            'Display name of the hiring company (e.g. "Acme Corp"). Empty string if you can\'t tell from the page.'
+          )
+        ),
+        url: v.pipe(
+          v.string(),
+          v.description(
+            'Primary corporate website URL of the hiring company (e.g. "https://acme.com"). Prefer the company\'s own site over the job-board host. Empty string if you can\'t find one on the page.'
+          )
+        ),
+        reason: v.pipe(
+          v.string(),
+          v.description(
+            'If you returned an empty name or url, explain why; otherwise an empty string.'
+          )
+        ),
+      }),
       maxAttempts: MAX_DISCOVER_ATTEMPTS,
       model: LLM_SOURCING_MODEL,
       logger: terminal,
@@ -148,8 +140,21 @@ async function findCompanyWebsite(args: {
     const result = await webSearch({
       context,
       query: `${name} official company website`,
-      schema: WebSearchResultSchema,
-      systemPrompt: WEB_SEARCH_SYSTEM_PROMPT,
+      schema: v.object({
+        url: v.pipe(
+          v.string(),
+          v.description(
+            "The company's primary corporate website (e.g. \"https://acme.com\"). Prefer the company's own homepage over Wikipedia, LinkedIn, Crunchbase, or job-board pages. Empty string if you can't find a confident match."
+          )
+        ),
+        reason: v.pipe(
+          v.string(),
+          v.description(
+            'If url is empty, explain why; otherwise an empty string.'
+          )
+        ),
+      }),
+      systemPrompt: FIND_COMPANY_WEBSITE_SYSTEM_PROMPT,
       model: LLM_SOURCING_MODEL,
       maxAttempts: MAX_WEB_SEARCH_ATTEMPTS,
     });

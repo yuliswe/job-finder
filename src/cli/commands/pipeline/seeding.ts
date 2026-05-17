@@ -5,8 +5,10 @@ import * as v from 'valibot';
 
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
+import { recordPipelineState } from 'src/db/pipelineState.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LLM_SEEDING_MODEL } from 'jobfinder.config.js';
+import { SEEDING_SYSTEM_PROMPT } from 'src/prompts/seeding.js';
 import {
   JobspyError,
   scrapeJobs,
@@ -38,24 +40,6 @@ const JOB_TYPES = [
   'volunteer',
 ] as const;
 
-const ScrapeArgsSchema = v.object({
-  site_name: v.array(v.picklist(SITES)),
-  search_term: v.string(),
-  location: v.nullable(v.string()),
-  country_indeed: v.nullable(v.string()),
-  results_wanted: v.nullable(v.number()),
-  hours_old: v.nullable(v.number()),
-  job_type: v.nullable(v.picklist(JOB_TYPES)),
-  is_remote: v.nullable(v.boolean()),
-  distance: v.nullable(v.number()),
-});
-
-const SYSTEM_PROMPT = `You translate a user's job-search interests (free-form Markdown) into a single python-jobspy scrape call.
-
-Output JSON matching the provided schema. Pick sites and a search_term that best capture the user's interests; include location/country/job_type/is_remote/hours_old/results_wanted only when supported by the interests.
-
-If a previous attempt fails, read the error feedback and adjust: try different sites, a broader search_term, or a different location format.`;
-
 const MAX_ATTEMPTS = 5;
 
 export function createSeedingCommand(): Command {
@@ -73,12 +57,67 @@ export function createSeedingCommand(): Command {
       const interests = await readSeedFile('seeds/interests.md');
       const cv = await readSeedFile('seeds/cv.md');
 
-      const memory = new Memory([{ system: SYSTEM_PROMPT }]);
+      const memory = new Memory([{ system: SEEDING_SYSTEM_PROMPT }]);
 
       const { result: jobs } = await feedbackLoop({
         memory,
         initialPrompt: `User interests:\n\n${interests}\n\nUser CV:\n\n${cv}`,
-        schema: ScrapeArgsSchema,
+        schema: v.object({
+          site_name: v.pipe(
+            v.array(v.picklist(SITES)),
+            v.description(
+              'Job sites to scrape. Pick one or more from the supported list.'
+            )
+          ),
+          search_term: v.pipe(
+            v.string(),
+            v.description(
+              'Free-text search query (e.g. "senior software engineer", "data analyst"). Keep it broad enough to return results.'
+            )
+          ),
+          location: v.pipe(
+            v.nullable(v.string()),
+            v.description(
+              'City / state / region the user wants jobs in (e.g. "Waterloo, ON"). null if no specific location.'
+            )
+          ),
+          country_indeed: v.pipe(
+            v.nullable(v.string()),
+            v.description(
+              'Country code for Indeed (e.g. "usa", "canada"). null if not applicable.'
+            )
+          ),
+          results_wanted: v.pipe(
+            v.nullable(v.number()),
+            v.description(
+              'How many results to fetch per site. null lets jobspy use its default (~15).'
+            )
+          ),
+          hours_old: v.pipe(
+            v.nullable(v.number()),
+            v.description(
+              'Only return postings newer than this many hours. null means no recency filter.'
+            )
+          ),
+          job_type: v.pipe(
+            v.nullable(v.picklist(JOB_TYPES)),
+            v.description(
+              'Employment type filter (fulltime, contract, internship, etc.). null means no filter.'
+            )
+          ),
+          is_remote: v.pipe(
+            v.nullable(v.boolean()),
+            v.description(
+              'If true, return remote-only postings. null means no remote filter.'
+            )
+          ),
+          distance: v.pipe(
+            v.nullable(v.number()),
+            v.description(
+              'Search radius in miles from `location`. null lets jobspy use its default (~50).'
+            )
+          ),
+        }),
         maxAttempts: MAX_ATTEMPTS,
         model: LLM_SEEDING_MODEL,
         logger: terminal,
@@ -136,17 +175,23 @@ async function insertSeeds(jobs: JobResult[]): Promise<number> {
 
   let inserted = 0;
   for (const j of dedup.values()) {
+    const id = newId();
     try {
       await db
         .insertInto('SourceSeed')
         .values({
-          id: newId(),
+          id,
           url: j.job_url,
           name: j.company ?? 'Unknown',
           title: j.title,
         })
         .execute();
       inserted++;
+      await recordPipelineState({
+        task: 'seeding',
+        state: 'done',
+        entity: { ofSourceSeedId: id },
+      });
     } catch {
       // unique-url collision or other insert error — skip
     }

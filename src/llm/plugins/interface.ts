@@ -5,12 +5,16 @@ export type LlmMessage = {
   content: string;
 };
 
+export const LlmReasoningEffort = {
+  Minimal: 'minimal',
+  Low: 'low',
+  Medium: 'medium',
+  High: 'high',
+  XHigh: 'xhigh',
+} as const;
+
 export type LlmReasoningEffort =
-  | 'minimal'
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'xhigh';
+  (typeof LlmReasoningEffort)[keyof typeof LlmReasoningEffort];
 
 export type LlmResponseFormat = {
   name: string;

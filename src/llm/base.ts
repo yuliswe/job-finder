@@ -87,7 +87,7 @@ export type ValidateResult<R> =
   | { valid: false; feedback: string };
 
 /** Single LLM call. Sends messages, parses and validates response against schema. */
-export async function llmSend<S extends v.GenericSchema>(args: {
+async function llmSend<S extends v.GenericSchema>(args: {
   schema: S;
   model: string;
   messages: LlmMessage[];
@@ -100,9 +100,11 @@ export async function llmSend<S extends v.GenericSchema>(args: {
       toJsonSchema(schema) as Record<string, unknown>
     ),
   };
+  const schemaBlock = `\n\n# Required response format\n\nYour response MUST be a single JSON object validating against this schema (descriptions explain each field; read them carefully):\n\n\`\`\`json\n${JSON.stringify(responseFormat.schema, null, 2)}\n\`\`\``;
+  const messagesWithSchema = appendToLastSystemMessage(messages, schemaBlock);
   const { content, totalTokens } = await plugin.send({
     model,
-    messages,
+    messages: messagesWithSchema,
     reasoningEffort,
     responseFormat,
   });
@@ -111,10 +113,32 @@ export async function llmSend<S extends v.GenericSchema>(args: {
   return { result, totalTokens };
 }
 
+/**
+ * Return a copy of `messages` with `suffix` appended to the last leading
+ * `system` message. If there is no system message, prepend one carrying the
+ * suffix.
+ */
+function appendToLastSystemMessage(
+  messages: LlmMessage[],
+  suffix: string
+): LlmMessage[] {
+  let lastSystemIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i]!.role === 'system') lastSystemIdx = i;
+    else break;
+  }
+  if (lastSystemIdx === -1) {
+    return [{ role: 'system', content: suffix.trimStart() }, ...messages];
+  }
+  return messages.map((m, i) =>
+    i === lastSystemIdx ? { ...m, content: m.content + suffix } : m
+  );
+}
+
 const MAX_SEND_RETRIES = 5;
 
 /** Send with retries on transient/validation failures. Returns parsed result. */
-export async function sendWithRetry<S extends v.GenericSchema>(args: {
+async function sendWithRetry<S extends v.GenericSchema>(args: {
   memory: Memory;
   schema: S;
   model: string;
@@ -135,18 +159,24 @@ export async function sendWithRetry<S extends v.GenericSchema>(args: {
       totalTokens += sendResult.totalTokens;
       return { result: sendResult.result, totalTokens };
     } catch (error) {
-      const isRetryable =
+      const isSchemaError =
         error instanceof Error &&
         (error.name === 'ResponseValidationError' ||
-          error instanceof v.ValiError);
+          error instanceof v.ValiError ||
+          error instanceof SyntaxError);
+      const isNetworkError =
+        error instanceof TypeError && error.message === 'terminated';
+      const isRetryable = isSchemaError || isNetworkError;
 
       if (isRetryable && retry < MAX_SEND_RETRIES - 1) {
         logger.error(
           `LLM request failed (model=${model}), retrying (${retry + 1}/${MAX_SEND_RETRIES}): ${String(error)}`
         );
-        memory.add(
-          'Your previous response was not valid or did not match the expected schema. Please respond with valid JSON only, matching the required schema exactly.'
-        );
+        if (isSchemaError) {
+          memory.add(
+            'Your previous response was not valid or did not match the expected schema. Please respond with valid JSON only, matching the required schema exactly.'
+          );
+        }
         continue;
       }
 

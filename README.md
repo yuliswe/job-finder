@@ -59,6 +59,32 @@ Print the supported sites and job types (useful as a reference for `--site` / `-
 ./src/cli/bin/cli sites
 ```
 
+## `pipeline listing`
+
+For each unprocessed `JobSource`, open the company URL and BFS the same-domain links the LLM ranks most likely to lead to a careers/jobs page (capped at `PIPELINE_LISTING_BFS_MAX_DEPTH`). The first page the LLM classifies as a listing page is inserted as a new `JobListSource` row with an empty `parserScript` placeholder. `pipeline scripting` fills the script in later. The `JobSource` is always marked `isProcessed` after the attempt to avoid re-running BFS.
+
+```bash
+./src/cli/bin/cli pipeline listing
+```
+
+Requires:
+
+- A locally installed Chrome/Chromium (run `npx patchright install chromium` once if not).
+- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+
+## `pipeline scripting`
+
+For each unprocessed `JobListSource` (i.e. one whose `parserScript` has not yet been generated), reload the listing page and ask the LLM to emit a JavaScript snippet defining `listLocations()` and `async searchJobs(locations, keywords)`. The script is executed inside the page in a feedback loop — corrective feedback is fed back to the LLM until `searchJobs` returns a non-empty `{ jobTitle, url }[]`. On success, the script is stored in `JobListSource.parserScript` and the row is marked `isProcessed`. On failure, the row is left unprocessed so it can be retried (after tweaking prompts, raising `PIPELINE_LISTING_BFS_MAX_DEPTH`, etc.).
+
+```bash
+./src/cli/bin/cli pipeline scripting
+```
+
+Requires:
+
+- A locally installed Chrome/Chromium.
+- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+
 ## `pipeline sourcing`
 
 For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.

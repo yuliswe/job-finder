@@ -6,6 +6,7 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
+import { recordPipelineState } from 'src/db/pipelineState.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -52,11 +53,13 @@ async function processSource(
     : `https://${source.url}`;
 
   let listingUrl: string | null;
+  let failure: string | null = null;
   try {
     listingUrl = await findJobListPage({ context, startUrl });
   } catch (err) {
     terminal.error(`findJobListPage failed for ${source.name}: ${String(err)}`);
     listingUrl = null;
+    failure = String(err).slice(0, 500);
   }
 
   await db
@@ -69,19 +72,41 @@ async function processSource(
     terminal.warn(
       `No job-listing page found within depth limit for "${source.name}"`
     );
+    await recordPipelineState({
+      task: 'listing',
+      state: failure ? 'failed' : 'no_listing_found',
+      reason: failure,
+      entity: { ofJobSourceId: source.id },
+    });
     return;
   }
 
-  await db
+  const newListId = newId();
+  const result = await db
     .insertInto('JobListSource')
     .values({
-      id: newId(),
+      id: newListId,
       url: listingUrl,
       parserScript: null,
       ofJobSourceId: source.id,
     })
     .onConflict(oc => oc.column('url').doNothing())
     .executeTakeFirstOrThrow();
+  const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
+
+  await recordPipelineState({
+    task: 'listing',
+    state: 'done',
+    reason: wasInserted ? null : 'duplicate JobListSource.url',
+    entity: { ofJobSourceId: source.id },
+  });
+  if (wasInserted) {
+    await recordPipelineState({
+      task: 'listing',
+      state: 'created',
+      entity: { ofJobListSourceId: newListId },
+    });
+  }
 
   return;
 }

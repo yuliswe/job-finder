@@ -39,6 +39,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     )
     .addColumn('url', 'text', c => c.notNull().unique())
     .addColumn('parserScript', 'text')
+    .addColumn('locations', 'text')
+    .addColumn('divisions', 'text')
     .addColumn('isActive', sql`integer_boolean`, c =>
       c.notNull().defaultTo(Bool.True)
     )

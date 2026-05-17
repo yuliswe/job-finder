@@ -1,0 +1,156 @@
+import { Command } from 'commander';
+import pLimit from 'p-limit';
+import type { BrowserContext } from 'patchright';
+
+import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import { Bool } from 'src/db/customTypes.js';
+import { db } from 'src/db/index.js';
+import { newId } from 'src/db/id.js';
+import { recordPipelineState } from 'src/db/pipelineState.js';
+import { runParserScript } from 'src/llm/runParserScript.js';
+import { withBrowserInstance } from 'src/utils/browser.js';
+import { terminal } from 'src/utils/terminal.js';
+
+const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
+
+export function createRunScriptsCommand(): Command {
+  return new Command('run-scripts')
+    .description(
+      'For every JobListSource with a validated parserScript, ask the LLM to map the supplied division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost'
+    )
+    .requiredOption(
+      '-d, --division <division>',
+      'Division/department to filter by (e.g. "engineering")'
+    )
+    .requiredOption(
+      '-l, --location <location>',
+      'Location to filter by (e.g. "Toronto, ON")'
+    )
+    .action(async (opts: { division: string; location: string }) => {
+      await withBrowserInstance(context =>
+        runAll(context, { division: opts.division, location: opts.location })
+      );
+    });
+}
+
+async function runAll(
+  context: BrowserContext,
+  args: { division: string; location: string }
+): Promise<void> {
+  const targets = await db
+    .selectFrom('JobListSource')
+    .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
+    .where('isProcessed', '=', Bool.True)
+    .where('parserScript', 'is not', null)
+    .execute();
+
+  if (targets.length === 0) {
+    terminal.log(
+      'No JobListSource rows with a validated parserScript. Nothing to do.'
+    );
+    return;
+  }
+
+  let totalInserted = 0;
+  await Promise.all(
+    targets.map(target =>
+      tabLimit(async () => {
+        totalInserted += await processTarget(context, target, args);
+      })
+    )
+  );
+
+  terminal.log(`Inserted ${totalInserted} rows into JobPost\n`);
+}
+
+async function processTarget(
+  context: BrowserContext,
+  target: {
+    id: string;
+    url: string;
+    parserScript: string | null;
+    ofJobSourceId: string;
+  },
+  args: { division: string; location: string }
+): Promise<number> {
+  if (!target.parserScript) return 0; // filtered above but TS narrowing
+
+  terminal.log(`Running parserScript for ${target.url}`);
+
+  const result = await runParserScript({
+    context,
+    listingUrl: target.url,
+    script: target.parserScript,
+    userLocation: args.location,
+    userDivision: args.division,
+  });
+
+  if (!result.ok && result.reason === 'script_error') {
+    terminal.error(`script_error for ${target.url}: ${result.error}`);
+    await recordPipelineState({
+      task: 'run-scripts',
+      state: 'script_error',
+      reason: result.error,
+      entity: { ofJobListSourceId: target.id },
+    });
+    return 0;
+  }
+
+  if (!result.ok && result.reason === 'no_result_found') {
+    terminal.warn(
+      `no_result_found for ${target.url} (picked ${JSON.stringify(result.picked)})`
+    );
+    await recordPipelineState({
+      task: 'run-scripts',
+      state: 'no_result_found',
+      reason: `picked locations=${JSON.stringify(result.picked.locations)} divisions=${JSON.stringify(result.picked.divisions)}`,
+      entity: { ofJobListSourceId: target.id },
+    });
+    return 0;
+  }
+
+  if (!result.ok) return 0; // exhaustive but TS narrowing
+
+  const inserted = await insertJobs({
+    jobs: result.jobs,
+    ofJobSourceId: target.ofJobSourceId,
+    ofJobListSourceId: target.id,
+  });
+
+  await recordPipelineState({
+    task: 'run-scripts',
+    state: 'success',
+    reason: `${inserted}/${result.jobs.length} new JobPost rows`,
+    entity: { ofJobListSourceId: target.id },
+  });
+
+  return inserted;
+}
+
+async function insertJobs(args: {
+  jobs: { jobTitle: string; url: string }[];
+  ofJobSourceId: string;
+  ofJobListSourceId: string;
+}): Promise<number> {
+  const { jobs, ofJobSourceId, ofJobListSourceId } = args;
+  let inserted = 0;
+  for (const j of jobs) {
+    try {
+      const result = await db
+        .insertInto('JobPost')
+        .values({
+          id: newId(),
+          url: j.url,
+          title: j.jobTitle,
+          ofJobSourceId,
+          ofJobListSourceId,
+        })
+        .onConflict(oc => oc.column('url').doNothing())
+        .executeTakeFirst();
+      if ((result.numInsertedOrUpdatedRows ?? 0n) > 0n) inserted++;
+    } catch (err) {
+      terminal.warn(`JobPost insert failed for ${j.url}: ${String(err)}`);
+    }
+  }
+  return inserted;
+}

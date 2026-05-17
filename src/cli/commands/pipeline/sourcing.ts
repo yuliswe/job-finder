@@ -6,6 +6,7 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
+import { recordPipelineState } from 'src/db/pipelineState.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -65,31 +66,58 @@ async function processNameGroup(
 
   let inserted = 0;
   let groupSucceeded = false;
-  for (const { url } of seeds) {
+  for (const { id: seedId, url } of seeds) {
     try {
       const source = await discoverJobSource({ context, url });
       if (!source) {
         terminal.warn(`discoverJobSource returned no result for ${url}`);
+        await recordPipelineState({
+          task: 'sourcing',
+          state: 'no_source_found',
+          entity: { ofSourceSeedId: seedId },
+        });
         continue;
       }
 
+      const newSourceId = newId();
       const result = await db
         .insertInto('JobSource')
         .values({
-          id: newId(),
+          id: newSourceId,
           name: source.name,
           url: source.url,
         })
         .onConflict(oc => oc.column('url').doNothing())
         .executeTakeFirst();
 
-      if ((result.numInsertedOrUpdatedRows ?? 0n) > 0n) inserted++;
+      const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
+      if (wasInserted) inserted++;
+
+      await recordPipelineState({
+        task: 'sourcing',
+        state: 'done',
+        reason: wasInserted ? null : 'duplicate JobSource.url',
+        entity: { ofSourceSeedId: seedId },
+      });
+      if (wasInserted) {
+        await recordPipelineState({
+          task: 'sourcing',
+          state: 'created',
+          entity: { ofJobSourceId: newSourceId },
+        });
+      }
 
       // if succeeds, we skip other URLs in this group
       groupSucceeded = true;
       break;
     } catch (err) {
       terminal.error(`discoverJobSource failed for ${url}: ${String(err)}`);
+      await recordPipelineState({
+        task: 'sourcing',
+        state: 'failed',
+        reason: String(err).slice(0, 500),
+        entity: { ofSourceSeedId: seedId },
+      });
     }
   }
 

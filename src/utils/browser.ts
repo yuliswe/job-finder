@@ -62,3 +62,20 @@ export async function withBrowserTab<T>(
     releaseTab();
   }
 }
+
+/**
+ * Like `page.evaluate(fn, arg)`, but immune to the `__name is not defined`
+ * crash caused by tsx/esbuild wrapping transpiled function declarations with
+ * `__name(...)`. We stringify `fn`, drop it in an IIFE that declares `__name`
+ * locally, and ship the whole thing as a string so the missing helper resolves
+ * at eval-time. `arg` must be JSON-serializable.
+ */
+export async function pageEval<T, A = undefined>(
+  page: Page,
+  fn: (arg: A) => T | Promise<T>,
+  arg?: A
+): Promise<T> {
+  const argSrc = arg === undefined ? 'undefined' : JSON.stringify(arg);
+  const src = `(function () { var __name = function (f) { return f; }; return (${fn.toString()})(${argSrc}); })()`;
+  return page.evaluate(src) as Promise<T>;
+}

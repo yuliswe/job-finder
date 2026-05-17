@@ -3,18 +3,21 @@
  * Please do not edit it manually.
  */
 
-import type { ColumnType } from "kysely";
-import type { Bool, Timestamp } from "src/db/customTypes";
+import type { ColumnType } from 'kysely';
+import type { Bool, Timestamp } from 'src/db/customTypes';
 
-export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
-  ? ColumnType<S, I | undefined, U>
-  : ColumnType<T, T | undefined, T>;
+export type Generated<T> =
+  T extends ColumnType<infer S, infer I, infer U>
+    ? ColumnType<S, I | undefined, U>
+    : ColumnType<T, T | undefined, T>;
 
 export interface JobListSource {
   createdAt: Generated<Timestamp>;
+  divisions: string | null;
   id: string;
   isActive: Generated<Bool>;
   isProcessed: Generated<Bool>;
+  locations: string | null;
   ofJobSourceId: string;
   parserScript: string | null;
   updatedAt: Generated<Timestamp>;
@@ -53,6 +56,19 @@ export interface JobSource {
   url: string;
 }
 
+export interface PipelineState {
+  createdAt: Generated<Timestamp>;
+  id: string;
+  ofJobListSourceId: string | null;
+  ofJobPostId: string | null;
+  ofJobSourceId: string | null;
+  ofSourceSeedId: string | null;
+  reason: string | null;
+  state: string;
+  task: string;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface SourceSeed {
   createdAt: Generated<Timestamp>;
   id: string;
@@ -67,5 +83,6 @@ export interface DB {
   JobListSource: JobListSource;
   JobPost: JobPost;
   JobSource: JobSource;
+  PipelineState: PipelineState;
   SourceSeed: SourceSeed;
 }
