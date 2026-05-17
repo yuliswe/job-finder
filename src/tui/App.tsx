@@ -30,6 +30,8 @@ export function App({ initial }: { initial: AppOptions }) {
   const { exit } = useApp();
   const [tab, setTab] = useState<AppTab>(initial.tab);
   const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
+  const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
+  const [pipelineCursor, setPipelineCursor] = useState(0);
 
   const stats = useLiveData(useCallback(() => getPipelineStats(), []));
   const activity = useLiveData(
@@ -45,9 +47,32 @@ export function App({ initial }: { initial: AppOptions }) {
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
   // re-render the chrome on every press. Ink supports multiple useInput hooks.
+  const stageCount = stats?.length ?? 0;
   useInput((input, key) => {
-    if (input === 'q' || key.escape) {
+    if (input === 'q') {
       exit();
+      return;
+    }
+    if (key.escape) {
+      // ESC returns to table focus when pipeline is focused; otherwise exits.
+      if (focus === 'pipeline') {
+        setFocus('table');
+        return;
+      }
+      exit();
+      return;
+    }
+    if (input === 'p') {
+      setFocus(f => (f === 'pipeline' ? 'table' : 'pipeline'));
+      return;
+    }
+    if (focus === 'pipeline') {
+      if (key.upArrow) {
+        setPipelineCursor(c => Math.max(0, c - 1));
+      }
+      if (key.downArrow) {
+        setPipelineCursor(c => Math.min(Math.max(0, stageCount - 1), c + 1));
+      }
       return;
     }
     if (input === '\t' || key.rightArrow || key.leftArrow) {
@@ -69,7 +94,11 @@ export function App({ initial }: { initial: AppOptions }) {
 
   return (
     <Box flexDirection='column'>
-      <PipelineHeader stats={stats} />
+      <PipelineHeader
+        stats={stats}
+        focused={focus === 'pipeline'}
+        cursor={pipelineCursor}
+      />
       <TabBar
         tab={tab}
         sort={sort}
@@ -91,6 +120,7 @@ export function App({ initial }: { initial: AppOptions }) {
         jobListSources={jobListSources}
         stagesCount={stats?.length ?? 0}
         activityCount={activity?.length ?? 0}
+        active={focus === 'table'}
       />
       <ActivityFeed rows={activity ?? []} />
       <Footer />

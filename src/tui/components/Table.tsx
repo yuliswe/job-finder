@@ -24,6 +24,8 @@ export type TableProps<T> = {
   getKey: (r: T) => string;
   /** Shown when `rows` is empty. */
   emptyMessage: string;
+  /** When false, suppress the row-selection highlight. */
+  active?: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ export function Table<T>({
   width,
   getKey,
   emptyMessage,
+  active = true,
 }: TableProps<T>) {
   if (rows.length === 0) return <Text dimColor>{emptyMessage}</Text>;
 
@@ -73,7 +76,7 @@ export function Table<T>({
           key={getKey(r)}
           columns={columns}
           row={r}
-          selected={i === localCursor}
+          selected={active && i === localCursor}
           w={w}
         />
       ))}

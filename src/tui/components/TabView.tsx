@@ -22,6 +22,7 @@ export function TabView({
   jobListSources,
   stagesCount,
   activityCount,
+  active = true,
 }: {
   tab: AppTab;
   jobPosts: JobPostRow[] | null;
@@ -29,6 +30,7 @@ export function TabView({
   jobListSources: JobListSourceRow[] | null;
   stagesCount: number;
   activityCount: number;
+  active?: boolean;
 }) {
   const [cursor, setCursor] = useState(0);
   const { rows: terminalRows, cols: terminalCols } = useTerminalSize();
@@ -66,10 +68,13 @@ export function TabView({
     }
   }, [cursor, rowCount]);
 
-  useInput((_input, key) => {
-    if (key.upArrow) setCursor(c => Math.max(0, c - 1));
-    if (key.downArrow) setCursor(c => Math.min(rowCount - 1, c + 1));
-  });
+  useInput(
+    (_input, key) => {
+      if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+      if (key.downArrow) setCursor(c => Math.min(rowCount - 1, c + 1));
+    },
+    { isActive: active }
+  );
 
   // Pin the detail pane to a fixed width and let the list expand to fill the
   // rest. Percentage splits caused list rows (padded to ~77 cols) to wrap on
@@ -90,6 +95,7 @@ export function TabView({
             windowStart={windowStart}
             visibleCount={visibleCount}
             width={listWidth}
+            active={active}
           />
         )}
         {tab === 'jobsource' && (
@@ -99,6 +105,7 @@ export function TabView({
             windowStart={windowStart}
             visibleCount={visibleCount}
             width={listWidth}
+            active={active}
           />
         )}
         {tab === 'joblistsource' && (
@@ -108,6 +115,7 @@ export function TabView({
             windowStart={windowStart}
             visibleCount={visibleCount}
             width={listWidth}
+            active={active}
           />
         )}
       </Box>

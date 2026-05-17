@@ -14,6 +14,7 @@ export function JobSourceList(props: {
   windowStart: number;
   visibleCount: number;
   width: number;
+  active?: boolean;
 }) {
   return (
     <Table
