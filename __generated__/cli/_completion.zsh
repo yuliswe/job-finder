@@ -43,7 +43,7 @@ _jobfinder_pipeline() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seeding sourcing listing scripting run-scripts viewing)' \
+    '1:subcommand:(seeding sourcing listing scripting run-scripts viewing evaluate)' \
     '*:: :->args'
 
   case $state in
@@ -55,9 +55,16 @@ _jobfinder_pipeline() {
     scripting) _normal ;;
     run-scripts) _jobfinder_pipeline_run_scripts ;;
     viewing) _normal ;;
+    evaluate) _normal ;;
       esac
       ;;
   esac
+}
+
+_jobfinder_tui() {
+  _arguments -s -S \
+    '--tab[tab]:tab:(jobpost jobsource joblistsource)' \
+    '--sort[sort]:sort:(score postedAt company title salary)'
 }
 
 _jobfinder_help_menu_dump() {
@@ -71,7 +78,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(scrape sites pipeline completion-script-dump help-menu-dump)' \
+    '1:subcommand:(scrape sites pipeline tui completion-script-dump help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -80,6 +87,7 @@ _jobfinder() {
     scrape) _jobfinder_scrape ;;
     sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
+    tui) _jobfinder_tui ;;
     completion-script-dump) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;
       esac

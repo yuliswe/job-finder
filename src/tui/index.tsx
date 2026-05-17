@@ -1,6 +1,10 @@
 import { render } from 'ink';
 import React from 'react';
 
-import { App } from 'src/tui/App.js';
+import { App, type AppOptions } from 'src/tui/App.js';
 
-render(<App />);
+/** Mount Ink and return a promise that resolves when the user quits. */
+export async function renderApp(options: AppOptions): Promise<void> {
+  const instance = render(<App initial={options} />);
+  await instance.waitUntilExit();
+}
