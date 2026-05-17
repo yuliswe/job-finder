@@ -33,7 +33,6 @@ type JobListSource = {
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
-  isProcessed: Bool | DEFAULT<0>;
   url: Text;
   divisions?: Text;
   locations?: Text;
@@ -54,7 +53,6 @@ type JobPost = {
   createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
-  isProcessed: Bool | DEFAULT<0>;
   title: Text;
   url: Text;
   company?: Text;
@@ -110,7 +108,6 @@ type JobSource = {
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
-  isProcessed: Bool | DEFAULT<0>;
   name: Text;
   url: Text;
   // ── indexes ──
@@ -145,13 +142,52 @@ type PipelineState = {
   };
 };
 
-type SourceSeed = {
+type PipelineTrigger = {
   // ── base ──
   id: Text | PK;
   createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
   isProcessed: Bool | DEFAULT<0>;
+  task: Text;
+  // ── relations ──
+  ofJobListSourceId?: Text | ON_DELETE.CASCADE | JobListSource['id'];
+  ofJobPostId?: Text | ON_DELETE.CASCADE | JobPost['id'];
+  ofJobSourceId?: Text | ON_DELETE.CASCADE | JobSource['id'];
+  ofSourceSeedId?: Text | ON_DELETE.CASCADE | SourceSeed['id'];
+  // ── indexes ──
+  _indexes: {
+    task_ofJobPostId_uniq:
+      | [PipelineTrigger['task'], PipelineTrigger['ofJobPostId']]
+      | UNIQUE
+      | PARTIAL_IDX;
+    task_ofJobListSourceId_uniq:
+      | [PipelineTrigger['task'], PipelineTrigger['ofJobListSourceId']]
+      | UNIQUE
+      | PARTIAL_IDX;
+    task_ofJobSourceId_uniq:
+      | [PipelineTrigger['task'], PipelineTrigger['ofJobSourceId']]
+      | UNIQUE
+      | PARTIAL_IDX;
+    task_ofSourceSeedId_uniq:
+      | [PipelineTrigger['task'], PipelineTrigger['ofSourceSeedId']]
+      | UNIQUE
+      | PARTIAL_IDX;
+    ofJobPostId: [PipelineTrigger['ofJobPostId']];
+    ofJobListSourceId: [PipelineTrigger['ofJobListSourceId']];
+    ofJobSourceId: [PipelineTrigger['ofJobSourceId']];
+    ofSourceSeedId: [PipelineTrigger['ofSourceSeedId']];
+    isProcessed: [PipelineTrigger['isProcessed']];
+    task: [PipelineTrigger['task']];
+  };
+};
+
+type SourceSeed = {
+  // ── base ──
+  id: Text | PK;
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  // ── fields ──
   name: Text;
   title: Text;
   url: Text;

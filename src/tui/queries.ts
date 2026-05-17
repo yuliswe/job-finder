@@ -1,5 +1,6 @@
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
+import { TASK_ORDER, type TriggerTask } from 'src/db/pipelineTrigger.js';
 
 export type PipelineStageStats = {
   task:
@@ -26,7 +27,6 @@ export type JobPostRow = {
   salaryMin: number | null;
   salaryMax: number | null;
   salaryCurrency: string | null;
-  isProcessed: number;
   titleRelavency: number | null;
   interestScore: number | null;
   skillScore: number | null;
@@ -67,102 +67,31 @@ export type JobPostSortKey =
   | 'salary';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
-  const [
-    seedTotal,
-    seedDone,
-    sourceTotal,
-    sourceDone,
-    listTotal,
-    listWithScript,
-    jobPostTotal,
-    jobPostViewed,
-    jobPostEvaluated,
-  ] = await Promise.all([
-    countRows('SourceSeed'),
-    db
-      .selectFrom('SourceSeed')
-      .select(db.fn.countAll<number>().as('n'))
-      .where('isProcessed', '=', Bool.True)
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-    countRows('JobSource'),
-    db
-      .selectFrom('JobSource')
-      .select(db.fn.countAll<number>().as('n'))
-      .where('isProcessed', '=', Bool.True)
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-    countRows('JobListSource'),
-    db
-      .selectFrom('JobListSource')
-      .select(db.fn.countAll<number>().as('n'))
-      .where('parserScript', 'is not', null)
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-    countRows('JobPost'),
-    db
-      .selectFrom('JobPost')
-      .select(db.fn.countAll<number>().as('n'))
-      .where('isProcessed', '=', Bool.True)
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-    countRows('JobPostEval'),
-  ]);
-
-  return [
-    { task: 'seeding', label: 'seeding', done: seedDone, total: seedTotal },
-    {
-      task: 'sourcing',
-      label: 'sourcing',
-      done: sourceTotal,
-      total: seedDone || seedTotal,
-    },
-    {
-      task: 'listing',
-      label: 'listing',
-      done: listTotal,
-      total: sourceDone || sourceTotal,
-    },
-    {
-      task: 'scripting',
-      label: 'scripting',
-      done: listWithScript,
-      total: listTotal,
-    },
-    {
-      task: 'run-scripts',
-      label: 'run-scripts',
-      done: jobPostTotal,
-      total: jobPostTotal,
-    },
-    {
-      task: 'viewing',
-      label: 'viewing',
-      done: jobPostViewed,
-      total: jobPostTotal,
-    },
-    {
-      task: 'evaluate',
-      label: 'evaluate',
-      done: jobPostEvaluated,
-      total: jobPostViewed || jobPostTotal,
-    },
-  ];
+  // For each task X:
+  //   total = count(PipelineTrigger WHERE task=X)
+  //   done  = count(PipelineTrigger WHERE task=X AND isProcessed=true)
+  // Child triggers are only enqueued when their parent succeeds, so `total`
+  // already reflects "work that's eligible for this stage".
+  return Promise.all(TASK_ORDER.map(triggerStats));
 }
 
-async function countRows(
-  table:
-    | 'SourceSeed'
-    | 'JobSource'
-    | 'JobListSource'
-    | 'JobPost'
-    | 'JobPostEval'
-): Promise<number> {
-  const r = await db
-    .selectFrom(table)
-    .select(db.fn.countAll<number>().as('n'))
-    .executeTakeFirst();
-  return Number(r?.n ?? 0);
+async function triggerStats(task: TriggerTask): Promise<PipelineStageStats> {
+  const [total, done] = await Promise.all([
+    db
+      .selectFrom('PipelineTrigger')
+      .select(db.fn.countAll<number>().as('n'))
+      .where('task', '=', task)
+      .executeTakeFirst()
+      .then(r => Number(r?.n ?? 0)),
+    db
+      .selectFrom('PipelineTrigger')
+      .select(db.fn.countAll<number>().as('n'))
+      .where('task', '=', task)
+      .where('isProcessed', '=', Bool.True)
+      .executeTakeFirst()
+      .then(r => Number(r?.n ?? 0)),
+  ]);
+  return { task, label: task, done, total };
 }
 
 export async function listJobPosts(args: {
@@ -185,7 +114,6 @@ export async function listJobPosts(args: {
       'JobPost.salaryMin as salaryMin',
       'JobPost.salaryMax as salaryMax',
       'JobPost.salaryCurrency as salaryCurrency',
-      'JobPost.isProcessed as isProcessed',
       'JobPost.description as description',
       'JobPost.summary as summary',
       'JobPostEval.titleRelavency as titleRelavency',
@@ -217,19 +145,14 @@ export async function listJobPosts(args: {
   const rows = await q.limit(limit).execute();
   return rows.map(r => ({
     ...r,
-    combinedScore: combine(r.interestScore, r.skillScore, r.titleRelavency),
+    combinedScore: combine(r.interestScore, r.skillScore),
   }));
 }
 
-function combine(
-  interest: number | null,
-  skill: number | null,
-  title: number | null
-): number | null {
-  const parts = [interest, skill, title].filter((x): x is number => x != null);
-  if (parts.length === 0) return null;
-  // Geometric-ish blend: interest * skill weighted, fall back to title.
+function combine(interest: number | null, skill: number | null): number | null {
   if (interest != null && skill != null) return interest * skill;
+  const parts = [interest, skill].filter((x): x is number => x != null);
+  if (parts.length === 0) return null;
   return parts.reduce((a, b) => a + b, 0) / parts.length;
 }
 
@@ -238,14 +161,24 @@ export async function listSources(): Promise<SourceRow[]> {
     .selectFrom('JobSource')
     .leftJoin('JobListSource', 'JobListSource.ofJobSourceId', 'JobSource.id')
     .leftJoin('JobPost', 'JobPost.ofJobListSourceId', 'JobListSource.id')
+    .leftJoin('PipelineTrigger as sourceTrigger', join =>
+      join
+        .onRef('sourceTrigger.ofJobSourceId', '=', 'JobSource.id')
+        .on('sourceTrigger.task', '=', 'listing')
+    )
+    .leftJoin('PipelineTrigger as listTrigger', join =>
+      join
+        .onRef('listTrigger.ofJobListSourceId', '=', 'JobListSource.id')
+        .on('listTrigger.task', '=', 'run-scripts')
+    )
     .select([
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
-      'JobSource.isProcessed as sourceIsProcessed',
+      'sourceTrigger.isProcessed as sourceIsProcessed',
       'JobListSource.id as listId',
       'JobListSource.url as listUrl',
-      'JobListSource.isProcessed as listIsProcessed',
+      'listTrigger.isProcessed as listIsProcessed',
       'JobListSource.locations as listLocations',
       'JobListSource.divisions as listDivisions',
       'JobListSource.parserScript as listParserScript',
@@ -260,7 +193,7 @@ export async function listSources(): Promise<SourceRow[]> {
     sourceId: r.sourceId,
     sourceName: r.sourceName,
     sourceUrl: r.sourceUrl,
-    sourceIsProcessed: r.sourceIsProcessed,
+    sourceIsProcessed: r.sourceIsProcessed ?? 0,
     listId: r.listId,
     listUrl: r.listUrl,
     listIsProcessed: r.listIsProcessed,

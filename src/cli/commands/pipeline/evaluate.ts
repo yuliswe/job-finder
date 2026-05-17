@@ -1,10 +1,10 @@
 import { Command } from 'commander';
 import pLimit from 'p-limit';
 
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import { markTriggerProcessed } from 'src/db/pipelineTrigger.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
@@ -40,7 +40,6 @@ export function createEvaluateCommand(): Command {
       const targets = await db
         .selectFrom('JobPost')
         .select(['id', 'title', 'description'])
-        .where('isProcessed', '=', Bool.True)
         .where('description', 'is not', null)
         .execute();
 
@@ -130,6 +129,10 @@ async function processOne(args: {
   await recordPipelineState({
     task: 'evaluate',
     state: 'done',
+    entity: { ofJobPostId: target.id },
+  });
+  await markTriggerProcessed({
+    task: 'evaluate',
     entity: { ofJobPostId: target.id },
   });
 }

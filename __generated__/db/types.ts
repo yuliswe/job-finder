@@ -16,7 +16,6 @@ export interface JobListSource {
   divisions: string | null;
   id: string;
   isActive: Generated<Bool>;
-  isProcessed: Generated<Bool>;
   locations: string | null;
   ofJobSourceId: string;
   parserScript: string | null;
@@ -29,7 +28,6 @@ export interface JobPost {
   createdAt: Generated<Timestamp>;
   description: string | null;
   id: string;
-  isProcessed: Generated<Bool>;
   isRemote: Bool | null;
   jobType: string | null;
   location: string | null;
@@ -64,7 +62,6 @@ export interface JobSource {
   createdAt: Generated<Timestamp>;
   id: string;
   isActive: Generated<Bool>;
-  isProcessed: Generated<Bool>;
   name: string;
   updatedAt: Generated<Timestamp>;
   url: string;
@@ -83,10 +80,21 @@ export interface PipelineState {
   updatedAt: Generated<Timestamp>;
 }
 
-export interface SourceSeed {
+export interface PipelineTrigger {
   createdAt: Generated<Timestamp>;
   id: string;
   isProcessed: Generated<Bool>;
+  ofJobListSourceId: string | null;
+  ofJobPostId: string | null;
+  ofJobSourceId: string | null;
+  ofSourceSeedId: string | null;
+  task: string;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface SourceSeed {
+  createdAt: Generated<Timestamp>;
+  id: string;
   name: string;
   title: string;
   updatedAt: Generated<Timestamp>;
@@ -99,5 +107,6 @@ export interface DB {
   JobPostEval: JobPostEval;
   JobSource: JobSource;
   PipelineState: PipelineState;
+  PipelineTrigger: PipelineTrigger;
   SourceSeed: SourceSeed;
 }

@@ -3,9 +3,12 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
 import {
   generateParserScript,
   type GeneratedParserScript,
@@ -90,7 +93,6 @@ async function processTarget(
       parserScript: generated.parserScript,
       locations: JSON.stringify(generated.locations),
       divisions: JSON.stringify(generated.divisions),
-      isProcessed: Bool.True,
     })
     .where('id', '=', target.id)
     .execute();
@@ -98,6 +100,14 @@ async function processTarget(
   await recordPipelineState({
     task: 'scripting',
     state: 'done',
+    entity: { ofJobListSourceId: target.id },
+  });
+  await markTriggerProcessed({
+    task: 'scripting',
+    entity: { ofJobListSourceId: target.id },
+  });
+  await enqueueTrigger({
+    task: 'run-scripts',
     entity: { ofJobListSourceId: target.id },
   });
 }

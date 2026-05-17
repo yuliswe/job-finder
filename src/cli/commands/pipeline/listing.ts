@@ -3,10 +3,14 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import { Bool } from 'src/db/customTypes.js';
+import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -27,7 +31,18 @@ async function runListing(context: BrowserContext): Promise<void> {
   const sources = await db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
-    .where('isProcessed', '=', Bool.False)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('PipelineTrigger')
+            .select('PipelineTrigger.id')
+            .whereRef('PipelineTrigger.ofJobSourceId', '=', 'JobSource.id')
+            .where('PipelineTrigger.task', '=', 'listing')
+            .where('PipelineTrigger.isProcessed', '=', Bool.True)
+        )
+      )
+    )
     .execute();
 
   let inserted = 0;
@@ -62,11 +77,10 @@ async function processSource(
     failure = String(err).slice(0, 500);
   }
 
-  await db
-    .updateTable('JobSource')
-    .set({ isProcessed: Bool.True })
-    .where('id', '=', source.id)
-    .execute();
+  await markTriggerProcessed({
+    task: 'listing',
+    entity: { ofJobSourceId: source.id },
+  });
 
   if (!listingUrl) {
     terminal.warn(
@@ -104,6 +118,10 @@ async function processSource(
     await recordPipelineState({
       task: 'listing',
       state: 'created',
+      entity: { ofJobListSourceId: newListId },
+    });
+    await enqueueTrigger({
+      task: 'scripting',
       entity: { ofJobListSourceId: newListId },
     });
   }

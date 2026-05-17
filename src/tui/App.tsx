@@ -78,7 +78,7 @@ export function App({ initial }: { initial: AppOptions }) {
         TAB_LABELS[(idx + delta + TAB_LABELS.length) % TAB_LABELS.length]!;
       setTab(next.key);
     }
-    if (input === 's' && tab === 'jobpost') {
+    if (input === 's' && tab === 'jobs') {
       const idx = JOB_POST_SORTS.indexOf(sort);
       const next = JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'score';
       setSort(next);
@@ -99,8 +99,8 @@ export function App({ initial }: { initial: AppOptions }) {
         tab={tab}
         sort={sort}
         counts={{
-          jobpost: jobPosts?.length ?? 0,
-          source: sources?.length ?? 0,
+          jobs: jobPosts?.length ?? 0,
+          sources: sources?.length ?? 0,
         }}
       />
       {/*

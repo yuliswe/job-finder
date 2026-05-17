@@ -59,8 +59,7 @@ export function PipelineHeader({
                 <Text color={progressColor(s)}>
                   {progressBar(s.done, s.total)}
                 </Text>{' '}
-                {s.done}
-                {s.total !== s.done ? ` / ${s.total}` : ''}{' '}
+                {s.done} / {s.total}{' '}
               </Text>
             );
           })}

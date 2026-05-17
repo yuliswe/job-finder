@@ -7,6 +7,10 @@ import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -28,7 +32,18 @@ async function runSourcing(context: BrowserContext): Promise<void> {
   const names = await db
     .selectFrom('SourceSeed')
     .select('name')
-    .where('isProcessed', '=', Bool.False)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('PipelineTrigger')
+            .select('PipelineTrigger.id')
+            .whereRef('PipelineTrigger.ofSourceSeedId', '=', 'SourceSeed.id')
+            .where('PipelineTrigger.task', '=', 'sourcing')
+            .where('PipelineTrigger.isProcessed', '=', Bool.True)
+        )
+      )
+    )
     .distinct()
     .execute();
 
@@ -59,7 +74,18 @@ async function processNameGroup(
     .selectFrom('SourceSeed')
     .select(['id', 'url'])
     .where('name', '=', name)
-    .where('isProcessed', '=', Bool.False)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('PipelineTrigger')
+            .select('PipelineTrigger.id')
+            .whereRef('PipelineTrigger.ofSourceSeedId', '=', 'SourceSeed.id')
+            .where('PipelineTrigger.task', '=', 'sourcing')
+            .where('PipelineTrigger.isProcessed', '=', Bool.True)
+        )
+      )
+    )
     .orderBy('createdAt', 'desc')
     .limit(PER_NAME_RETRY_LIMIT)
     .execute();
@@ -105,6 +131,10 @@ async function processNameGroup(
           state: 'created',
           entity: { ofJobSourceId: newSourceId },
         });
+        await enqueueTrigger({
+          task: 'listing',
+          entity: { ofJobSourceId: newSourceId },
+        });
       }
 
       // if succeeds, we skip other URLs in this group
@@ -123,11 +153,17 @@ async function processNameGroup(
 
   if (groupSucceeded) {
     // Mark every row in this name group processed — one win covers the rest.
-    await db
-      .updateTable('SourceSeed')
-      .set({ isProcessed: Bool.True })
+    const groupSeeds = await db
+      .selectFrom('SourceSeed')
+      .select('id')
       .where('name', '=', name)
       .execute();
+    for (const seed of groupSeeds) {
+      await markTriggerProcessed({
+        task: 'sourcing',
+        entity: { ofSourceSeedId: seed.id },
+      });
+    }
   }
 
   return inserted;

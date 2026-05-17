@@ -6,6 +6,10 @@ import * as v from 'valibot';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LLM_SEEDING_MODEL } from 'jobfinder.config.js';
 import { SEEDING_SYSTEM_PROMPT } from 'src/prompts/seeding.js';
@@ -190,6 +194,16 @@ async function insertSeeds(jobs: JobResult[]): Promise<number> {
       await recordPipelineState({
         task: 'seeding',
         state: 'done',
+        entity: { ofSourceSeedId: id },
+      });
+      await enqueueTrigger({
+        task: 'sourcing',
+        entity: { ofSourceSeedId: id },
+      });
+      // Seeding "completes" the moment the row exists — nothing further to do
+      // for that task. Mark it processed inline so progress reflects reality.
+      await markTriggerProcessed({
+        task: 'seeding',
         entity: { ofSourceSeedId: id },
       });
     } catch {

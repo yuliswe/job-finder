@@ -38,7 +38,7 @@ export function TabView({
   const visibleCount = Math.max(3, terminalRows - chromeLines);
 
   const rowCount =
-    tab === 'jobpost' ? (jobPosts?.length ?? 0) : (sources?.length ?? 0);
+    tab === 'jobs' ? (jobPosts?.length ?? 0) : (sources?.length ?? 0);
 
   // Slide the visible window to keep cursor in view.
   const windowStart = Math.max(
@@ -76,7 +76,7 @@ export function TabView({
   return (
     <Box flexDirection='row' marginTop={1}>
       <Box flexDirection='column' flexGrow={1} flexShrink={1} overflow='hidden'>
-        {tab === 'jobpost' && (
+        {tab === 'jobs' && (
           <JobPostList
             rows={jobPosts ?? []}
             cursor={cursor}
@@ -86,7 +86,7 @@ export function TabView({
             active={active}
           />
         )}
-        {tab === 'source' && (
+        {tab === 'sources' && (
           <SourceList
             rows={sources ?? []}
             cursor={cursor}
@@ -104,10 +104,8 @@ export function TabView({
         paddingLeft={2}
         overflow='hidden'
       >
-        {tab === 'jobpost' && (
-          <JobPostDetail row={jobPosts?.[cursor] ?? null} />
-        )}
-        {tab === 'source' && <SourceDetail row={sources?.[cursor] ?? null} />}
+        {tab === 'jobs' && <JobPostDetail row={jobPosts?.[cursor] ?? null} />}
+        {tab === 'sources' && <SourceDetail row={sources?.[cursor] ?? null} />}
       </Box>
     </Box>
   );

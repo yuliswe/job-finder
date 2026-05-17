@@ -3,7 +3,7 @@ import { Command, Option } from 'commander';
 import type { AppTab } from 'src/tui/App.js';
 import type { JobPostSortKey } from 'src/tui/queries.js';
 
-const TABS = ['jobpost', 'source'] as const satisfies readonly AppTab[];
+const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
   'score',
   'postedAt',
@@ -20,7 +20,7 @@ export function createTuiCommand(): Command {
     .addOption(
       new Option('--tab <tab>', 'initial tab')
         .choices([...TABS])
-        .default('jobpost' satisfies AppTab)
+        .default('jobs' satisfies AppTab)
     )
     .addOption(
       new Option('--sort <key>', 'sort key for the JobPost tab')

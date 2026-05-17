@@ -8,6 +8,10 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
 import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
+import {
   batchEvaluateJobTitlesRelevancy,
   type JobRelevanceScore,
 } from 'src/llm/batchEvaluateJobTitlesRelevancy.js';
@@ -45,7 +49,22 @@ async function runAll(
   const targets = await db
     .selectFrom('JobListSource')
     .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
-    .where('isProcessed', '=', Bool.True)
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('PipelineTrigger')
+            .select('PipelineTrigger.id')
+            .whereRef(
+              'PipelineTrigger.ofJobListSourceId',
+              '=',
+              'JobListSource.id'
+            )
+            .where('PipelineTrigger.task', '=', 'run-scripts')
+            .where('PipelineTrigger.isProcessed', '=', Bool.True)
+        )
+      )
+    )
     .where('parserScript', 'is not', null)
     .execute();
 
@@ -155,6 +174,10 @@ async function processTarget(
     reason: `${inserted}/${result.jobs.length} new JobPost rows`,
     entity: { ofJobListSourceId: target.id },
   });
+  await markTriggerProcessed({
+    task: 'run-scripts',
+    entity: { ofJobListSourceId: target.id },
+  });
 
   return inserted;
 }
@@ -192,6 +215,10 @@ async function insertJobsWithScores(args: {
       let jobPostId: string;
       if (wasInserted) {
         jobPostId = newJobId;
+        await enqueueTrigger({
+          task: 'viewing',
+          entity: { ofJobPostId: newJobId },
+        });
       } else {
         const existing = await db
           .selectFrom('JobPost')

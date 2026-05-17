@@ -2,10 +2,17 @@ import { Command } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
-import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import {
+  MAX_CONCURRENT_BROWSER_TABS,
+  PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
+} from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import {
+  enqueueTrigger,
+  markTriggerProcessed,
+} from 'src/db/pipelineTrigger.js';
 import { viewJobPost, type ViewedJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -23,10 +30,29 @@ export function createViewingCommand(): Command {
 }
 
 async function runAll(context: BrowserContext): Promise<void> {
+  // Only view JobPosts whose title cleared the relevancy bar — anything below
+  // is treated as junk per PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
   const targets = await db
     .selectFrom('JobPost')
-    .select(['id', 'url'])
-    .where('isProcessed', '=', Bool.False)
+    .innerJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
+    .select(['JobPost.id as id', 'JobPost.url as url'])
+    .where(eb =>
+      eb.not(
+        eb.exists(
+          eb
+            .selectFrom('PipelineTrigger')
+            .select('PipelineTrigger.id')
+            .whereRef('PipelineTrigger.ofJobPostId', '=', 'JobPost.id')
+            .where('PipelineTrigger.task', '=', 'viewing')
+            .where('PipelineTrigger.isProcessed', '=', Bool.True)
+        )
+      )
+    )
+    .where(
+      'JobPostEval.titleRelavency',
+      '>=',
+      PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+    )
     .execute();
 
   if (targets.length === 0) {
@@ -77,7 +103,6 @@ async function processTarget(
   }
 
   const update: Record<string, unknown> = {
-    isProcessed: Bool.True,
     company: parsed.company,
     description: parsed.description,
     isRemote:
@@ -108,6 +133,14 @@ async function processTarget(
   await recordPipelineState({
     task: 'viewing',
     state: 'done',
+    entity: { ofJobPostId: target.id },
+  });
+  await markTriggerProcessed({
+    task: 'viewing',
+    entity: { ofJobPostId: target.id },
+  });
+  await enqueueTrigger({
+    task: 'evaluate',
     entity: { ofJobPostId: target.id },
   });
 
