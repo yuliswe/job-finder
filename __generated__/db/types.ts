@@ -46,6 +46,20 @@ export interface JobPost {
   url: string;
 }
 
+export interface JobPostEval {
+  createdAt: Generated<Timestamp>;
+  id: string;
+  interestScore: number | null;
+  interestScoreReason: string | null;
+  ofJobPostId: string;
+  skillScore: number | null;
+  skillScoreBreakdown: string | null;
+  skillScoreReason: string | null;
+  titleRelavency: number | null;
+  titleRelavencyReason: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface JobSource {
   createdAt: Generated<Timestamp>;
   id: string;
@@ -82,6 +96,7 @@ export interface SourceSeed {
 export interface DB {
   JobListSource: JobListSource;
   JobPost: JobPost;
+  JobPostEval: JobPostEval;
   JobSource: JobSource;
   PipelineState: PipelineState;
   SourceSeed: SourceSeed;

@@ -12,7 +12,9 @@ export type PipelineTask =
   | 'sourcing'
   | 'listing'
   | 'scripting'
-  | 'run-scripts';
+  | 'run-scripts'
+  | 'viewing'
+  | 'evaluate';
 
 /**
  * Append a row to `PipelineState` recording that `task` touched `entity` and
@@ -22,8 +24,8 @@ export type PipelineTask =
 export async function recordPipelineState(args: {
   task: PipelineTask;
   state: string;
-  reason?: string | null;
   entity: PipelineEntity;
+  reason?: string | null;
 }): Promise<void> {
   await db
     .insertInto('PipelineState')

@@ -1,0 +1,135 @@
+import { Command } from 'commander';
+import pLimit from 'p-limit';
+
+import { Bool } from 'src/db/customTypes.js';
+import { db } from 'src/db/index.js';
+import { newId } from 'src/db/id.js';
+import { recordPipelineState } from 'src/db/pipelineState.js';
+import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
+import { terminal } from 'src/utils/terminal.js';
+import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
+
+// Evaluation is pure LLM work — no browser needed. Cap concurrency to avoid
+// hammering the LLM provider.
+const CONCURRENCY = 5;
+const limit = pLimit(CONCURRENCY);
+
+export function createEvaluateCommand(): Command {
+  return new Command('evaluate')
+    .description(
+      'For each viewed JobPost (description populated), score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.'
+    )
+    .action(async () => {
+      const [interests, cv] = await Promise.all([
+        getUserInterests(),
+        getUserCV(),
+      ]);
+
+      if (!interests) {
+        terminal.warn(
+          'No user interests found (seeds/interests.local.md or seeds/interests.md). interestScore will be unreliable.'
+        );
+      }
+
+      if (!cv) {
+        terminal.warn(
+          'No CV found (seeds/cv.local.md or seeds/cv.md). skillScore will be unreliable.'
+        );
+      }
+
+      const targets = await db
+        .selectFrom('JobPost')
+        .select(['id', 'title', 'description'])
+        .where('isProcessed', '=', Bool.True)
+        .where('description', 'is not', null)
+        .execute();
+
+      if (targets.length === 0) {
+        terminal.log(
+          'No viewed JobPost rows with a description. Run `pipeline viewing` first.'
+        );
+        return;
+      }
+
+      let evaluated = 0;
+      let failed = 0;
+      await Promise.all(
+        targets.map(target =>
+          limit(async () => {
+            try {
+              await processOne({ target, interests, cv });
+              evaluated++;
+            } catch (err) {
+              failed++;
+              terminal.error(
+                `evaluate failed for ${target.id}: ${String(err)}`
+              );
+            }
+          })
+        )
+      );
+
+      terminal.log(
+        `Evaluated ${evaluated}/${targets.length} JobPost rows (${failed} failed)\n`
+      );
+    });
+}
+
+async function processOne(args: {
+  target: { id: string; title: string; description: string | null };
+  interests: string;
+  cv: string;
+}): Promise<void> {
+  const { target, interests, cv } = args;
+  if (!target.description) {
+    throw new Error(`JobPost ${target.id} has no description`);
+  }
+
+  terminal.log(`Evaluating "${target.title}" (${target.id})`);
+
+  let eva;
+  try {
+    eva = await evaluateJobPost({
+      interests,
+      cv,
+      job: { title: target.title, description: target.description },
+    });
+  } catch (err) {
+    await recordPipelineState({
+      task: 'evaluate',
+      state: 'failed',
+      reason: String(err).slice(0, 500),
+      entity: { ofJobPostId: target.id },
+    });
+    throw err;
+  }
+
+  await db
+    .insertInto('JobPostEval')
+    .values({
+      id: newId(),
+      ofJobPostId: target.id,
+      interestScore: eva.interestScore,
+      interestScoreReason: eva.interestScoreReason,
+      skillScore: eva.skillScore,
+      skillScoreReason: eva.skillScoreReason,
+      skillScoreBreakdown: JSON.stringify(eva.skillScoreBreakdown),
+    })
+    .onConflict(oc =>
+      oc.column('ofJobPostId').doUpdateSet({
+        interestScore: eva.interestScore,
+        interestScoreReason: eva.interestScoreReason,
+        skillScore: eva.skillScore,
+        skillScoreReason: eva.skillScoreReason,
+        skillScoreBreakdown: JSON.stringify(eva.skillScoreBreakdown),
+        updatedAt: new Date().toISOString(),
+      })
+    )
+    .execute();
+
+  await recordPipelineState({
+    task: 'evaluate',
+    state: 'done',
+    entity: { ofJobPostId: target.id },
+  });
+}

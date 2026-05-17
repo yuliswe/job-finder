@@ -7,9 +7,14 @@ import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { recordPipelineState } from 'src/db/pipelineState.js';
+import {
+  batchEvaluateJobTitlesRelevancy,
+  type JobRelevanceScore,
+} from 'src/llm/batchEvaluateJobTitlesRelevancy.js';
 import { runParserScript } from 'src/llm/runParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
+import { getUserInterests } from 'src/utils/userInterests.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
@@ -51,11 +56,18 @@ async function runAll(
     return;
   }
 
+  const interests = await getUserInterests();
+  if (!interests) {
+    terminal.warn(
+      'No user interests found (seeds/interests.local.md or seeds/interests.md). Relevance scores will all be neutral (0.5).'
+    );
+  }
+
   let totalInserted = 0;
   await Promise.all(
     targets.map(target =>
       tabLimit(async () => {
-        totalInserted += await processTarget(context, target, args);
+        totalInserted += await processTarget(context, target, args, interests);
       })
     )
   );
@@ -71,7 +83,8 @@ async function processTarget(
     parserScript: string | null;
     ofJobSourceId: string;
   },
-  args: { division: string; location: string }
+  args: { division: string; location: string },
+  interests: string
 ): Promise<number> {
   if (!target.parserScript) return 0; // filtered above but TS narrowing
 
@@ -111,8 +124,27 @@ async function processTarget(
 
   if (!result.ok) return 0; // exhaustive but TS narrowing
 
-  const inserted = await insertJobs({
+  // Score TITLE relevance in a single batched LLM call before insertion.
+  let scores: JobRelevanceScore[];
+  try {
+    scores = await batchEvaluateJobTitlesRelevancy({
+      interests,
+      candidates: result.jobs,
+    });
+  } catch (err) {
+    terminal.error(
+      `batchEvaluateJobTitlesRelevancy failed for ${target.url}: ${String(err)}`
+    );
+    // Fall back to neutral scores so insertion still proceeds.
+    scores = result.jobs.map(() => ({
+      titleRelavency: 0.5,
+      titleRelavencyReason: `batchEvaluateJobTitlesRelevancy failed: ${String(err).slice(0, 200)}`,
+    }));
+  }
+
+  const inserted = await insertJobsWithScores({
     jobs: result.jobs,
+    scores,
     ofJobSourceId: target.ofJobSourceId,
     ofJobListSourceId: target.id,
   });
@@ -127,19 +159,23 @@ async function processTarget(
   return inserted;
 }
 
-async function insertJobs(args: {
+async function insertJobsWithScores(args: {
   jobs: { jobTitle: string; url: string }[];
+  scores: JobRelevanceScore[];
   ofJobSourceId: string;
   ofJobListSourceId: string;
 }): Promise<number> {
-  const { jobs, ofJobSourceId, ofJobListSourceId } = args;
+  const { jobs, scores, ofJobSourceId, ofJobListSourceId } = args;
   let inserted = 0;
-  for (const j of jobs) {
+  for (let i = 0; i < jobs.length; i++) {
+    const j = jobs[i]!;
+    const score = scores[i]!;
     try {
+      const newJobId = newId();
       const result = await db
         .insertInto('JobPost')
         .values({
-          id: newId(),
+          id: newJobId,
           url: j.url,
           title: j.jobTitle,
           ofJobSourceId,
@@ -147,7 +183,34 @@ async function insertJobs(args: {
         })
         .onConflict(oc => oc.column('url').doNothing())
         .executeTakeFirst();
-      if ((result.numInsertedOrUpdatedRows ?? 0n) > 0n) inserted++;
+
+      const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
+      if (wasInserted) inserted++;
+
+      // Resolve the JobPost.id we should hang the eval off of. For brand-new
+      // rows it's `newJobId`; for duplicate URLs we look up the existing one.
+      let jobPostId: string;
+      if (wasInserted) {
+        jobPostId = newJobId;
+      } else {
+        const existing = await db
+          .selectFrom('JobPost')
+          .select('id')
+          .where('url', '=', j.url)
+          .executeTakeFirst();
+        if (!existing) continue;
+        jobPostId = existing.id;
+      }
+
+      await db
+        .insertInto('JobPostEval')
+        .values({
+          id: newId(),
+          titleRelavency: score.titleRelavency,
+          titleRelavencyReason: score.titleRelavencyReason,
+          ofJobPostId: jobPostId,
+        })
+        .execute();
     } catch (err) {
       terminal.warn(`JobPost insert failed for ${j.url}: ${String(err)}`);
     }

@@ -85,6 +85,32 @@ Requires:
 - A locally installed Chrome/Chromium.
 - `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
 
+## `pipeline run-scripts`
+
+For every `JobListSource` with a validated `parserScript`, reload the listing page, call the script's `listLocations()` and `listDivisions()` to enumerate the page's actual filter values, ask the LLM to map the user-supplied `--division` and `--location` strings to subsets of those values, then invoke `searchJobs()` with the picks and insert every returned `{ jobTitle, url }` into `JobPost` (ON CONFLICT(url) DO NOTHING). Each row is recorded in `PipelineState` with `task='run-scripts'` and state `script_error` / `no_result_found` / `success`.
+
+```bash
+./src/cli/bin/cli pipeline run-scripts -d engineering -l "Toronto, ON"
+```
+
+Requires:
+
+- A locally installed Chrome/Chromium.
+- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+
+## `pipeline viewing`
+
+For each unprocessed `JobPost` (i.e. `isProcessed=false`), open the posting URL, clean the page HTML, and ask the LLM to extract structured fields (`title`, `company`, `location`, `description`, `isRemote`, `jobType`, `postedAt`, `salaryMin`/`salaryMax`/`salaryCurrency`/`salaryInterval`, `summary`). The row is updated with whatever fields the LLM populates and marked `isProcessed`. Each row is recorded in `PipelineState` with `task='viewing'` and state `done` / `failed`.
+
+```bash
+./src/cli/bin/cli pipeline viewing
+```
+
+Requires:
+
+- A locally installed Chrome/Chromium.
+- `LLM_VIEWING_MODEL` set in `jobfinder.config.ts`.
+
 ## `pipeline sourcing`
 
 For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.

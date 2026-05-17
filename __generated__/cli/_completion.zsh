@@ -32,12 +32,18 @@ _jobfinder_scrape() {
     '(-o --output)'{-o,--output}'[output]:output:'
 }
 
+_jobfinder_pipeline_run_scripts() {
+  _arguments -s -S \
+    '(-d --division)'{-d,--division}'[division]:division:' \
+    '(-l --location)'{-l,--location}'[location]:location:'
+}
+
 _jobfinder_pipeline() {
   local state line
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seeding sourcing listing scripting)' \
+    '1:subcommand:(seeding sourcing listing scripting run-scripts viewing)' \
     '*:: :->args'
 
   case $state in
@@ -47,6 +53,8 @@ _jobfinder_pipeline() {
     sourcing) _normal ;;
     listing) _normal ;;
     scripting) _normal ;;
+    run-scripts) _jobfinder_pipeline_run_scripts ;;
+    viewing) _normal ;;
       esac
       ;;
   esac

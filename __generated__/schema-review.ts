@@ -81,6 +81,28 @@ type JobPost = {
   };
 };
 
+type JobPostEval = {
+  // ── base ──
+  id: Text | PK;
+  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
+  // ── fields ──
+  interestScore?: Real;
+  interestScoreReason?: Text;
+  skillScore?: Real;
+  skillScoreBreakdown?: Text;
+  skillScoreReason?: Text;
+  titleRelavency?: Real;
+  titleRelavencyReason?: Text;
+  // ── relations ──
+  ofJobPostId: Text | ON_DELETE.CASCADE | JobPost['id'];
+  // ── indexes ──
+  _indexes: {
+    titleRelavency: [JobPostEval['titleRelavency']];
+    ofJobPostId: [JobPostEval['ofJobPostId']] | UNIQUE;
+  };
+};
+
 type JobSource = {
   // ── base ──
   id: Text | PK;
