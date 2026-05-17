@@ -8,17 +8,7 @@ const jestConfig = {
     `<rootDir>/tests/test.setupAfterEnv.ts`, // runs before every test suite
   ],
   transform: {
-    '\\.[tj]sx?$': [
-      'esbuild-jest-fixed',
-      {
-        sourcemap: true,
-        format: 'cjs',
-        target: 'ESNext',
-        loaders: {
-          '.test.ts': 'tsx',
-        },
-      },
-    ],
+    '\\.[tj]sx?$': ['babel-jest', { configFile: './babel.config.cjs' }],
   },
   roots: ['<rootDir>'],
   modulePaths: ['./'],

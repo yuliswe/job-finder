@@ -1,2 +1,2 @@
 #!/bin/sh
-exec "$WS_DIR/node_modules/.bin/tsx" "$WS_DIR/src/cli/cli.ts" "$@"
+exec node "$WS_DIR/dist/src/cli/cli.js" "$@"
