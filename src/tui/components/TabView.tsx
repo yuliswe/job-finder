@@ -100,6 +100,7 @@ export function TabView({
       <Box
         flexDirection='column'
         width={DETAIL_WIDTH}
+        height={visibleCount + 2}
         paddingLeft={2}
         overflow='hidden'
       >
