@@ -3,11 +3,7 @@ import { Command, Option } from 'commander';
 import type { AppTab } from 'src/tui/App.js';
 import type { JobPostSortKey } from 'src/tui/queries.js';
 
-const TABS = [
-  'jobpost',
-  'jobsource',
-  'joblistsource',
-] as const satisfies readonly AppTab[];
+const TABS = ['jobpost', 'source'] as const satisfies readonly AppTab[];
 const SORTS = [
   'score',
   'postedAt',

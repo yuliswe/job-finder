@@ -4,9 +4,8 @@ import React, { useCallback, useState } from 'react';
 import {
   getPipelineStats,
   getRecentActivity,
-  listJobListSources,
   listJobPosts,
-  listJobSources,
+  listSources,
   type JobPostSortKey,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
@@ -40,10 +39,7 @@ export function App({ initial }: { initial: AppOptions }) {
   const jobPosts = useLiveData(
     useCallback(() => listJobPosts({ sort }), [sort])
   );
-  const jobSources = useLiveData(useCallback(() => listJobSources(), []));
-  const jobListSources = useLiveData(
-    useCallback(() => listJobListSources(), [])
-  );
+  const sources = useLiveData(useCallback(() => listSources(), []));
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
   // re-render the chrome on every press. Ink supports multiple useInput hooks.
@@ -104,8 +100,7 @@ export function App({ initial }: { initial: AppOptions }) {
         sort={sort}
         counts={{
           jobpost: jobPosts?.length ?? 0,
-          jobsource: jobSources?.length ?? 0,
-          joblistsource: jobListSources?.length ?? 0,
+          source: sources?.length ?? 0,
         }}
       />
       {/*
@@ -116,8 +111,7 @@ export function App({ initial }: { initial: AppOptions }) {
         key={tab}
         tab={tab}
         jobPosts={jobPosts}
-        jobSources={jobSources}
-        jobListSources={jobListSources}
+        sources={sources}
         stagesCount={stats?.length ?? 0}
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}

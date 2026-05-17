@@ -1,6 +1,6 @@
 import type { JobPostSortKey } from 'src/tui/queries.js';
 
-export type AppTab = 'jobpost' | 'jobsource' | 'joblistsource';
+export type AppTab = 'jobpost' | 'source';
 
 export type AppOptions = {
   tab: AppTab;
@@ -9,8 +9,7 @@ export type AppOptions = {
 
 export const TAB_LABELS: { key: AppTab; label: string }[] = [
   { key: 'jobpost', label: 'JobPost' },
-  { key: 'jobsource', label: 'JobSource' },
-  { key: 'joblistsource', label: 'JobListSource' },
+  { key: 'source', label: 'Source' },
 ];
 
 export const JOB_POST_SORTS: JobPostSortKey[] = [

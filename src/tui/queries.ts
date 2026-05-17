@@ -35,22 +35,19 @@ export type JobPostRow = {
   summary: string | null;
 };
 
-export type JobSourceRow = {
-  id: string;
-  name: string;
-  url: string;
-  isProcessed: number;
-  jobListSourceCount: number;
-  jobPostCount: number;
-};
-
-export type JobListSourceRow = {
-  id: string;
-  url: string;
+export type SourceRow = {
+  /** Composite of source + list id, stable for React keys. */
+  rowKey: string;
+  sourceId: string;
+  sourceName: string;
+  sourceUrl: string;
+  sourceIsProcessed: number;
+  listId: string | null;
+  listUrl: string | null;
+  listIsProcessed: number | null;
+  listLocations: string | null;
+  listDivisions: string | null;
   hasScript: number;
-  isProcessed: number;
-  locations: string | null;
-  divisions: string | null;
   jobPostCount: number;
 };
 
@@ -236,55 +233,40 @@ function combine(
   return parts.reduce((a, b) => a + b, 0) / parts.length;
 }
 
-export async function listJobSources(): Promise<JobSourceRow[]> {
+export async function listSources(): Promise<SourceRow[]> {
   const rows = await db
     .selectFrom('JobSource')
     .leftJoin('JobListSource', 'JobListSource.ofJobSourceId', 'JobSource.id')
-    .leftJoin('JobPost', 'JobPost.ofJobSourceId', 'JobSource.id')
-    .select([
-      'JobSource.id as id',
-      'JobSource.name as name',
-      'JobSource.url as url',
-      'JobSource.isProcessed as isProcessed',
-      db.fn
-        .count<number>('JobListSource.id')
-        .distinct()
-        .as('jobListSourceCount'),
-      db.fn.count<number>('JobPost.id').distinct().as('jobPostCount'),
-    ])
-    .groupBy('JobSource.id')
-    .orderBy('JobSource.name', 'asc')
-    .execute();
-  return rows.map(r => ({
-    ...r,
-    jobListSourceCount: Number(r.jobListSourceCount),
-    jobPostCount: Number(r.jobPostCount),
-  }));
-}
-
-export async function listJobListSources(): Promise<JobListSourceRow[]> {
-  const rows = await db
-    .selectFrom('JobListSource')
     .leftJoin('JobPost', 'JobPost.ofJobListSourceId', 'JobListSource.id')
     .select([
-      'JobListSource.id as id',
-      'JobListSource.url as url',
-      'JobListSource.isProcessed as isProcessed',
-      'JobListSource.locations as locations',
-      'JobListSource.divisions as divisions',
-      'JobListSource.parserScript as parserScript',
+      'JobSource.id as sourceId',
+      'JobSource.name as sourceName',
+      'JobSource.url as sourceUrl',
+      'JobSource.isProcessed as sourceIsProcessed',
+      'JobListSource.id as listId',
+      'JobListSource.url as listUrl',
+      'JobListSource.isProcessed as listIsProcessed',
+      'JobListSource.locations as listLocations',
+      'JobListSource.divisions as listDivisions',
+      'JobListSource.parserScript as listParserScript',
       db.fn.count<number>('JobPost.id').as('jobPostCount'),
     ])
-    .groupBy('JobListSource.id')
-    .orderBy('JobListSource.createdAt', 'desc')
+    .groupBy(['JobSource.id', 'JobListSource.id'])
+    .orderBy('JobSource.name', 'asc')
+    .orderBy('JobListSource.createdAt', 'asc')
     .execute();
   return rows.map(r => ({
-    id: r.id,
-    url: r.url,
-    isProcessed: r.isProcessed,
-    locations: r.locations,
-    divisions: r.divisions,
-    hasScript: r.parserScript ? 1 : 0,
+    rowKey: `${r.sourceId}::${r.listId ?? ''}`,
+    sourceId: r.sourceId,
+    sourceName: r.sourceName,
+    sourceUrl: r.sourceUrl,
+    sourceIsProcessed: r.sourceIsProcessed,
+    listId: r.listId,
+    listUrl: r.listUrl,
+    listIsProcessed: r.listIsProcessed,
+    listLocations: r.listLocations,
+    listDivisions: r.listDivisions,
+    hasScript: r.listParserScript ? 1 : 0,
     jobPostCount: Number(r.jobPostCount),
   }));
 }

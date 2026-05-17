@@ -1,33 +1,25 @@
 import { Box, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 
-import { JobListSourceDetail } from 'src/tui/components/JobListSourceDetail.js';
-import { JobListSourceList } from 'src/tui/components/JobListSourceList.js';
 import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
-import { JobSourceDetail } from 'src/tui/components/JobSourceDetail.js';
-import { JobSourceList } from 'src/tui/components/JobSourceList.js';
+import { SourceDetail } from 'src/tui/components/SourceDetail.js';
+import { SourceList } from 'src/tui/components/SourceList.js';
 import type { AppTab } from 'src/tui/utils/types.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
-import type {
-  JobListSourceRow,
-  JobPostRow,
-  JobSourceRow,
-} from 'src/tui/queries.js';
+import type { JobPostRow, SourceRow } from 'src/tui/queries.js';
 
 export function TabView({
   tab,
   jobPosts,
-  jobSources,
-  jobListSources,
+  sources,
   stagesCount,
   activityCount,
   active = true,
 }: {
   tab: AppTab;
   jobPosts: JobPostRow[] | null;
-  jobSources: JobSourceRow[] | null;
-  jobListSources: JobListSourceRow[] | null;
+  sources: SourceRow[] | null;
   stagesCount: number;
   activityCount: number;
   active?: boolean;
@@ -46,11 +38,7 @@ export function TabView({
   const visibleCount = Math.max(3, terminalRows - chromeLines);
 
   const rowCount =
-    tab === 'jobpost'
-      ? (jobPosts?.length ?? 0)
-      : tab === 'jobsource'
-        ? (jobSources?.length ?? 0)
-        : (jobListSources?.length ?? 0);
+    tab === 'jobpost' ? (jobPosts?.length ?? 0) : (sources?.length ?? 0);
 
   // Slide the visible window to keep cursor in view.
   const windowStart = Math.max(
@@ -98,19 +86,9 @@ export function TabView({
             active={active}
           />
         )}
-        {tab === 'jobsource' && (
-          <JobSourceList
-            rows={jobSources ?? []}
-            cursor={cursor}
-            windowStart={windowStart}
-            visibleCount={visibleCount}
-            width={listWidth}
-            active={active}
-          />
-        )}
-        {tab === 'joblistsource' && (
-          <JobListSourceList
-            rows={jobListSources ?? []}
+        {tab === 'source' && (
+          <SourceList
+            rows={sources ?? []}
             cursor={cursor}
             windowStart={windowStart}
             visibleCount={visibleCount}
@@ -128,12 +106,7 @@ export function TabView({
         {tab === 'jobpost' && (
           <JobPostDetail row={jobPosts?.[cursor] ?? null} />
         )}
-        {tab === 'jobsource' && (
-          <JobSourceDetail row={jobSources?.[cursor] ?? null} />
-        )}
-        {tab === 'joblistsource' && (
-          <JobListSourceDetail row={jobListSources?.[cursor] ?? null} />
-        )}
+        {tab === 'source' && <SourceDetail row={sources?.[cursor] ?? null} />}
       </Box>
     </Box>
   );
