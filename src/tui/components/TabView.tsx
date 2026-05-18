@@ -6,6 +6,7 @@ import { JobPostList } from 'src/tui/components/JobPostList.js';
 import { SourceDetail } from 'src/tui/components/SourceDetail.js';
 import { SourceList } from 'src/tui/components/SourceList.js';
 import type { AppTab } from 'src/tui/utils/types.js';
+import { openUrl } from 'src/tui/utils/openUrl.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
   toggleSourceActive,
@@ -20,6 +21,7 @@ export function TabView({
   stagesCount,
   activityCount,
   active = true,
+  onOpenJob,
 }: {
   tab: AppTab;
   jobPosts: JobPostRow[] | null;
@@ -27,6 +29,8 @@ export function TabView({
   stagesCount: number;
   activityCount: number;
   active?: boolean;
+  /** Open the full-screen detail view for the given JobPost id. */
+  onOpenJob?: (id: string) => void;
 }) {
   const [cursor, setCursor] = useState(0);
   const { rows: terminalRows, cols: terminalCols } = useTerminalSize();
@@ -64,9 +68,22 @@ export function TabView({
     (input, key) => {
       if (key.upArrow) setCursor(c => Math.max(0, c - 1));
       if (key.downArrow) setCursor(c => Math.min(rowCount - 1, c + 1));
+      if (key.return && tab === 'jobs') {
+        const row = jobPosts?.[cursor];
+        if (row && onOpenJob) onOpenJob(row.id);
+      }
       if (input === 'a' && tab === 'sources') {
         const row = sources?.[cursor];
         if (row) void toggleSourceActive(row);
+      }
+      if (input === 'l') {
+        const url =
+          tab === 'jobs'
+            ? (jobPosts?.[cursor]?.url ?? null)
+            : (sources?.[cursor]?.listUrl ??
+              sources?.[cursor]?.sourceUrl ??
+              null);
+        if (url) openUrl(url);
       }
     },
     { isActive: active }

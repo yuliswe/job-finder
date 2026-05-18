@@ -99,6 +99,15 @@ export function fmtScore(n: number | null): string {
   return n.toFixed(2);
 }
 
+export function fmtDaysAgo(postedAt: string | null, now = Date.now()): string {
+  if (postedAt == null) return '—';
+  const t = Date.parse(postedAt);
+  if (Number.isNaN(t)) return '—';
+  const days = Math.floor((now - t) / 86_400_000);
+  if (days < 0) return '0';
+  return String(days);
+}
+
 export function fmtSalary(
   min: number | null,
   max: number | null,

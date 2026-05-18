@@ -67,16 +67,6 @@ Score this posting and return the structured evaluation.`,
           'One sentence (≤ ~200 chars) justifying interestScore, citing concrete words from the interests and the posting.'
         )
       ),
-      skillScore: v.pipe(
-        v.number(),
-        v.description(
-          'Score in [0, 1] of how well the user already has the skills/experience this job requires (per their CV).'
-        )
-      ),
-      skillScoreReason: v.pipe(
-        v.string(),
-        v.description('One sentence (≤ ~200 chars) justifying skillScore.')
-      ),
       skillScoreBreakdown: v.pipe(
         v.array(
           v.object({
@@ -129,13 +119,6 @@ Score this posting and return the structured evaluation.`,
         };
       }
 
-      if (!inRange(parsed.skillScore)) {
-        return {
-          valid: false,
-          feedback: `skillScore must be in [0, 1]; got ${parsed.skillScore}.`,
-        };
-      }
-
       for (const s of parsed.skillScoreBreakdown) {
         if (!inRange(s.importance) || !inRange(s.skillScore)) {
           return {
@@ -148,5 +131,47 @@ Score this posting and return the structured evaluation.`,
     },
   });
 
-  return result;
+  // skillScore is derived, not LLM-supplied: it's the importance-weighted
+  // average of the per-skill scores in the breakdown. This keeps the aggregate
+  // mechanically consistent with the breakdown the UI shows.
+  const { skillScore, skillScoreReason } = aggregateSkillScore(
+    result.skillScoreBreakdown
+  );
+
+  return {
+    interestScore: result.interestScore,
+    interestScoreReason: result.interestScoreReason,
+    skillScore,
+    skillScoreReason,
+    skillScoreBreakdown: result.skillScoreBreakdown,
+  };
+}
+
+function aggregateSkillScore(breakdown: SkillBreakdownEntry[]): {
+  skillScore: number;
+  skillScoreReason: string;
+} {
+  if (breakdown.length === 0) {
+    return {
+      skillScore: 0,
+      skillScoreReason: 'No skills extracted from the posting.',
+    };
+  }
+  let weighted = 0;
+  let totalImportance = 0;
+  for (const s of breakdown) {
+    weighted += s.importance * s.skillScore;
+    totalImportance += s.importance;
+  }
+  if (totalImportance === 0) {
+    return {
+      skillScore: 0,
+      skillScoreReason: `All ${breakdown.length} skills had importance=0.`,
+    };
+  }
+  const skillScore = weighted / totalImportance;
+  return {
+    skillScore,
+    skillScoreReason: `Importance-weighted average over ${breakdown.length} skill${breakdown.length === 1 ? '' : 's'} (Σ importance = ${totalImportance.toFixed(2)}).`,
+  };
 }

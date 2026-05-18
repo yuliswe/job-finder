@@ -12,6 +12,7 @@ import {
   processOne,
   recordPipelineState,
 } from 'src/db/pipelineState.js';
+import { qualifiedForSourcing } from 'src/db/pipelineQualified.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -33,6 +34,7 @@ async function runSourcing(context: BrowserContext): Promise<void> {
   const names = await db
     .selectFrom('SourceSeed')
     .select('name')
+    .where(qualifiedForSourcing)
     .where(
       eligibleForPipelineTask({
         task: 'sourcing',
@@ -69,6 +71,7 @@ async function sourceOneGroup(args: {
     .selectFrom('SourceSeed')
     .select(['id', 'url'])
     .where('name', '=', name)
+    .where(qualifiedForSourcing)
     .where(
       eligibleForPipelineTask({
         task: 'sourcing',

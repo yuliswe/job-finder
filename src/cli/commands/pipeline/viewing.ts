@@ -2,11 +2,7 @@ import { Command } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
-import {
-  MAX_CONCURRENT_BROWSER_TABS,
-  PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
-} from 'jobfinder.config.js';
-import { jobPostInActiveSource } from 'src/db/activeSource.js';
+import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import {
@@ -16,6 +12,7 @@ import {
   processOne,
   recordPipelineState,
 } from 'src/db/pipelineState.js';
+import { qualifiedForViewing } from 'src/db/pipelineQualified.js';
 import { viewJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -33,24 +30,18 @@ export function createViewingCommand(): Command {
 }
 
 async function runAll(context: BrowserContext): Promise<void> {
-  // Only view JobPosts whose title cleared the relevancy bar — anything below
-  // is treated as junk per PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
+  // qualifiedForViewing handles the active-source filter AND the
+  // titleRelavency threshold against PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
   const targets = await db
     .selectFrom('JobPost')
-    .innerJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
     .select(['JobPost.id as id', 'JobPost.url as url'])
+    .where(qualifiedForViewing)
     .where(
       eligibleForPipelineTask({
         task: 'viewing',
         parentIdRef: 'JobPost.id',
       })
     )
-    .where(
-      'JobPostEval.titleRelavency',
-      '>=',
-      PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
-    )
-    .where(jobPostInActiveSource)
     .execute();
 
   if (targets.length === 0) {

@@ -72,9 +72,9 @@ export function PipelineHeader({
                   ' '
                 )}{' '}
                 {s.label.padEnd(labelWidth)}{' '}
-                <Text color='green'>{'█'.repeat(segs.green)}</Text>
-                <Text color='yellow'>{'█'.repeat(segs.yellow)}</Text>
                 <Text color='red'>{'█'.repeat(segs.red)}</Text>
+                <Text color='yellow'>{'█'.repeat(segs.yellow)}</Text>
+                <Text color='green'>{'█'.repeat(segs.green)}</Text>
                 <Text dimColor>{'░'.repeat(segs.empty)}</Text>{' '}
                 {countSummary(s)}{' '}
               </Text>
@@ -111,30 +111,51 @@ export function PipelineHeader({
  *            no_*_found),
  *   red    = terminal failure (failed / aborted / script_error),
  *   empty  = not yet processed (queued / started).
- * When processing completes, green + yellow + red fills the whole bar. */
+ * Cells are allocated via the largest-remainder method so the four segments
+ * always sum to exactly `width` — no trailing gap when nothing is pending.
+ * Any non-zero count is guaranteed at least one cell (stolen from the largest
+ * segment if rounding would otherwise drop it) so a single failure / no-result
+ * is always visible. */
 function progressSegments(
   s: PipelineStageStats,
   width = 18
 ): { green: number; yellow: number; red: number; empty: number } {
   if (s.total <= 0) return { green: 0, yellow: 0, red: 0, empty: width };
-  const raw = {
-    green: (s.done / s.total) * width,
-    yellow: (s.noResult / s.total) * width,
-    red: (s.failed / s.total) * width,
-  };
-  // Largest-remainder rounding across the three filled segments so widths
-  // sum to at most `Math.round(filledRatio * width)`. Simpler approach: round
-  // each independently, then trim the segment with the largest fractional
-  // overshoot if the sum exceeds the filled budget.
-  let green = Math.round(raw.green);
-  let yellow = Math.round(raw.yellow);
-  let red = Math.round(raw.red);
-  while (green + yellow + red > width) {
-    if (green >= yellow && green >= red) green--;
-    else if (yellow >= red) yellow--;
-    else red--;
+  const pending = s.queued + s.started;
+  const counts = [s.done, s.noResult, s.failed, pending];
+
+  // 1. Largest-remainder rounding so cells sum to exactly `width`.
+  const raw = counts.map(n => (n / s.total) * width);
+  const out = raw.map(Math.floor);
+  let leftover = width - out.reduce((a, b) => a + b, 0);
+  const order = raw
+    .map((r, i) => ({ i, frac: r - out[i]!, n: counts[i]! }))
+    .sort((a, b) => b.frac - a.frac || b.n - a.n);
+  for (const entry of order) {
+    if (leftover <= 0) break;
+    out[entry.i]!++;
+    leftover--;
   }
-  return { green, yellow, red, empty: width - green - yellow - red };
+
+  // 2. Bump any non-zero count that rounded to 0 cells; pay for it by
+  //    decrementing whichever segment currently has the most cells.
+  for (let i = 0; i < counts.length; i++) {
+    if (counts[i]! === 0 || out[i]! > 0) continue;
+    let donor = -1;
+    let donorCells = 1; // need >= 2 cells to spare one
+    for (let j = 0; j < out.length; j++) {
+      if (j !== i && out[j]! > donorCells) {
+        donor = j;
+        donorCells = out[j]!;
+      }
+    }
+    if (donor >= 0) {
+      out[donor]!--;
+      out[i]!++;
+    }
+  }
+
+  return { green: out[0]!, yellow: out[1]!, red: out[2]!, empty: out[3]! };
 }
 
 function countSummary(s: PipelineStageStats): string {

@@ -3,14 +3,15 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
-import { jobListSourceInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
 import {
+  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
 } from 'src/db/pipelineState.js';
+import { qualifiedForScripting } from 'src/db/pipelineQualified.js';
 import { generateParserScript } from 'src/llm/generateParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -31,8 +32,13 @@ async function runScripting(context: BrowserContext): Promise<void> {
   const targets = await db
     .selectFrom('JobListSource')
     .select(['id', 'url'])
-    .where('parserScript', 'is', null)
-    .where(jobListSourceInActiveSource)
+    .where(qualifiedForScripting)
+    .where(
+      eligibleForPipelineTask({
+        task: 'scripting',
+        parentIdRef: 'JobListSource.id',
+      })
+    )
     .execute();
 
   const results = await Promise.all(

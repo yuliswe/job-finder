@@ -1,9 +1,6 @@
 import { sql } from 'kysely';
 
-import {
-  jobListSourceInActiveSource,
-  jobPostInActiveSource,
-} from 'src/db/activeSource.js';
+import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import {
@@ -13,6 +10,15 @@ import {
   TERMINAL_NO_RESULT_STATES,
   TERMINAL_SUCCESS_STATES,
 } from 'src/db/pipelineState.js';
+import {
+  qualifiedForEvaluate,
+  qualifiedForListing,
+  qualifiedForRunScripts,
+  qualifiedForScripting,
+  qualifiedForSourcing,
+  qualifiedForViewing,
+} from 'src/db/pipelineQualified.js';
+import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
 import { bumpLocalRevision } from 'src/tui/useLiveData.js';
 
 export type PipelineStageStats = {
@@ -54,8 +60,13 @@ export type JobPostRow = {
   salaryMax: number | null;
   salaryCurrency: string | null;
   titleRelavency: number | null;
+  titleRelavencyReason: string | null;
   interestScore: number | null;
+  interestScoreReason: string | null;
   skillScore: number | null;
+  skillScoreReason: string | null;
+  /** Parsed from the JSON-encoded JobPostEval.skillScoreBreakdown column. */
+  skillScoreBreakdown: SkillBreakdownEntry[] | null;
   overallScore: number | null;
   description: string | null;
   summary: string | null;
@@ -118,7 +129,11 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
   for (const r of rows) {
     const n = Number(r.n ?? 0);
     if (r.state == null) continue;
-    if (TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
+    // user_interrupted is terminal in the data model (won't be auto-re-picked)
+    // but the TUI buckets it under `queued` so it shows as pending in the bar
+    // rather than a yellow "no-result" — a Ctrl+C is not really an outcome.
+    if (r.state === PIPELINE_STATE.USER_INTERRUPTED) queued += n;
+    else if (TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
     else if (TERMINAL_NO_RESULT_STATES.has(r.state)) noResult += n;
     else if (r.state === PIPELINE_STATE.QUEUED) queued += n;
     else if (r.state === PIPELINE_STATE.STARTED) started += n;
@@ -137,14 +152,28 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
 }
 
 function stageStatsQuery(task: PipelineTask) {
+  // Every bar uses the SAME predicate the pipeline command uses to pick work,
+  // wrapped in an EXISTS keyed on the relevant FK. That way bar counts and
+  // what the CLI will actually process are guaranteed to agree.
   const q = db
     .selectFrom('LatestPipelineState')
     .where('LatestPipelineState.task', '=', task);
   switch (task) {
     case 'seeding':
     case 'sourcing':
-      // SourceSeed has no isActive concept.
-      return q;
+      return q.where(eb =>
+        eb.exists(
+          eb
+            .selectFrom('SourceSeed')
+            .select('SourceSeed.id')
+            .whereRef(
+              'SourceSeed.id',
+              '=',
+              'LatestPipelineState.ofSourceSeedId'
+            )
+            .where(qualifiedForSourcing)
+        )
+      );
     case 'listing':
       return q.where(eb =>
         eb.exists(
@@ -152,10 +181,23 @@ function stageStatsQuery(task: PipelineTask) {
             .selectFrom('JobSource')
             .select('JobSource.id')
             .whereRef('JobSource.id', '=', 'LatestPipelineState.ofJobSourceId')
-            .where('JobSource.isActive', '=', Bool.True)
+            .where(qualifiedForListing)
         )
       );
     case 'scripting':
+      return q.where(eb =>
+        eb.exists(
+          eb
+            .selectFrom('JobListSource')
+            .select('JobListSource.id')
+            .whereRef(
+              'JobListSource.id',
+              '=',
+              'LatestPipelineState.ofJobListSourceId'
+            )
+            .where(qualifiedForScripting)
+        )
+      );
     case 'run-scripts':
       return q.where(eb =>
         eb.exists(
@@ -167,10 +209,19 @@ function stageStatsQuery(task: PipelineTask) {
               '=',
               'LatestPipelineState.ofJobListSourceId'
             )
-            .where(jobListSourceInActiveSource)
+            .where(qualifiedForRunScripts)
         )
       );
     case 'viewing':
+      return q.where(eb =>
+        eb.exists(
+          eb
+            .selectFrom('JobPost')
+            .select('JobPost.id')
+            .whereRef('JobPost.id', '=', 'LatestPipelineState.ofJobPostId')
+            .where(qualifiedForViewing)
+        )
+      );
     case 'evaluate':
       return q.where(eb =>
         eb.exists(
@@ -178,7 +229,7 @@ function stageStatsQuery(task: PipelineTask) {
             .selectFrom('JobPost')
             .select('JobPost.id')
             .whereRef('JobPost.id', '=', 'LatestPipelineState.ofJobPostId')
-            .where(jobPostInActiveSource)
+            .where(qualifiedForEvaluate)
         )
       );
   }
@@ -208,8 +259,12 @@ export async function listJobPosts(args: {
       'JobPost.description as description',
       'JobPost.summary as summary',
       'JobPostEval.titleRelavency as titleRelavency',
+      'JobPostEval.titleRelavencyReason as titleRelavencyReason',
       'JobPostEval.interestScore as interestScore',
+      'JobPostEval.interestScoreReason as interestScoreReason',
       'JobPostEval.skillScore as skillScore',
+      'JobPostEval.skillScoreReason as skillScoreReason',
+      'JobPostEval.skillScoreBreakdown as skillScoreBreakdownJson',
     ]);
 
   switch (sort) {
@@ -228,13 +283,29 @@ export async function listJobPosts(args: {
   }
 
   const rows = await q.limit(limit).execute();
-  return rows.map(r => ({
-    ...r,
-    overallScore:
-      r.skillScore != null && r.interestScore != null
-        ? r.skillScore * r.interestScore
-        : null,
-  }));
+  return rows.map(r => {
+    const { skillScoreBreakdownJson, ...rest } = r;
+    return {
+      ...rest,
+      skillScoreBreakdown: parseSkillBreakdown(skillScoreBreakdownJson),
+      overallScore:
+        r.skillScore != null && r.interestScore != null
+          ? r.skillScore * r.interestScore
+          : null,
+    };
+  });
+}
+
+function parseSkillBreakdown(
+  json: string | null
+): SkillBreakdownEntry[] | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? (parsed as SkillBreakdownEntry[]) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function listSources(): Promise<SourceRow[]> {

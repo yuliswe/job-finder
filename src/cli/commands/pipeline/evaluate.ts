@@ -1,14 +1,15 @@
 import { Command } from 'commander';
 import pLimit from 'p-limit';
 
-import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
+  eligibleForPipelineTask,
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
 } from 'src/db/pipelineState.js';
+import { qualifiedForEvaluate } from 'src/db/pipelineQualified.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
@@ -43,8 +44,13 @@ async function runEvaluate(): Promise<void> {
   const targets = await db
     .selectFrom('JobPost')
     .select(['id', 'title', 'description'])
-    .where('description', 'is not', null)
-    .where(jobPostInActiveSource)
+    .where(qualifiedForEvaluate)
+    .where(
+      eligibleForPipelineTask({
+        task: 'evaluate',
+        parentIdRef: 'JobPost.id',
+      })
+    )
     .execute();
 
   if (targets.length === 0) {

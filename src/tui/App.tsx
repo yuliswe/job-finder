@@ -12,6 +12,7 @@ import { useLiveData } from 'src/tui/useLiveData.js';
 import { ActivityFeed } from 'src/tui/components/ActivityFeed.js';
 import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { Footer } from 'src/tui/components/Footer.js';
+import { JobPostDetailScreen } from 'src/tui/components/JobPostDetailScreen.js';
 import { PipelineHeader } from 'src/tui/components/PipelineHeader.js';
 import { TabBar } from 'src/tui/components/TabBar.js';
 import { TabView } from 'src/tui/components/TabView.js';
@@ -31,6 +32,7 @@ export function App({ initial }: { initial: AppOptions }) {
   const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
   const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
   const [pipelineCursor, setPipelineCursor] = useState(0);
+  const [openJobId, setOpenJobId] = useState<string | null>(null);
 
   const stats = useLiveData(useCallback(() => getPipelineStats(), []));
   const activity = useLiveData(
@@ -44,50 +46,65 @@ export function App({ initial }: { initial: AppOptions }) {
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
   // re-render the chrome on every press. Ink supports multiple useInput hooks.
   const stageCount = stats?.length ?? 0;
-  useInput((input, key) => {
-    if (input === 'q') {
-      exit();
-      return;
-    }
-    if (key.escape) {
-      // ESC returns to table focus when pipeline is focused; otherwise exits.
-      if (focus === 'pipeline') {
-        setFocus('table');
+  const openJob =
+    openJobId == null
+      ? null
+      : (jobPosts?.find(j => j.id === openJobId) ?? null);
+  useInput(
+    (input, key) => {
+      if (input === 'q') {
+        exit();
         return;
       }
-      exit();
-      return;
-    }
-    if (input === 'p') {
-      setFocus(f => (f === 'pipeline' ? 'table' : 'pipeline'));
-      return;
-    }
-    if (focus === 'pipeline') {
-      if (key.upArrow) {
-        setPipelineCursor(c => Math.max(0, c - 1));
+      if (key.escape) {
+        // ESC returns to table focus when pipeline is focused; otherwise exits.
+        if (focus === 'pipeline') {
+          setFocus('table');
+          return;
+        }
+        exit();
+        return;
       }
-      if (key.downArrow) {
-        setPipelineCursor(c => Math.min(Math.max(0, stageCount - 1), c + 1));
+      if (input === 'p') {
+        setFocus(f => (f === 'pipeline' ? 'table' : 'pipeline'));
+        return;
       }
-      return;
-    }
-    if (input === '\t' || key.rightArrow || key.leftArrow) {
-      const delta = key.leftArrow ? -1 : 1;
-      const idx = TAB_LABELS.findIndex(t => t.key === tab);
-      const next =
-        TAB_LABELS[(idx + delta + TAB_LABELS.length) % TAB_LABELS.length]!;
-      setTab(next.key);
-    }
-    if (input === 's' && tab === 'jobs') {
-      const idx = JOB_POST_SORTS.indexOf(sort);
-      const next =
-        JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
-      setSort(next);
-    }
-    if (input === 'y') {
-      copyToClipboard(`jobfinder tui --tab ${tab} --sort ${sort}`);
-    }
-  });
+      if (focus === 'pipeline') {
+        if (key.upArrow) {
+          setPipelineCursor(c => Math.max(0, c - 1));
+        }
+        if (key.downArrow) {
+          setPipelineCursor(c => Math.min(Math.max(0, stageCount - 1), c + 1));
+        }
+        return;
+      }
+      if (input === '\t' || key.rightArrow || key.leftArrow) {
+        const delta = key.leftArrow ? -1 : 1;
+        const idx = TAB_LABELS.findIndex(t => t.key === tab);
+        const next =
+          TAB_LABELS[(idx + delta + TAB_LABELS.length) % TAB_LABELS.length]!;
+        setTab(next.key);
+      }
+      if (input === 's' && tab === 'jobs') {
+        const idx = JOB_POST_SORTS.indexOf(sort);
+        const next =
+          JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
+        setSort(next);
+      }
+      if (input === 'y') {
+        copyToClipboard(`jobfinder tui --tab ${tab} --sort ${sort}`);
+      }
+    },
+    // App-level keys go silent while the JobPost detail screen is open —
+    // that screen owns all input (scroll/close/copy/etc.).
+    { isActive: openJob == null }
+  );
+
+  if (openJob) {
+    return (
+      <JobPostDetailScreen row={openJob} onClose={() => setOpenJobId(null)} />
+    );
+  }
 
   return (
     <Box flexDirection='column'>
@@ -116,6 +133,7 @@ export function App({ initial }: { initial: AppOptions }) {
         stagesCount={stats?.length ?? 0}
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}
+        onOpenJob={id => setOpenJobId(id)}
       />
       <ActivityFeed rows={activity ?? []} />
       <Footer />

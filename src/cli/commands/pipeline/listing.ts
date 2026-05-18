@@ -3,7 +3,6 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
@@ -13,6 +12,7 @@ import {
   processOne,
   recordPipelineState,
 } from 'src/db/pipelineState.js';
+import { qualifiedForListing } from 'src/db/pipelineQualified.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -33,7 +33,7 @@ async function runListing(context: BrowserContext): Promise<void> {
   const sources = await db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
-    .where('JobSource.isActive', '=', Bool.True)
+    .where(qualifiedForListing)
     .where(
       eligibleForPipelineTask({
         task: 'listing',
