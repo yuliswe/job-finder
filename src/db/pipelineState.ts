@@ -1,7 +1,7 @@
 import type { ExpressionBuilder } from 'kysely';
 
 import type { DB } from '__generated__/db/types.js';
-import { db } from 'src/db/index.js';
+import { db, sqlite } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { terminal } from 'src/utils/terminal.js';
 
@@ -64,20 +64,33 @@ export const PIPELINE_STATE = {
   NO_RESULT_FOUND: 'no_result_found',
   SCRIPT_ERROR: 'script_error',
   ABORTED: 'aborted',
+  /** Written by the SIGINT/SIGTERM handler for entities still in `'started'`
+   * when the CLI is killed. Terminal: not eligible for re-pickup. */
+  USER_INTERRUPTED: 'user_interrupted',
 } as const;
 
-/** Latest states that count as "completed successfully" — the entity should
- * not be re-picked unless explicitly re-queued. */
+/** Latest states that mean "completed successfully with a result" — the
+ * downstream pipeline has something concrete to act on. */
 export const TERMINAL_SUCCESS_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.DONE,
+]);
+
+/** Latest states that mean "ran successfully but produced no result" — not an
+ * error, just nothing to do downstream (e.g. URL was not a job posting, source
+ * page had no listings). The entity is terminal: not re-picked. */
+export const TERMINAL_NO_RESULT_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.NOT_A_JOB_POSTING,
+  PIPELINE_STATE.NO_SOURCE_FOUND,
+  PIPELINE_STATE.NO_LISTING_FOUND,
+  PIPELINE_STATE.NO_RESULT_FOUND,
+  PIPELINE_STATE.USER_INTERRUPTED,
 ]);
 
 /** Latest states that mean "needs pickup" by the next pipeline run. Includes
  * `'started'` so a process that crashed mid-work is retried automatically. */
 export const ELIGIBLE_FOR_PICKUP_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.QUEUED,
-  PIPELINE_STATE.STARTED,
+  PIPELINE_STATE.USER_INTERRUPTED,
 ]);
 
 /**
@@ -142,13 +155,18 @@ export async function getLatestPipelineState(args: {
   return { state: row.state, createdAt: row.createdAt };
 }
 
-/** True iff the latest state for (task, entity) is a terminal-success value. */
+/** True iff the latest state for (task, entity) is terminal-completed
+ * (success OR no-result) — the entity is not eligible for re-pickup. */
 export async function isPipelineTaskDone(args: {
   task: PipelineTask;
   entity: PipelineEntity;
 }): Promise<boolean> {
   const row = await getLatestPipelineState(args);
-  return row != null && TERMINAL_SUCCESS_STATES.has(row.state);
+  if (row == null) return false;
+  return (
+    TERMINAL_SUCCESS_STATES.has(row.state) ||
+    TERMINAL_NO_RESULT_STATES.has(row.state)
+  );
 }
 
 /**
@@ -199,6 +217,10 @@ function entityIdOf(entity: PipelineEntity): string {
  * recording. Per-command files wrap their per-record helpers around this so
  * thrown errors uniformly mark the record failed.
  *
+ * On SIGINT/SIGTERM, any entity still inside `processOne` has a
+ * `'user_interrupted'` row written synchronously before the process exits,
+ * so the bar never gets stuck pulsing across runs.
+ *
  * Returns `work`'s result on success, or `undefined` on caught error.
  */
 export async function processOne<T>(args: {
@@ -208,6 +230,13 @@ export async function processOne<T>(args: {
   /** Short label (URL, name, id) included in the error log on failure. */
   label?: string;
 }): Promise<T | undefined> {
+  installInterruptHandlers();
+  const entry: InFlight = {
+    task: args.task,
+    fk: FK_BY_TASK[args.task],
+    entityId: entityIdOf(args.entity),
+  };
+  inFlight.add(entry);
   await recordPipelineState({
     task: args.task,
     state: PIPELINE_STATE.STARTED,
@@ -226,5 +255,57 @@ export async function processOne<T>(args: {
       entity: args.entity,
     });
     return undefined;
+  } finally {
+    inFlight.delete(entry);
   }
+}
+
+// In-flight tracker: every entity currently inside a processOne call. The
+// signal handlers iterate this set and write a `'user_interrupted'` row for
+// each before the process exits. Synchronous so we don't lose anything to
+// pending microtasks when Node tears down.
+
+type InFlight = {
+  task: PipelineTask;
+  fk: PipelineFk;
+  entityId: string;
+};
+
+const inFlight = new Set<InFlight>();
+
+let interruptHandlersInstalled = false;
+
+function installInterruptHandlers(): void {
+  if (interruptHandlersInstalled) return;
+  interruptHandlersInstalled = true;
+  // Use `process.once` so a second Ctrl+C kills immediately.
+  process.once('SIGINT', () => handleInterrupt(130));
+  process.once('SIGTERM', () => handleInterrupt(143));
+}
+
+function handleInterrupt(exitCode: number): void {
+  flushInFlightAsInterrupted();
+  process.exit(exitCode);
+}
+
+function flushInFlightAsInterrupted(): void {
+  if (inFlight.size === 0) return;
+  const stmt = sqlite.prepare(
+    `INSERT INTO PipelineState
+       (id, task, state, reason,
+        ofSourceSeedId, ofJobSourceId, ofJobListSourceId, ofJobPostId)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`
+  );
+  for (const e of inFlight) {
+    stmt.run(
+      newId(),
+      e.task,
+      PIPELINE_STATE.USER_INTERRUPTED,
+      e.fk === 'ofSourceSeedId' ? e.entityId : null,
+      e.fk === 'ofJobSourceId' ? e.entityId : null,
+      e.fk === 'ofJobListSourceId' ? e.entityId : null,
+      e.fk === 'ofJobPostId' ? e.entityId : null
+    );
+  }
+  inFlight.clear();
 }

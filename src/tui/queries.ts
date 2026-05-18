@@ -7,8 +7,10 @@ import {
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import {
+  PIPELINE_STATE,
   type PipelineTask,
   TASK_ORDER,
+  TERMINAL_NO_RESULT_STATES,
   TERMINAL_SUCCESS_STATES,
 } from 'src/db/pipelineState.js';
 import { bumpLocalRevision } from 'src/tui/useLiveData.js';
@@ -22,7 +24,20 @@ export type PipelineStageStats = {
     | 'run-scripts'
     | 'viewing'
     | 'evaluate';
+  /** Entities whose latest state is a terminal-success value with a result. */
   done: number;
+  /** Entities whose latest state is terminal-completed but produced no result
+   * (not_a_job_posting, no_*_found). */
+  noResult: number;
+  /** Entities whose latest state is a terminal failure (failed, aborted,
+   * script_error, etc.). */
+  failed: number;
+  /** Entities whose latest state is queued — waiting for pickup. */
+  queued: number;
+  /** Entities whose latest state is started — actively being processed (or
+   * left over from a crashed run, which the next pipeline call will retry). */
+  started: number;
+  /** done + noResult + failed + queued + started. */
   total: number;
   label: string;
 };
@@ -41,7 +56,7 @@ export type JobPostRow = {
   titleRelavency: number | null;
   interestScore: number | null;
   skillScore: number | null;
-  combinedScore: number | null;
+  overallScore: number | null;
   description: string | null;
   summary: string | null;
 };
@@ -74,12 +89,7 @@ export type ActivityRow = {
   entity: string;
 };
 
-export type JobPostSortKey =
-  | 'score'
-  | 'postedAt'
-  | 'company'
-  | 'title'
-  | 'salary';
+export type JobPostSortKey = 'overall' | 'interest' | 'skill';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
   // For each task X, group LatestPipelineState rows by `state` and count.
@@ -100,14 +110,30 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
     .groupBy('LatestPipelineState.state')
     .execute();
 
-  let total = 0;
   let done = 0;
+  let noResult = 0;
+  let failed = 0;
+  let queued = 0;
+  let started = 0;
   for (const r of rows) {
     const n = Number(r.n ?? 0);
-    total += n;
-    if (r.state != null && TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
+    if (r.state == null) continue;
+    if (TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
+    else if (TERMINAL_NO_RESULT_STATES.has(r.state)) noResult += n;
+    else if (r.state === PIPELINE_STATE.QUEUED) queued += n;
+    else if (r.state === PIPELINE_STATE.STARTED) started += n;
+    else failed += n;
   }
-  return { task, label: task, done, total };
+  return {
+    task,
+    label: task,
+    done,
+    noResult,
+    failed,
+    queued,
+    started,
+    total: done + noResult + failed + queued + started,
+  };
 }
 
 function stageStatsQuery(task: PipelineTask) {
@@ -187,38 +213,28 @@ export async function listJobPosts(args: {
     ]);
 
   switch (sort) {
-    case 'score':
-      q = q
-        .orderBy('JobPostEval.interestScore', ob => ob.desc().nullsLast())
-        .orderBy('JobPostEval.skillScore', ob => ob.desc().nullsLast())
-        .orderBy('JobPostEval.titleRelavency', ob => ob.desc().nullsLast());
+    case 'overall':
+      q = q.orderBy(
+        sql`"JobPostEval"."skillScore" * "JobPostEval"."interestScore"`,
+        ob => ob.desc().nullsLast()
+      );
       break;
-    case 'postedAt':
-      q = q.orderBy('JobPost.postedAt', ob => ob.desc().nullsLast());
+    case 'interest':
+      q = q.orderBy('JobPostEval.interestScore', ob => ob.desc().nullsLast());
       break;
-    case 'company':
-      q = q.orderBy('JobPost.company', ob => ob.asc().nullsLast());
-      break;
-    case 'title':
-      q = q.orderBy('JobPost.title', ob => ob.asc().nullsLast());
-      break;
-    case 'salary':
-      q = q.orderBy('JobPost.salaryMax', ob => ob.desc().nullsLast());
+    case 'skill':
+      q = q.orderBy('JobPostEval.skillScore', ob => ob.desc().nullsLast());
       break;
   }
 
   const rows = await q.limit(limit).execute();
   return rows.map(r => ({
     ...r,
-    combinedScore: combine(r.interestScore, r.skillScore),
+    overallScore:
+      r.skillScore != null && r.interestScore != null
+        ? r.skillScore * r.interestScore
+        : null,
   }));
-}
-
-function combine(interest: number | null, skill: number | null): number | null {
-  if (interest != null && skill != null) return interest * skill;
-  const parts = [interest, skill].filter((x): x is number => x != null);
-  if (parts.length === 0) return null;
-  return parts.reduce((a, b) => a + b, 0) / parts.length;
 }
 
 export async function listSources(): Promise<SourceRow[]> {
@@ -281,7 +297,10 @@ export async function listSources(): Promise<SourceRow[]> {
 }
 
 function isDoneState(state: string | null | undefined): boolean {
-  return state != null && TERMINAL_SUCCESS_STATES.has(state);
+  if (state == null) return false;
+  return (
+    TERMINAL_SUCCESS_STATES.has(state) || TERMINAL_NO_RESULT_STATES.has(state)
+  );
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
