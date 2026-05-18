@@ -133,52 +133,32 @@ type PipelineState = {
   ofSourceSeedId?: Text | ON_DELETE.CASCADE | SourceSeed['id'];
   // ── indexes ──
   _indexes: {
+    task_ofJobPostId_createdAt: [
+      PipelineState['task'],
+      PipelineState['ofJobPostId'],
+      PipelineState['createdAt'],
+    ];
+    task_ofJobListSourceId_createdAt: [
+      PipelineState['task'],
+      PipelineState['ofJobListSourceId'],
+      PipelineState['createdAt'],
+    ];
+    task_ofJobSourceId_createdAt: [
+      PipelineState['task'],
+      PipelineState['ofJobSourceId'],
+      PipelineState['createdAt'],
+    ];
+    task_ofSourceSeedId_createdAt: [
+      PipelineState['task'],
+      PipelineState['ofSourceSeedId'],
+      PipelineState['createdAt'],
+    ];
     ofJobPostId: [PipelineState['ofJobPostId']];
     ofJobListSourceId: [PipelineState['ofJobListSourceId']];
     ofJobSourceId: [PipelineState['ofJobSourceId']];
     ofSourceSeedId: [PipelineState['ofSourceSeedId']];
     state: [PipelineState['state']];
     task: [PipelineState['task']];
-  };
-};
-
-type PipelineTrigger = {
-  // ── base ──
-  id: Text | PK;
-  createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
-  updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
-  // ── fields ──
-  isProcessed: Bool | DEFAULT<0>;
-  task: Text;
-  // ── relations ──
-  ofJobListSourceId?: Text | ON_DELETE.CASCADE | JobListSource['id'];
-  ofJobPostId?: Text | ON_DELETE.CASCADE | JobPost['id'];
-  ofJobSourceId?: Text | ON_DELETE.CASCADE | JobSource['id'];
-  ofSourceSeedId?: Text | ON_DELETE.CASCADE | SourceSeed['id'];
-  // ── indexes ──
-  _indexes: {
-    task_ofJobPostId_uniq:
-      | [PipelineTrigger['task'], PipelineTrigger['ofJobPostId']]
-      | UNIQUE
-      | PARTIAL_IDX;
-    task_ofJobListSourceId_uniq:
-      | [PipelineTrigger['task'], PipelineTrigger['ofJobListSourceId']]
-      | UNIQUE
-      | PARTIAL_IDX;
-    task_ofJobSourceId_uniq:
-      | [PipelineTrigger['task'], PipelineTrigger['ofJobSourceId']]
-      | UNIQUE
-      | PARTIAL_IDX;
-    task_ofSourceSeedId_uniq:
-      | [PipelineTrigger['task'], PipelineTrigger['ofSourceSeedId']]
-      | UNIQUE
-      | PARTIAL_IDX;
-    ofJobPostId: [PipelineTrigger['ofJobPostId']];
-    ofJobListSourceId: [PipelineTrigger['ofJobListSourceId']];
-    ofJobSourceId: [PipelineTrigger['ofJobSourceId']];
-    ofSourceSeedId: [PipelineTrigger['ofSourceSeedId']];
-    isProcessed: [PipelineTrigger['isProcessed']];
-    task: [PipelineTrigger['task']];
   };
 };
 

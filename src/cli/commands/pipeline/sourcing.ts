@@ -3,14 +3,15 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
-  enqueueTrigger,
-  markTriggerProcessed,
-} from 'src/db/pipelineTrigger.js';
+  eligibleForPipelineTask,
+  enqueuePipelineTask,
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -32,17 +33,11 @@ async function runSourcing(context: BrowserContext): Promise<void> {
   const names = await db
     .selectFrom('SourceSeed')
     .select('name')
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('PipelineTrigger')
-            .select('PipelineTrigger.id')
-            .whereRef('PipelineTrigger.ofSourceSeedId', '=', 'SourceSeed.id')
-            .where('PipelineTrigger.task', '=', 'sourcing')
-            .where('PipelineTrigger.isProcessed', '=', Bool.True)
-        )
-      )
+    .where(
+      eligibleForPipelineTask({
+        task: 'sourcing',
+        parentIdRef: 'SourceSeed.id',
+      })
     )
     .distinct()
     .execute();
@@ -74,17 +69,11 @@ async function sourceOneGroup(args: {
     .selectFrom('SourceSeed')
     .select(['id', 'url'])
     .where('name', '=', name)
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('PipelineTrigger')
-            .select('PipelineTrigger.id')
-            .whereRef('PipelineTrigger.ofSourceSeedId', '=', 'SourceSeed.id')
-            .where('PipelineTrigger.task', '=', 'sourcing')
-            .where('PipelineTrigger.isProcessed', '=', Bool.True)
-        )
-      )
+    .where(
+      eligibleForPipelineTask({
+        task: 'sourcing',
+        parentIdRef: 'SourceSeed.id',
+      })
     )
     .orderBy('createdAt', 'desc')
     .limit(PER_NAME_RETRY_LIMIT)
@@ -102,15 +91,18 @@ async function sourceOneGroup(args: {
   }
 
   if (jobSourceInserted > 0) {
-    // Mark every row in this name group processed — one win covers the rest.
+    // Mark every row in this name group done — one win covers the rest.
+    // sourceOneSeedUrl already recorded 'done' for the winning seed.
     const groupSeeds = await db
       .selectFrom('SourceSeed')
       .select('id')
       .where('name', '=', name)
       .execute();
     for (const seed of groupSeeds) {
-      await markTriggerProcessed({
+      await recordPipelineState({
         task: 'sourcing',
+        state: PIPELINE_STATE.DONE,
+        reason: 'covered by sibling seed in name group',
         entity: { ofSourceSeedId: seed.id },
       });
     }
@@ -134,7 +126,7 @@ async function sourceOneSeedUrl(args: {
         terminal.warn(`discoverJobSource returned no result for ${seed.url}`);
         await recordPipelineState({
           task: 'sourcing',
-          state: 'no_source_found',
+          state: PIPELINE_STATE.NO_SOURCE_FOUND,
           entity: { ofSourceSeedId: seed.id },
         });
         return { jobSourceInserted: 0 };
@@ -154,21 +146,18 @@ async function sourceOneSeedUrl(args: {
 
       await recordPipelineState({
         task: 'sourcing',
-        state: 'done',
-        reason: wasInserted ? null : 'duplicate JobSource.url',
+        state: PIPELINE_STATE.DONE,
+        reason: wasInserted ? 'inserted' : 'updated',
         entity: { ofSourceSeedId: seed.id },
       });
+
       if (wasInserted) {
-        await recordPipelineState({
-          task: 'sourcing',
-          state: 'created',
-          entity: { ofJobSourceId: newSourceId },
-        });
-        await enqueueTrigger({
+        await enqueuePipelineTask({
           task: 'listing',
           entity: { ofJobSourceId: newSourceId },
         });
       }
+
       return { jobSourceInserted: wasInserted ? 1 : 0 };
     },
   });

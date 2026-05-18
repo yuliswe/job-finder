@@ -9,11 +9,13 @@ import {
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
-  enqueueTrigger,
-  markTriggerProcessed,
-} from 'src/db/pipelineTrigger.js';
+  eligibleForPipelineTask,
+  enqueuePipelineTask,
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import { viewJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -37,17 +39,11 @@ async function runAll(context: BrowserContext): Promise<void> {
     .selectFrom('JobPost')
     .innerJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
     .select(['JobPost.id as id', 'JobPost.url as url'])
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('PipelineTrigger')
-            .select('PipelineTrigger.id')
-            .whereRef('PipelineTrigger.ofJobPostId', '=', 'JobPost.id')
-            .where('PipelineTrigger.task', '=', 'viewing')
-            .where('PipelineTrigger.isProcessed', '=', Bool.True)
-        )
-      )
+    .where(
+      eligibleForPipelineTask({
+        task: 'viewing',
+        parentIdRef: 'JobPost.id',
+      })
     )
     .where(
       'JobPostEval.titleRelavency',
@@ -89,7 +85,7 @@ async function viewOneTarget(args: {
       if (!parsed) {
         await recordPipelineState({
           task: 'viewing',
-          state: 'failed',
+          state: PIPELINE_STATE.FAILED,
           reason: 'viewJobPost returned null (page load or LLM call failed)',
           entity: { ofJobPostId: target.id },
         });
@@ -101,12 +97,8 @@ async function viewOneTarget(args: {
         // so we stop re-attempting it on every pipeline run.
         await recordPipelineState({
           task: 'viewing',
-          state: 'not_a_job_posting',
+          state: PIPELINE_STATE.NOT_A_JOB_POSTING,
           reason: 'LLM reported the page is not a job posting',
-          entity: { ofJobPostId: target.id },
-        });
-        await markTriggerProcessed({
-          task: 'viewing',
           entity: { ofJobPostId: target.id },
         });
         return { jobPostUpdated: 0 };
@@ -142,14 +134,10 @@ async function viewOneTarget(args: {
 
       await recordPipelineState({
         task: 'viewing',
-        state: 'done',
+        state: PIPELINE_STATE.DONE,
         entity: { ofJobPostId: target.id },
       });
-      await markTriggerProcessed({
-        task: 'viewing',
-        entity: { ofJobPostId: target.id },
-      });
-      await enqueueTrigger({
+      await enqueuePipelineTask({
         task: 'evaluate',
         entity: { ofJobPostId: target.id },
       });

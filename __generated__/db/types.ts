@@ -67,6 +67,19 @@ export interface JobSource {
   url: string;
 }
 
+export interface LatestPipelineState {
+  createdAt: string | null;
+  id: string | null;
+  ofJobListSourceId: string | null;
+  ofJobPostId: string | null;
+  ofJobSourceId: string | null;
+  ofSourceSeedId: string | null;
+  reason: string | null;
+  state: string | null;
+  task: string | null;
+  updatedAt: string | null;
+}
+
 export interface PipelineState {
   createdAt: Generated<Timestamp>;
   id: string;
@@ -76,18 +89,6 @@ export interface PipelineState {
   ofSourceSeedId: string | null;
   reason: string | null;
   state: string;
-  task: string;
-  updatedAt: Generated<Timestamp>;
-}
-
-export interface PipelineTrigger {
-  createdAt: Generated<Timestamp>;
-  id: string;
-  isProcessed: Generated<Bool>;
-  ofJobListSourceId: string | null;
-  ofJobPostId: string | null;
-  ofJobSourceId: string | null;
-  ofSourceSeedId: string | null;
   task: string;
   updatedAt: Generated<Timestamp>;
 }
@@ -106,7 +107,7 @@ export interface DB {
   JobPost: JobPost;
   JobPostEval: JobPostEval;
   JobSource: JobSource;
+  LatestPipelineState: LatestPipelineState;
   PipelineState: PipelineState;
-  PipelineTrigger: PipelineTrigger;
   SourceSeed: SourceSeed;
 }

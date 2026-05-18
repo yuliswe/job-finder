@@ -4,14 +4,15 @@ import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { jobListSourceInActiveSource } from 'src/db/activeSource.js';
-import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
-  enqueueTrigger,
-  markTriggerProcessed,
-} from 'src/db/pipelineTrigger.js';
+  eligibleForPipelineTask,
+  enqueuePipelineTask,
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import {
   batchEvaluateJobTitlesRelevancy,
   type JobRelevanceScore,
@@ -50,21 +51,11 @@ async function runAll(
   const targets = await db
     .selectFrom('JobListSource')
     .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('PipelineTrigger')
-            .select('PipelineTrigger.id')
-            .whereRef(
-              'PipelineTrigger.ofJobListSourceId',
-              '=',
-              'JobListSource.id'
-            )
-            .where('PipelineTrigger.task', '=', 'run-scripts')
-            .where('PipelineTrigger.isProcessed', '=', Bool.True)
-        )
-      )
+    .where(
+      eligibleForPipelineTask({
+        task: 'run-scripts',
+        parentIdRef: 'JobListSource.id',
+      })
     )
     .where('parserScript', 'is not', null)
     .where(jobListSourceInActiveSource)
@@ -131,7 +122,7 @@ async function runScriptsForTarget(args: {
         terminal.error(`script_error for ${target.url}: ${result.error}`);
         await recordPipelineState({
           task: 'run-scripts',
-          state: 'script_error',
+          state: PIPELINE_STATE.SCRIPT_ERROR,
           reason: result.error,
           entity: { ofJobListSourceId: target.id },
         });
@@ -143,7 +134,7 @@ async function runScriptsForTarget(args: {
         );
         await recordPipelineState({
           task: 'run-scripts',
-          state: 'no_result_found',
+          state: PIPELINE_STATE.NO_RESULT_FOUND,
           reason: `picked locations=${JSON.stringify(result.picked.locations)} divisions=${JSON.stringify(result.picked.divisions)}`,
           entity: { ofJobListSourceId: target.id },
         });
@@ -170,15 +161,11 @@ async function runScriptsForTarget(args: {
 
       await recordPipelineState({
         task: 'run-scripts',
-        state: 'success',
+        state: PIPELINE_STATE.DONE,
         reason: `${jobPostInserted}/${result.jobs.length} new JobPost rows`,
         entity: { ofJobListSourceId: target.id },
       });
 
-      await markTriggerProcessed({
-        task: 'run-scripts',
-        entity: { ofJobListSourceId: target.id },
-      });
       return { jobPostInserted };
     },
   });
@@ -218,7 +205,7 @@ async function insertJobsWithScores(args: {
       let jobPostId: string;
       if (wasInserted) {
         jobPostId = newJobId;
-        await enqueueTrigger({
+        await enqueuePipelineTask({
           task: 'viewing',
           entity: { ofJobPostId: newJobId },
         });

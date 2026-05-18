@@ -3,14 +3,16 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
-import { Bool } from 'src/db/customTypes.js';
 import {
-  enqueueTrigger,
-  markTriggerProcessed,
-} from 'src/db/pipelineTrigger.js';
+  eligibleForPipelineTask,
+  enqueuePipelineTask,
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -32,17 +34,11 @@ async function runListing(context: BrowserContext): Promise<void> {
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
     .where('JobSource.isActive', '=', Bool.True)
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('PipelineTrigger')
-            .select('PipelineTrigger.id')
-            .whereRef('PipelineTrigger.ofJobSourceId', '=', 'JobSource.id')
-            .where('PipelineTrigger.task', '=', 'listing')
-            .where('PipelineTrigger.isProcessed', '=', Bool.True)
-        )
-      )
+    .where(
+      eligibleForPipelineTask({
+        task: 'listing',
+        parentIdRef: 'JobSource.id',
+      })
     )
     .execute();
 
@@ -79,7 +75,7 @@ async function listOneSource(args: {
         );
         await recordPipelineState({
           task: 'listing',
-          state: 'no_listing_found',
+          state: PIPELINE_STATE.NO_LISTING_FOUND,
           entity: { ofJobSourceId: source.id },
         });
         return { jobListSourceInserted: 0 };
@@ -96,29 +92,23 @@ async function listOneSource(args: {
         })
         .onConflict(oc => oc.column('url').doNothing())
         .executeTakeFirstOrThrow();
+
       const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
 
       await recordPipelineState({
         task: 'listing',
-        state: 'done',
-        reason: wasInserted ? null : 'duplicate JobListSource.url',
+        state: PIPELINE_STATE.DONE,
+        reason: wasInserted ? 'inserted' : 'updated',
         entity: { ofJobSourceId: source.id },
       });
-      await markTriggerProcessed({
-        task: 'listing',
-        entity: { ofJobSourceId: source.id },
-      });
+
       if (wasInserted) {
-        await recordPipelineState({
-          task: 'listing',
-          state: 'created',
-          entity: { ofJobListSourceId: newListId },
-        });
-        await enqueueTrigger({
+        await enqueuePipelineTask({
           task: 'scripting',
           entity: { ofJobListSourceId: newListId },
         });
       }
+
       return { jobListSourceInserted: wasInserted ? 1 : 0 };
     },
   });

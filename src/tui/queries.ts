@@ -6,7 +6,11 @@ import {
 } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
-import { TASK_ORDER, type TriggerTask } from 'src/db/pipelineTrigger.js';
+import {
+  type PipelineTask,
+  TASK_ORDER,
+  TERMINAL_SUCCESS_STATES,
+} from 'src/db/pipelineState.js';
 import { bumpLocalRevision } from 'src/tui/useLiveData.js';
 
 export type PipelineStageStats = {
@@ -78,35 +82,38 @@ export type JobPostSortKey =
   | 'salary';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
-  // For each task X:
-  //   total = count(PipelineTrigger WHERE task=X)
-  //   done  = count(PipelineTrigger WHERE task=X AND isProcessed=true)
-  // Child triggers are only enqueued when their parent succeeds, so `total`
-  // already reflects "work that's eligible for this stage".
-  return Promise.all(TASK_ORDER.map(triggerStats));
+  // For each task X, group LatestPipelineState rows by `state` and count.
+  // `total` is every entity that has any history for this task; `done` is the
+  // subset whose latest state is a terminal-success value. The base query
+  // filters to entities whose owning source tree is still active so toggling
+  // a Source/ListSource off shrinks the bar in the TUI to match what the
+  // pipeline will actually process.
+  return Promise.all(TASK_ORDER.map(stageStats));
 }
 
-async function triggerStats(task: TriggerTask): Promise<PipelineStageStats> {
-  // The base query for this task already filters to triggers whose owning
-  // source tree is still active — toggling a Source/ListSource off shrinks
-  // the bar in the TUI to match what the pipeline will actually process.
-  const base = () => triggerQueryForTask(task);
-  const [total, done] = await Promise.all([
-    base()
-      .select(db.fn.countAll<number>().as('n'))
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-    base()
-      .where('isProcessed', '=', Bool.True)
-      .select(db.fn.countAll<number>().as('n'))
-      .executeTakeFirst()
-      .then(r => Number(r?.n ?? 0)),
-  ]);
+async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
+  const rows = await stageStatsQuery(task)
+    .select([
+      'LatestPipelineState.state as state',
+      db.fn.countAll<number>().as('n'),
+    ])
+    .groupBy('LatestPipelineState.state')
+    .execute();
+
+  let total = 0;
+  let done = 0;
+  for (const r of rows) {
+    const n = Number(r.n ?? 0);
+    total += n;
+    if (r.state != null && TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
+  }
   return { task, label: task, done, total };
 }
 
-function triggerQueryForTask(task: TriggerTask) {
-  const q = db.selectFrom('PipelineTrigger').where('task', '=', task);
+function stageStatsQuery(task: PipelineTask) {
+  const q = db
+    .selectFrom('LatestPipelineState')
+    .where('LatestPipelineState.task', '=', task);
   switch (task) {
     case 'seeding':
     case 'sourcing':
@@ -118,7 +125,7 @@ function triggerQueryForTask(task: TriggerTask) {
           eb
             .selectFrom('JobSource')
             .select('JobSource.id')
-            .whereRef('JobSource.id', '=', 'PipelineTrigger.ofJobSourceId')
+            .whereRef('JobSource.id', '=', 'LatestPipelineState.ofJobSourceId')
             .where('JobSource.isActive', '=', Bool.True)
         )
       );
@@ -132,7 +139,7 @@ function triggerQueryForTask(task: TriggerTask) {
             .whereRef(
               'JobListSource.id',
               '=',
-              'PipelineTrigger.ofJobListSourceId'
+              'LatestPipelineState.ofJobListSourceId'
             )
             .where(jobListSourceInActiveSource)
         )
@@ -144,7 +151,7 @@ function triggerQueryForTask(task: TriggerTask) {
           eb
             .selectFrom('JobPost')
             .select('JobPost.id')
-            .whereRef('JobPost.id', '=', 'PipelineTrigger.ofJobPostId')
+            .whereRef('JobPost.id', '=', 'LatestPipelineState.ofJobPostId')
             .where(jobPostInActiveSource)
         )
       );
@@ -219,26 +226,26 @@ export async function listSources(): Promise<SourceRow[]> {
     .selectFrom('JobSource')
     .leftJoin('JobListSource', 'JobListSource.ofJobSourceId', 'JobSource.id')
     .leftJoin('JobPost', 'JobPost.ofJobListSourceId', 'JobListSource.id')
-    .leftJoin('PipelineTrigger as sourceTrigger', join =>
+    .leftJoin('LatestPipelineState as sourceState', join =>
       join
-        .onRef('sourceTrigger.ofJobSourceId', '=', 'JobSource.id')
-        .on('sourceTrigger.task', '=', 'listing')
+        .onRef('sourceState.ofJobSourceId', '=', 'JobSource.id')
+        .on('sourceState.task', '=', 'listing')
     )
-    .leftJoin('PipelineTrigger as listTrigger', join =>
+    .leftJoin('LatestPipelineState as listState', join =>
       join
-        .onRef('listTrigger.ofJobListSourceId', '=', 'JobListSource.id')
-        .on('listTrigger.task', '=', 'run-scripts')
+        .onRef('listState.ofJobListSourceId', '=', 'JobListSource.id')
+        .on('listState.task', '=', 'run-scripts')
     )
     .select([
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
       'JobSource.isActive as sourceIsActive',
-      'sourceTrigger.isProcessed as sourceIsProcessed',
+      'sourceState.state as sourceLatestState',
       'JobListSource.id as listId',
       'JobListSource.url as listUrl',
       'JobListSource.isActive as listIsActive',
-      'listTrigger.isProcessed as listIsProcessed',
+      'listState.state as listLatestState',
       'JobListSource.locations as listLocations',
       'JobListSource.divisions as listDivisions',
       'JobListSource.parserScript as listParserScript',
@@ -258,11 +265,12 @@ export async function listSources(): Promise<SourceRow[]> {
       sourceName: r.sourceName,
       sourceUrl: r.sourceUrl,
       sourceIsActive,
-      sourceIsProcessed: r.sourceIsProcessed ?? 0,
+      sourceIsProcessed: isDoneState(r.sourceLatestState) ? 1 : 0,
       listId: r.listId,
       listUrl: r.listUrl,
       listIsActive,
-      listIsProcessed: r.listIsProcessed,
+      listIsProcessed:
+        r.listId == null ? null : isDoneState(r.listLatestState) ? 1 : 0,
       listLocations: r.listLocations,
       listDivisions: r.listDivisions,
       hasScript: r.listParserScript ? 1 : 0,
@@ -270,6 +278,10 @@ export async function listSources(): Promise<SourceRow[]> {
       isActive: r.listId ? (listIsActive ?? 0) : sourceIsActive,
     };
   });
+}
+
+function isDoneState(state: string | null | undefined): boolean {
+  return state != null && TERMINAL_SUCCESS_STATES.has(state);
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {

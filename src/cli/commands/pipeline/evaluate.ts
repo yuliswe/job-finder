@@ -4,8 +4,11 @@ import pLimit from 'p-limit';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
-import { markTriggerProcessed } from 'src/db/pipelineTrigger.js';
+import {
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
@@ -110,11 +113,7 @@ async function evaluateOne(args: {
 
       await recordPipelineState({
         task: 'evaluate',
-        state: 'done',
-        entity: { ofJobPostId: target.id },
-      });
-      await markTriggerProcessed({
-        task: 'evaluate',
+        state: PIPELINE_STATE.DONE,
         entity: { ofJobPostId: target.id },
       });
       return { jobPostEvaluated: 1 };

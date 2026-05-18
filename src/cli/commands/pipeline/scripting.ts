@@ -5,11 +5,12 @@ import type { BrowserContext } from 'patchright';
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { jobListSourceInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
-import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
-  enqueueTrigger,
-  markTriggerProcessed,
-} from 'src/db/pipelineTrigger.js';
+  enqueuePipelineTask,
+  PIPELINE_STATE,
+  processOne,
+  recordPipelineState,
+} from 'src/db/pipelineState.js';
 import { generateParserScript } from 'src/llm/generateParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -69,7 +70,7 @@ async function scriptOneTarget(args: {
         );
         await recordPipelineState({
           task: 'scripting',
-          state: 'aborted',
+          state: PIPELINE_STATE.ABORTED,
           reason:
             'generateParserScript returned null (LLM aborted or exhausted attempts)',
           entity: { ofJobListSourceId: target.id },
@@ -89,17 +90,15 @@ async function scriptOneTarget(args: {
 
       await recordPipelineState({
         task: 'scripting',
-        state: 'done',
+        state: PIPELINE_STATE.DONE,
         entity: { ofJobListSourceId: target.id },
       });
-      await markTriggerProcessed({
-        task: 'scripting',
-        entity: { ofJobListSourceId: target.id },
-      });
-      await enqueueTrigger({
+
+      await enqueuePipelineTask({
         task: 'run-scripts',
         entity: { ofJobListSourceId: target.id },
       });
+
       return { jobListSourceUpdated: 1 };
     },
   });
