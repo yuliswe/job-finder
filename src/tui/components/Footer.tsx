@@ -6,6 +6,7 @@ const HINTS: { keys: string; label: string }[] = [
   { keys: '←→/Tab', label: 'tab' },
   { keys: 'p', label: 'pipeline focus' },
   { keys: 's', label: 'sort (JobPost)' },
+  { keys: 'a', label: 'toggle active (Source)' },
   { keys: 'y', label: 'copy state cmd' },
   { keys: 'q/Esc', label: 'quit' },
 ];

@@ -3,6 +3,7 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import { jobListSourceInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
 import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
@@ -30,6 +31,7 @@ async function runScripting(context: BrowserContext): Promise<void> {
     .selectFrom('JobListSource')
     .select(['id', 'url'])
     .where('parserScript', 'is', null)
+    .where(jobListSourceInActiveSource)
     .execute();
 
   const results = await Promise.all(

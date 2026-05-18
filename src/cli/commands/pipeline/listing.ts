@@ -31,6 +31,7 @@ async function runListing(context: BrowserContext): Promise<void> {
   const sources = await db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
+    .where('JobSource.isActive', '=', Bool.True)
     .where(eb =>
       eb.not(
         eb.exists(

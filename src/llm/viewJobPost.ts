@@ -12,6 +12,7 @@ import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { terminal } from 'src/utils/terminal';
 
 export type ViewedJobPost = {
+  isJobPosting: boolean;
   title: string | null;
   company: string | null;
   description: string | null;
@@ -69,6 +70,12 @@ ${html}
 
 Extract the fields. Return null for anything the page does not actually state.`,
         schema: v.object({
+          isJobPosting: v.pipe(
+            v.boolean(),
+            v.description(
+              'true if this page is actually a single job posting whose content you can extract. false ONLY when the page is something else (error page, expired/removed listing, login wall, a listings/index page, completely empty content, etc.). When false, return null for every other field — we will record this URL as un-viewable and stop retrying it.'
+            )
+          ),
           title: v.pipe(
             v.nullable(v.string()),
             v.description(
@@ -140,10 +147,22 @@ Extract the fields. Return null for anything the page does not actually state.`,
             )
           ),
         }),
-        maxAttempts: 1,
+        maxAttempts: 3,
         model: LLM_VIEWING_MODEL,
         logger: terminal,
-        validate: parsed => ({ valid: true, result: parsed }),
+        validate: parsed => {
+          // The LLM is telling us this URL isn't a job posting — accept and
+          // stop retrying. The caller marks the trigger processed.
+          if (!parsed.isJobPosting) return { valid: true, result: parsed };
+          if (!parsed.description?.trim()) {
+            return {
+              valid: false,
+              feedback:
+                'You returned null/empty for `description` but `isJobPosting` is true. Either: (a) re-extract the description (look harder — responsibilities, requirements, about-the-role, what-you-will-do sections), or (b) if the page genuinely is not a job posting, set `isJobPosting` to false and null every other field.',
+            };
+          }
+          return { valid: true, result: parsed };
+        },
       });
       return result;
     } catch (err) {

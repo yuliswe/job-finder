@@ -5,9 +5,12 @@ You will receive:
 - The page title.
 - The cleaned page HTML (scripts, styles, comments, inline event handlers, base64 images already stripped).
 
-Extract what is actually present on the page. Do NOT guess. Every field is nullable — return null whenever the page doesn't state the value (or you aren't confident).
+Extract what is actually present on the page. Do NOT guess. Every field except \`isJobPosting\` is nullable — return null whenever the page doesn't state the value (or you aren't confident).
+
+Before extracting, decide whether the URL is actually a job posting. If the page is an error/404, an expired or removed listing, a login wall, a listings/index page, blank, or otherwise not a single hiring posting, set \`isJobPosting\` to false and return null for every other field — the pipeline will record the URL as un-viewable and stop retrying it. Only set \`isJobPosting\` to true when you can extract a real \`description\`.
 
 Field-specific guidance:
+- isJobPosting: see above. true for real single job postings; false for non-postings.
 - title: the posting's headline title, trimmed. Use the most prominent heading on the page.
 - company: hiring company name, trimmed. Strip suffixes like "Careers" or "is hiring".
 - location: primary work location string as the page states it (e.g. "Toronto, ON", "San Francisco · Remote OK", "Remote — North America"). If the page lists multiple locations equally, join with "; " (e.g. "Toronto; Vancouver; Remote").

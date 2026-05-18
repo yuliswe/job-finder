@@ -10,6 +10,14 @@ function readDataVersion(): number {
   return typeof row === 'number' ? row : Number(row);
 }
 
+// SQLite's data_version only bumps for writes from *other* connections; writes
+// the TUI itself makes (e.g. toggling Source.isActive) won't trip it. Callers
+// invoke bumpLocalRevision() after such writes to force a refetch.
+let localRevision = 0;
+export function bumpLocalRevision(): void {
+  localRevision += 1;
+}
+
 /**
  * Run `fetch` on mount and again every time `PRAGMA data_version` changes
  * (i.e. some other connection wrote to the DB). Returns the latest data, or
@@ -30,6 +38,7 @@ export function useLiveData<T>(fetch: () => Promise<T>): T | null {
     let inFlight = false;
     let queued = false;
     let lastVersion = -1;
+    let lastLocalRevision = localRevision;
 
     const run = async () => {
       if (cancelled) return;
@@ -58,8 +67,10 @@ export function useLiveData<T>(fetch: () => Promise<T>): T | null {
     const interval = setInterval(() => {
       if (cancelled) return;
       const v = readDataVersion();
-      if (v !== lastVersion) {
+      const rev = localRevision;
+      if (v !== lastVersion || rev !== lastLocalRevision) {
         lastVersion = v;
+        lastLocalRevision = rev;
         void run();
       }
     }, POLL_MS);
@@ -68,7 +79,9 @@ export function useLiveData<T>(fetch: () => Promise<T>): T | null {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+    // `fetch` is intentionally a dep: callers wrap it in useCallback keyed on
+    // their query inputs (e.g. sort), so a new closure means we must re-run.
+  }, [fetch]);
 
   return data;
 }

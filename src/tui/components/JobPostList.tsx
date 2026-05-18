@@ -1,14 +1,14 @@
-import { fmtScore } from 'src/tui/utils/format.js';
 import { Table, type Column } from 'src/tui/components/Table.js';
 import type { JobPostRow } from 'src/tui/queries.js';
+import { fmtScore } from 'src/tui/utils/format.js';
 
 const COLS: Column<JobPostRow>[] = [
   { label: 'overall', value: r => fmtScore(r.combinedScore), min: 1 },
   { label: 'interest', value: r => fmtScore(r.interestScore), min: 1 },
   { label: 'skill', value: r => fmtScore(r.skillScore), min: 1 },
-  { label: 'company', value: r => r.company ?? '—', min: 8, max: 22 },
+  { label: 'company', value: r => r.company ?? '—', min: 7, max: 22 },
   { label: 'title', value: r => r.title, min: 20, priority: 3 },
-  { label: 'location', value: r => r.location ?? '—', min: 10 },
+  { label: 'location', value: r => r.location ?? '—', min: 10, max: 20 },
 ];
 
 export function JobPostList(props: {

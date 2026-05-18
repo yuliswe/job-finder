@@ -3,6 +3,7 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import { jobListSourceInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
@@ -66,6 +67,7 @@ async function runAll(
       )
     )
     .where('parserScript', 'is not', null)
+    .where(jobListSourceInActiveSource)
     .execute();
 
   if (targets.length === 0) {

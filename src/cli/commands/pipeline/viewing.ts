@@ -6,6 +6,7 @@ import {
   MAX_CONCURRENT_BROWSER_TABS,
   PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
 } from 'jobfinder.config.js';
+import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
@@ -53,6 +54,7 @@ async function runAll(context: BrowserContext): Promise<void> {
       '>=',
       PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
     )
+    .where(jobPostInActiveSource)
     .execute();
 
   if (targets.length === 0) {
@@ -89,6 +91,22 @@ async function viewOneTarget(args: {
           task: 'viewing',
           state: 'failed',
           reason: 'viewJobPost returned null (page load or LLM call failed)',
+          entity: { ofJobPostId: target.id },
+        });
+        return { jobPostUpdated: 0 };
+      }
+      if (!parsed.isJobPosting) {
+        // LLM determined the URL is not a job posting (expired, login wall,
+        // error page, listings page, etc.). Treat this as a terminal verdict
+        // so we stop re-attempting it on every pipeline run.
+        await recordPipelineState({
+          task: 'viewing',
+          state: 'not_a_job_posting',
+          reason: 'LLM reported the page is not a job posting',
+          entity: { ofJobPostId: target.id },
+        });
+        await markTriggerProcessed({
+          task: 'viewing',
           entity: { ofJobPostId: target.id },
         });
         return { jobPostUpdated: 0 };

@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import pLimit from 'p-limit';
 
+import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
@@ -40,6 +41,7 @@ async function runEvaluate(): Promise<void> {
     .selectFrom('JobPost')
     .select(['id', 'title', 'description'])
     .where('description', 'is not', null)
+    .where(jobPostInActiveSource)
     .execute();
 
   if (targets.length === 0) {

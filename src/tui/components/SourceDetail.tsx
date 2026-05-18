@@ -13,6 +13,7 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
       <Text dimColor wrap='truncate-end'>
         {row.sourceUrl}
       </Text>
+      <Text>active: {row.sourceIsActive ? 'yes' : 'no'}</Text>
       <Text>processed: {row.sourceIsProcessed ? 'yes' : 'no'}</Text>
       <Box marginTop={1} flexDirection='column'>
         {row.listId ? (
@@ -22,6 +23,7 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
               {row.listUrl ?? ''}
             </Text>
             <Text>script: {row.hasScript ? 'present' : 'missing'}</Text>
+            <Text>active: {row.listIsActive ? 'yes' : 'no'}</Text>
             <Text>processed: {row.listIsProcessed ? 'yes' : 'no'}</Text>
             <Text>JobPost rows: {row.jobPostCount}</Text>
             {row.listLocations && (

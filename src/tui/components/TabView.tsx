@@ -7,7 +7,11 @@ import { SourceDetail } from 'src/tui/components/SourceDetail.js';
 import { SourceList } from 'src/tui/components/SourceList.js';
 import type { AppTab } from 'src/tui/utils/types.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
-import type { JobPostRow, SourceRow } from 'src/tui/queries.js';
+import {
+  toggleSourceActive,
+  type JobPostRow,
+  type SourceRow,
+} from 'src/tui/queries.js';
 
 export function TabView({
   tab,
@@ -57,9 +61,13 @@ export function TabView({
   }, [cursor, rowCount]);
 
   useInput(
-    (_input, key) => {
+    (input, key) => {
       if (key.upArrow) setCursor(c => Math.max(0, c - 1));
       if (key.downArrow) setCursor(c => Math.min(rowCount - 1, c + 1));
+      if (input === 'a' && tab === 'sources') {
+        const row = sources?.[cursor];
+        if (row) void toggleSourceActive(row);
+      }
     },
     { isActive: active }
   );
