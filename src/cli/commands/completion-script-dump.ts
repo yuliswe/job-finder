@@ -173,7 +173,7 @@ export function createCompletionScriptDumpCommand(program: Command): Command {
       );
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, content, 'utf-8');
-      process.stdout.write(content);
+      terminal.log(content, s => s);
       terminal.log(`# wrote ${outputPath}`);
     });
 }

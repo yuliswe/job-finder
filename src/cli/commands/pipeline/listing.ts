@@ -5,7 +5,7 @@ import type { BrowserContext } from 'patchright';
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { recordPipelineState } from 'src/db/pipelineState.js';
+import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import { Bool } from 'src/db/customTypes.js';
 import {
   enqueueTrigger,
@@ -45,86 +45,80 @@ async function runListing(context: BrowserContext): Promise<void> {
     )
     .execute();
 
-  let inserted = 0;
-  await Promise.all(
-    sources.map(source =>
-      tabLimit(async () => {
-        await processSource(context, source);
-        inserted++;
-      })
-    )
+  const results = await Promise.all(
+    sources.map(source => tabLimit(() => listOneSource({ context, source })))
+  );
+  const jobListSourceInserted = results.reduce(
+    (sum, r) => sum + (r?.jobListSourceInserted ?? 0),
+    0
   );
 
-  terminal.log(`Inserted ${inserted} rows into JobListSource\n`);
+  terminal.log(`Inserted ${jobListSourceInserted} rows into JobListSource\n`);
 }
 
-async function processSource(
-  context: BrowserContext,
-  source: { id: string; name: string; url: string }
-): Promise<void> {
-  terminal.log(`Processing JobSource "${source.name}" (${source.url})`);
-  const startUrl = /^https?:\/\//i.test(source.url)
-    ? source.url
-    : `https://${source.url}`;
-
-  let listingUrl: string | null;
-  let failure: string | null = null;
-  try {
-    listingUrl = await findJobListPage({ context, startUrl });
-  } catch (err) {
-    terminal.error(`findJobListPage failed for ${source.name}: ${String(err)}`);
-    listingUrl = null;
-    failure = String(err).slice(0, 500);
-  }
-
-  await markTriggerProcessed({
+async function listOneSource(args: {
+  context: BrowserContext;
+  source: { id: string; name: string; url: string };
+}): Promise<{ jobListSourceInserted: number } | undefined> {
+  const { context, source } = args;
+  return processOne({
     task: 'listing',
     entity: { ofJobSourceId: source.id },
+    label: source.name,
+    work: async (): Promise<{ jobListSourceInserted: number }> => {
+      terminal.log(`Processing JobSource "${source.name}" (${source.url})`);
+      const startUrl = /^https?:\/\//i.test(source.url)
+        ? source.url
+        : `https://${source.url}`;
+
+      const listingUrl = await findJobListPage({ context, startUrl });
+      if (!listingUrl) {
+        terminal.warn(
+          `No job-listing page found within depth limit for "${source.name}"`
+        );
+        await recordPipelineState({
+          task: 'listing',
+          state: 'no_listing_found',
+          entity: { ofJobSourceId: source.id },
+        });
+        return { jobListSourceInserted: 0 };
+      }
+
+      const newListId = newId();
+      const result = await db
+        .insertInto('JobListSource')
+        .values({
+          id: newListId,
+          url: listingUrl,
+          parserScript: null,
+          ofJobSourceId: source.id,
+        })
+        .onConflict(oc => oc.column('url').doNothing())
+        .executeTakeFirstOrThrow();
+      const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
+
+      await recordPipelineState({
+        task: 'listing',
+        state: 'done',
+        reason: wasInserted ? null : 'duplicate JobListSource.url',
+        entity: { ofJobSourceId: source.id },
+      });
+      await markTriggerProcessed({
+        task: 'listing',
+        entity: { ofJobSourceId: source.id },
+      });
+      if (wasInserted) {
+        await recordPipelineState({
+          task: 'listing',
+          state: 'created',
+          entity: { ofJobListSourceId: newListId },
+        });
+        await enqueueTrigger({
+          task: 'scripting',
+          entity: { ofJobListSourceId: newListId },
+        });
+      }
+      return { jobListSourceInserted: wasInserted ? 1 : 0 };
+    },
   });
-
-  if (!listingUrl) {
-    terminal.warn(
-      `No job-listing page found within depth limit for "${source.name}"`
-    );
-    await recordPipelineState({
-      task: 'listing',
-      state: failure ? 'failed' : 'no_listing_found',
-      reason: failure,
-      entity: { ofJobSourceId: source.id },
-    });
-    return;
-  }
-
-  const newListId = newId();
-  const result = await db
-    .insertInto('JobListSource')
-    .values({
-      id: newListId,
-      url: listingUrl,
-      parserScript: null,
-      ofJobSourceId: source.id,
-    })
-    .onConflict(oc => oc.column('url').doNothing())
-    .executeTakeFirstOrThrow();
-  const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
-
-  await recordPipelineState({
-    task: 'listing',
-    state: 'done',
-    reason: wasInserted ? null : 'duplicate JobListSource.url',
-    entity: { ofJobSourceId: source.id },
-  });
-  if (wasInserted) {
-    await recordPipelineState({
-      task: 'listing',
-      state: 'created',
-      entity: { ofJobListSourceId: newListId },
-    });
-    await enqueueTrigger({
-      task: 'scripting',
-      entity: { ofJobListSourceId: newListId },
-    });
-  }
-
-  return;
 }

@@ -5,21 +5,19 @@ import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { BATCH_EVALUATE_JOB_TITLES_RELEVANCY_SYSTEM_PROMPT } from 'src/prompts/batchEvaluateJobTitlesRelevancy.js';
 import { terminal } from 'src/utils/terminal';
 
-const MAX_ATTEMPTS = 3;
+const MAX_ATTEMPTS = 5;
 
 /** Send candidates to the LLM in chunks so a single huge batch can't blow the context window. */
 const BATCH_SIZE = 50;
 
 export type JobRelevanceScore = {
-  titleRelavency: number;
+  titleRelavency: number | null;
   titleRelavencyReason: string;
 };
 
 /**
  * Score `candidates` against `interests` in batches. Returns one score per
- * input, in the same order. Entries the LLM forgets to score get a
- * conservative middle score (0.5) with an explanatory reason so the caller
- * never has to deal with holes.
+ * input, in the same order.
  */
 export async function batchEvaluateJobTitlesRelevancy(args: {
   interests: string;
@@ -29,11 +27,7 @@ export async function batchEvaluateJobTitlesRelevancy(args: {
 
   if (candidates.length === 0) return [];
   if (!interests.trim()) {
-    return candidates.map(() => ({
-      titleRelavency: 0.5,
-      titleRelavencyReason:
-        'No user interests configured; assigned neutral score.',
-    }));
+    throw new Error('Interests string is empty; cannot evaluate relevancy.');
   }
 
   const out: JobRelevanceScore[] = new Array(candidates.length);
@@ -42,11 +36,7 @@ export async function batchEvaluateJobTitlesRelevancy(args: {
     const batch = candidates.slice(start, start + BATCH_SIZE);
     const scores = await scoreBatch({ interests, batch });
     for (let i = 0; i < batch.length; i++) {
-      out[start + i] = scores[i] ?? {
-        titleRelavency: 0.5,
-        titleRelavencyReason:
-          'LLM omitted a score for this entry; defaulted to neutral.',
-      };
+      out[start + i] = scores[i]!;
     }
   }
 
@@ -126,12 +116,22 @@ Score each entry by TITLE relevance only. Return one score per index, in order.`
       // returned them out of order.
       const result: JobRelevanceScore[] = new Array(batch.length);
       for (const s of parsed.scores) {
-        if (s.index >= 0 && s.index < batch.length) {
-          result[s.index] = {
-            titleRelavency: s.titleRelavency,
-            titleRelavencyReason: s.titleRelavencyReason,
+        if (s.index < 0 || s.index >= batch.length) {
+          return {
+            valid: false,
+            feedback: `index ${s.index} is out of range [0, ${batch.length}). Return one score per input index.`,
           };
         }
+        if (result[s.index] !== undefined) {
+          return {
+            valid: false,
+            feedback: `index ${s.index} appeared more than once. Return exactly one score per input index.`,
+          };
+        }
+        result[s.index] = {
+          titleRelavency: s.titleRelavency,
+          titleRelavencyReason: s.titleRelavencyReason,
+        };
       }
       return { valid: true, result };
     },

@@ -10,6 +10,7 @@ import {
   type ScrapeJobsOptions,
   type Site,
 } from 'src/python-jobspy/index.js';
+import { terminal } from 'src/utils/terminal.js';
 
 const SITES: Site[] = [
   'linkedin',
@@ -107,7 +108,7 @@ export function createScrapeCommand(): Command {
         await writeFile(cliOpts.output, rendered);
         console.error(`wrote ${jobs.length} rows to ${cliOpts.output}`);
       } else {
-        process.stdout.write(rendered);
+        terminal.log(rendered, s => s);
       }
     });
 }

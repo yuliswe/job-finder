@@ -6,7 +6,7 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { recordPipelineState } from 'src/db/pipelineState.js';
+import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
   enqueueTrigger,
   markTriggerProcessed,
@@ -52,22 +52,22 @@ async function runSourcing(context: BrowserContext): Promise<void> {
     return;
   }
 
-  let inserted = 0;
-  await Promise.all(
-    names.map(({ name }) =>
-      tabLimit(async () => {
-        inserted += await processNameGroup(context, name);
-      })
-    )
+  const results = await Promise.all(
+    names.map(({ name }) => tabLimit(() => sourceOneGroup({ context, name })))
+  );
+  const jobSourceInserted = results.reduce(
+    (sum, r) => sum + r.jobSourceInserted,
+    0
   );
 
-  terminal.log(`Inserted ${inserted} rows into JobSource\n`);
+  terminal.log(`Inserted ${jobSourceInserted} rows into JobSource\n`);
 }
 
-async function processNameGroup(
-  context: BrowserContext,
-  name: string
-): Promise<number> {
+async function sourceOneGroup(args: {
+  context: BrowserContext;
+  name: string;
+}): Promise<{ jobSourceInserted: number }> {
+  const { context, name } = args;
   terminal.log(`Processing for "${name}"...`);
 
   const seeds = await db
@@ -90,68 +90,18 @@ async function processNameGroup(
     .limit(PER_NAME_RETRY_LIMIT)
     .execute();
 
-  let inserted = 0;
-  let groupSucceeded = false;
-  for (const { id: seedId, url } of seeds) {
-    try {
-      const source = await discoverJobSource({ context, url });
-      if (!source) {
-        terminal.warn(`discoverJobSource returned no result for ${url}`);
-        await recordPipelineState({
-          task: 'sourcing',
-          state: 'no_source_found',
-          entity: { ofSourceSeedId: seedId },
-        });
-        continue;
-      }
-
-      const newSourceId = newId();
-      const result = await db
-        .insertInto('JobSource')
-        .values({
-          id: newSourceId,
-          name: source.name,
-          url: source.url,
-        })
-        .onConflict(oc => oc.column('url').doNothing())
-        .executeTakeFirst();
-
-      const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
-      if (wasInserted) inserted++;
-
-      await recordPipelineState({
-        task: 'sourcing',
-        state: 'done',
-        reason: wasInserted ? null : 'duplicate JobSource.url',
-        entity: { ofSourceSeedId: seedId },
-      });
-      if (wasInserted) {
-        await recordPipelineState({
-          task: 'sourcing',
-          state: 'created',
-          entity: { ofJobSourceId: newSourceId },
-        });
-        await enqueueTrigger({
-          task: 'listing',
-          entity: { ofJobSourceId: newSourceId },
-        });
-      }
-
-      // if succeeds, we skip other URLs in this group
-      groupSucceeded = true;
+  // Try seeds in order; stop as soon as one yields a JobSource.
+  // sourceOneSeedUrl never throws — processOne catches and records.
+  let jobSourceInserted = 0;
+  for (const seed of seeds) {
+    const result = await sourceOneSeedUrl({ context, seed });
+    if (result && result.jobSourceInserted > 0) {
+      jobSourceInserted += result.jobSourceInserted;
       break;
-    } catch (err) {
-      terminal.error(`discoverJobSource failed for ${url}: ${String(err)}`);
-      await recordPipelineState({
-        task: 'sourcing',
-        state: 'failed',
-        reason: String(err).slice(0, 500),
-        entity: { ofSourceSeedId: seedId },
-      });
     }
   }
 
-  if (groupSucceeded) {
+  if (jobSourceInserted > 0) {
     // Mark every row in this name group processed — one win covers the rest.
     const groupSeeds = await db
       .selectFrom('SourceSeed')
@@ -166,5 +116,60 @@ async function processNameGroup(
     }
   }
 
-  return inserted;
+  return { jobSourceInserted };
+}
+
+async function sourceOneSeedUrl(args: {
+  context: BrowserContext;
+  seed: { id: string; url: string };
+}): Promise<{ jobSourceInserted: number } | undefined> {
+  const { context, seed } = args;
+  return processOne({
+    task: 'sourcing',
+    entity: { ofSourceSeedId: seed.id },
+    label: seed.url,
+    work: async (): Promise<{ jobSourceInserted: number }> => {
+      const source = await discoverJobSource({ context, url: seed.url });
+      if (!source) {
+        terminal.warn(`discoverJobSource returned no result for ${seed.url}`);
+        await recordPipelineState({
+          task: 'sourcing',
+          state: 'no_source_found',
+          entity: { ofSourceSeedId: seed.id },
+        });
+        return { jobSourceInserted: 0 };
+      }
+
+      const newSourceId = newId();
+      const insertResult = await db
+        .insertInto('JobSource')
+        .values({
+          id: newSourceId,
+          name: source.name,
+          url: source.url,
+        })
+        .onConflict(oc => oc.column('url').doNothing())
+        .executeTakeFirst();
+      const wasInserted = (insertResult.numInsertedOrUpdatedRows ?? 0n) > 0n;
+
+      await recordPipelineState({
+        task: 'sourcing',
+        state: 'done',
+        reason: wasInserted ? null : 'duplicate JobSource.url',
+        entity: { ofSourceSeedId: seed.id },
+      });
+      if (wasInserted) {
+        await recordPipelineState({
+          task: 'sourcing',
+          state: 'created',
+          entity: { ofJobSourceId: newSourceId },
+        });
+        await enqueueTrigger({
+          task: 'listing',
+          entity: { ofJobSourceId: newSourceId },
+        });
+      }
+      return { jobSourceInserted: wasInserted ? 1 : 0 };
+    },
+  });
 }

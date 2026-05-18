@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 
 import type { JobType, Site } from 'src/python-jobspy/index.js';
+import { terminal } from 'src/utils/terminal.js';
 
 const SITES: Site[] = [
   'linkedin',
@@ -38,6 +39,6 @@ export function createSitesCommand(): Command {
         ...JOB_TYPES.map(j => `  ${j}`),
         '',
       ];
-      process.stdout.write(lines.join('\n'));
+      terminal.log(lines.join('\n'), s => s);
     });
 }

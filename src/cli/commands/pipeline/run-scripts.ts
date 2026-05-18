@@ -6,7 +6,7 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
-import { recordPipelineState } from 'src/db/pipelineState.js';
+import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
   enqueueTrigger,
   markTriggerProcessed,
@@ -82,104 +82,104 @@ async function runAll(
     );
   }
 
-  let totalInserted = 0;
-  await Promise.all(
+  const results = await Promise.all(
     targets.map(target =>
-      tabLimit(async () => {
-        totalInserted += await processTarget(context, target, args, interests);
-      })
+      tabLimit(() => runScriptsForTarget({ context, target, args, interests }))
     )
   );
+  const jobPostInserted = results.reduce(
+    (sum, r) => sum + (r?.jobPostInserted ?? 0),
+    0
+  );
 
-  terminal.log(`Inserted ${totalInserted} rows into JobPost\n`);
+  terminal.log(`Inserted ${jobPostInserted} rows into JobPost\n`);
 }
 
-async function processTarget(
-  context: BrowserContext,
+async function runScriptsForTarget(args: {
+  context: BrowserContext;
   target: {
     id: string;
     url: string;
     parserScript: string | null;
     ofJobSourceId: string;
-  },
-  args: { division: string; location: string },
-  interests: string
-): Promise<number> {
-  if (!target.parserScript) return 0; // filtered above but TS narrowing
+  };
+  args: { division: string; location: string };
+  interests: string;
+}): Promise<{ jobPostInserted: number } | undefined> {
+  const { context, target, args: opts, interests } = args;
+  const { parserScript } = target;
+  if (!parserScript) return; // filtered above but TS narrowing
 
-  terminal.log(`Running parserScript for ${target.url}`);
-
-  const result = await runParserScript({
-    context,
-    listingUrl: target.url,
-    script: target.parserScript,
-    userLocation: args.location,
-    userDivision: args.division,
-  });
-
-  if (!result.ok && result.reason === 'script_error') {
-    terminal.error(`script_error for ${target.url}: ${result.error}`);
-    await recordPipelineState({
-      task: 'run-scripts',
-      state: 'script_error',
-      reason: result.error,
-      entity: { ofJobListSourceId: target.id },
-    });
-    return 0;
-  }
-
-  if (!result.ok && result.reason === 'no_result_found') {
-    terminal.warn(
-      `no_result_found for ${target.url} (picked ${JSON.stringify(result.picked)})`
-    );
-    await recordPipelineState({
-      task: 'run-scripts',
-      state: 'no_result_found',
-      reason: `picked locations=${JSON.stringify(result.picked.locations)} divisions=${JSON.stringify(result.picked.divisions)}`,
-      entity: { ofJobListSourceId: target.id },
-    });
-    return 0;
-  }
-
-  if (!result.ok) return 0; // exhaustive but TS narrowing
-
-  // Score TITLE relevance in a single batched LLM call before insertion.
-  let scores: JobRelevanceScore[];
-  try {
-    scores = await batchEvaluateJobTitlesRelevancy({
-      interests,
-      candidates: result.jobs,
-    });
-  } catch (err) {
-    terminal.error(
-      `batchEvaluateJobTitlesRelevancy failed for ${target.url}: ${String(err)}`
-    );
-    // Fall back to neutral scores so insertion still proceeds.
-    scores = result.jobs.map(() => ({
-      titleRelavency: 0.5,
-      titleRelavencyReason: `batchEvaluateJobTitlesRelevancy failed: ${String(err).slice(0, 200)}`,
-    }));
-  }
-
-  const inserted = await insertJobsWithScores({
-    jobs: result.jobs,
-    scores,
-    ofJobSourceId: target.ofJobSourceId,
-    ofJobListSourceId: target.id,
-  });
-
-  await recordPipelineState({
-    task: 'run-scripts',
-    state: 'success',
-    reason: `${inserted}/${result.jobs.length} new JobPost rows`,
-    entity: { ofJobListSourceId: target.id },
-  });
-  await markTriggerProcessed({
+  return processOne({
     task: 'run-scripts',
     entity: { ofJobListSourceId: target.id },
-  });
+    label: target.url,
+    work: async (): Promise<{ jobPostInserted: number }> => {
+      terminal.log(`Running parserScript for ${target.url}`);
 
-  return inserted;
+      const result = await runParserScript({
+        context,
+        listingUrl: target.url,
+        script: parserScript,
+        userLocation: opts.location,
+        userDivision: opts.division,
+      });
+
+      if (!result.ok && result.reason === 'script_error') {
+        terminal.error(`script_error for ${target.url}: ${result.error}`);
+        await recordPipelineState({
+          task: 'run-scripts',
+          state: 'script_error',
+          reason: result.error,
+          entity: { ofJobListSourceId: target.id },
+        });
+        return { jobPostInserted: 0 };
+      }
+      if (!result.ok && result.reason === 'no_result_found') {
+        terminal.warn(
+          `no_result_found for ${target.url} (picked ${JSON.stringify(result.picked)})`
+        );
+        await recordPipelineState({
+          task: 'run-scripts',
+          state: 'no_result_found',
+          reason: `picked locations=${JSON.stringify(result.picked.locations)} divisions=${JSON.stringify(result.picked.divisions)}`,
+          entity: { ofJobListSourceId: target.id },
+        });
+        return { jobPostInserted: 0 };
+      }
+
+      if (!result.ok) {
+        throw new Error(
+          `Unexpected result from runParserScript: ${JSON.stringify(result)}`
+        );
+      }
+
+      const scores = await batchEvaluateJobTitlesRelevancy({
+        interests,
+        candidates: result.jobs,
+      });
+
+      const { jobPostInserted } = await insertJobsWithScores({
+        jobs: result.jobs,
+        scores,
+        ofJobSourceId: target.ofJobSourceId,
+        ofJobListSourceId: target.id,
+      });
+
+      await recordPipelineState({
+        task: 'run-scripts',
+        state: 'success',
+        reason: `${jobPostInserted}/${result.jobs.length} new JobPost rows`,
+        entity: { ofJobListSourceId: target.id },
+      });
+
+      await markTriggerProcessed({
+        task: 'run-scripts',
+        entity: { ofJobListSourceId: target.id },
+      });
+      return { jobPostInserted };
+    },
+  });
 }
 
 async function insertJobsWithScores(args: {
@@ -187,9 +187,10 @@ async function insertJobsWithScores(args: {
   scores: JobRelevanceScore[];
   ofJobSourceId: string;
   ofJobListSourceId: string;
-}): Promise<number> {
+}) {
   const { jobs, scores, ofJobSourceId, ofJobListSourceId } = args;
-  let inserted = 0;
+  const counter = { jobPostInserted: 0 };
+
   for (let i = 0; i < jobs.length; i++) {
     const j = jobs[i]!;
     const score = scores[i]!;
@@ -208,7 +209,7 @@ async function insertJobsWithScores(args: {
         .executeTakeFirst();
 
       const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
-      if (wasInserted) inserted++;
+      if (wasInserted) counter.jobPostInserted++;
 
       // Resolve the JobPost.id we should hang the eval off of. For brand-new
       // rows it's `newJobId`; for duplicate URLs we look up the existing one.
@@ -237,10 +238,18 @@ async function insertJobsWithScores(args: {
           titleRelavencyReason: score.titleRelavencyReason,
           ofJobPostId: jobPostId,
         })
+        .onConflict(oc =>
+          oc.column('ofJobPostId').doUpdateSet({
+            titleRelavency: score.titleRelavency,
+            titleRelavencyReason: score.titleRelavencyReason,
+            updatedAt: new Date().toISOString(),
+          })
+        )
         .execute();
     } catch (err) {
       terminal.warn(`JobPost insert failed for ${j.url}: ${String(err)}`);
     }
   }
-  return inserted;
+
+  return counter;
 }

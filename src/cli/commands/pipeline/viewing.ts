@@ -8,12 +8,12 @@ import {
 } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
-import { recordPipelineState } from 'src/db/pipelineState.js';
+import { processOne, recordPipelineState } from 'src/db/pipelineState.js';
 import {
   enqueueTrigger,
   markTriggerProcessed,
 } from 'src/db/pipelineTrigger.js';
-import { viewJobPost, type ViewedJobPost } from 'src/llm/viewJobPost.js';
+import { viewJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
 
@@ -60,89 +60,82 @@ async function runAll(context: BrowserContext): Promise<void> {
     return;
   }
 
-  let updated = 0;
-  await Promise.all(
-    targets.map(target =>
-      tabLimit(async () => {
-        if (await processTarget(context, target)) updated++;
-      })
-    )
+  const results = await Promise.all(
+    targets.map(target => tabLimit(() => viewOneTarget({ context, target })))
+  );
+  const jobPostUpdated = results.reduce(
+    (sum, r) => sum + (r?.jobPostUpdated ?? 0),
+    0
   );
 
-  terminal.log(`Viewed and updated ${updated} JobPost rows\n`);
+  terminal.log(`Viewed and updated ${jobPostUpdated} JobPost rows\n`);
 }
 
-async function processTarget(
-  context: BrowserContext,
-  target: { id: string; url: string }
-): Promise<boolean> {
-  terminal.log(`Viewing JobPost ${target.url}`);
-
-  let parsed: ViewedJobPost | null;
-  try {
-    parsed = await viewJobPost({ context, url: target.url });
-  } catch (err) {
-    terminal.error(`viewJobPost threw for ${target.url}: ${String(err)}`);
-    await recordPipelineState({
-      task: 'viewing',
-      state: 'failed',
-      reason: String(err).slice(0, 500),
-      entity: { ofJobPostId: target.id },
-    });
-    return false;
-  }
-
-  if (!parsed) {
-    await recordPipelineState({
-      task: 'viewing',
-      state: 'failed',
-      reason: 'viewJobPost returned null (page load or LLM call failed)',
-      entity: { ofJobPostId: target.id },
-    });
-    return false;
-  }
-
-  const update: Record<string, unknown> = {
-    company: parsed.company,
-    description: parsed.description,
-    isRemote:
-      parsed.isRemote === null
-        ? null
-        : parsed.isRemote
-          ? Bool.True
-          : Bool.False,
-    jobType: parsed.jobType,
-    location: parsed.location,
-    postedAt: parsed.postedAt,
-    salaryCurrency: parsed.salaryCurrency,
-    salaryInterval: parsed.salaryInterval,
-    salaryMax: parsed.salaryMax,
-    salaryMin: parsed.salaryMin,
-    summary: parsed.summary,
-  };
-  // Only overwrite title if the LLM produced one — preserve the run-scripts
-  // title as a fallback otherwise.
-  if (parsed.title) update.title = parsed.title;
-
-  await db
-    .updateTable('JobPost')
-    .set(update)
-    .where('id', '=', target.id)
-    .execute();
-
-  await recordPipelineState({
-    task: 'viewing',
-    state: 'done',
-    entity: { ofJobPostId: target.id },
-  });
-  await markTriggerProcessed({
+async function viewOneTarget(args: {
+  context: BrowserContext;
+  target: { id: string; url: string };
+}): Promise<{ jobPostUpdated: number } | undefined> {
+  const { context, target } = args;
+  return processOne({
     task: 'viewing',
     entity: { ofJobPostId: target.id },
-  });
-  await enqueueTrigger({
-    task: 'evaluate',
-    entity: { ofJobPostId: target.id },
-  });
+    label: target.url,
+    work: async (): Promise<{ jobPostUpdated: number }> => {
+      terminal.log(`Viewing JobPost ${target.url}`);
 
-  return true;
+      const parsed = await viewJobPost({ context, url: target.url });
+      if (!parsed) {
+        await recordPipelineState({
+          task: 'viewing',
+          state: 'failed',
+          reason: 'viewJobPost returned null (page load or LLM call failed)',
+          entity: { ofJobPostId: target.id },
+        });
+        return { jobPostUpdated: 0 };
+      }
+
+      const update: Record<string, unknown> = {
+        company: parsed.company,
+        description: parsed.description,
+        isRemote:
+          parsed.isRemote === null
+            ? null
+            : parsed.isRemote
+              ? Bool.True
+              : Bool.False,
+        jobType: parsed.jobType,
+        location: parsed.location,
+        postedAt: parsed.postedAt,
+        salaryCurrency: parsed.salaryCurrency,
+        salaryInterval: parsed.salaryInterval,
+        salaryMax: parsed.salaryMax,
+        salaryMin: parsed.salaryMin,
+        summary: parsed.summary,
+      };
+      // Only overwrite title if the LLM produced one — preserve the
+      // run-scripts title as a fallback otherwise.
+      if (parsed.title) update.title = parsed.title;
+
+      await db
+        .updateTable('JobPost')
+        .set(update)
+        .where('id', '=', target.id)
+        .execute();
+
+      await recordPipelineState({
+        task: 'viewing',
+        state: 'done',
+        entity: { ofJobPostId: target.id },
+      });
+      await markTriggerProcessed({
+        task: 'viewing',
+        entity: { ofJobPostId: target.id },
+      });
+      await enqueueTrigger({
+        task: 'evaluate',
+        entity: { ofJobPostId: target.id },
+      });
+      return { jobPostUpdated: 1 };
+    },
+  });
 }

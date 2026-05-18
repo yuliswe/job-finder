@@ -1,5 +1,6 @@
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
+import { terminal } from 'src/utils/terminal.js';
 
 export type PipelineEntity =
   | { ofSourceSeedId: string }
@@ -41,4 +42,39 @@ export async function recordPipelineState(args: {
       ...args.entity,
     })
     .execute();
+}
+
+/**
+ * Run one record's worth of work, bracketed by `started`/`failed` state
+ * recording. Per-command files wrap their per-record helpers around this so
+ * thrown errors uniformly mark the record failed and skip the trigger.
+ *
+ * Returns `work`'s result on success, or `undefined` on caught error.
+ */
+export async function processOne<T>(args: {
+  task: PipelineTask;
+  entity: PipelineEntity;
+  work: () => Promise<T>;
+  /** Short label (URL, name, id) included in the error log on failure. */
+  label?: string;
+}): Promise<T | undefined> {
+  await recordPipelineState({
+    task: args.task,
+    state: 'started',
+    entity: args.entity,
+  });
+  try {
+    return await args.work();
+  } catch (err) {
+    terminal.error(
+      `${args.task} failed${args.label ? ` for ${args.label}` : ''}: ${String(err)}`
+    );
+    await recordPipelineState({
+      task: args.task,
+      state: 'failed',
+      reason: String(err).slice(0, 500),
+      entity: args.entity,
+    });
+    return undefined;
+  }
 }

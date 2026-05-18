@@ -130,7 +130,7 @@ export function createHelpMenuDumpCommand(program: Command): Command {
       );
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, rendered, 'utf-8');
-      process.stdout.write(rendered);
+      terminal.log(rendered, s => s);
       terminal.log(`# wrote ${outputPath}`);
     });
 }
