@@ -80,7 +80,8 @@ export function App({ initial }: { initial: AppOptions }) {
     }
     if (input === 's' && tab === 'jobs') {
       const idx = JOB_POST_SORTS.indexOf(sort);
-      const next = JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'score';
+      const next =
+        JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
       setSort(next);
     }
     if (input === 'y') {

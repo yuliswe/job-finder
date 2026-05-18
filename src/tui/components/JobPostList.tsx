@@ -3,7 +3,7 @@ import type { JobPostRow } from 'src/tui/queries.js';
 import { fmtScore } from 'src/tui/utils/format.js';
 
 const COLS: Column<JobPostRow>[] = [
-  { label: 'overall', value: r => fmtScore(r.combinedScore), min: 1 },
+  { label: 'overall', value: r => fmtScore(r.overallScore), min: 1 },
   { label: 'interest', value: r => fmtScore(r.interestScore), min: 1 },
   { label: 'skill', value: r => fmtScore(r.skillScore), min: 1 },
   { label: 'company', value: r => r.company ?? '—', min: 7, max: 22 },

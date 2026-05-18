@@ -13,11 +13,9 @@ export const TAB_LABELS: { key: AppTab; label: string }[] = [
 ];
 
 export const JOB_POST_SORTS: JobPostSortKey[] = [
-  'score',
-  'postedAt',
-  'company',
-  'title',
-  'salary',
+  'overall',
+  'interest',
+  'skill',
 ];
 
 /** Default # of PipelineState rows shown in the activity feed. */

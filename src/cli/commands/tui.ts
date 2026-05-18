@@ -5,11 +5,9 @@ import type { JobPostSortKey } from 'src/tui/queries.js';
 
 const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
-  'score',
-  'postedAt',
-  'company',
-  'title',
-  'salary',
+  'overall',
+  'interest',
+  'skill',
 ] as const satisfies readonly JobPostSortKey[];
 
 export function createTuiCommand(): Command {
@@ -25,7 +23,7 @@ export function createTuiCommand(): Command {
     .addOption(
       new Option('--sort <key>', 'sort key for the JobPost tab')
         .choices([...SORTS])
-        .default('score' satisfies JobPostSortKey)
+        .default('overall' satisfies JobPostSortKey)
     )
     .action(async (opts: { tab: AppTab; sort: JobPostSortKey }) => {
       // Lazy-load Ink so spinning up the CLI for unrelated commands stays fast.

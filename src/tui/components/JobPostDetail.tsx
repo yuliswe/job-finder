@@ -33,8 +33,13 @@ export function JobPostDetail({ row }: { row: JobPostRow | null }) {
           </Text>
         </Text>
         <Text>
-          scores: title={fmtScore(row.titleRelavency)} interest=
-          {fmtScore(row.interestScore)} skill={fmtScore(row.skillScore)}
+          skill: <Text bold>{fmtScore(row.skillScore)}</Text>
+        </Text>
+        <Text>
+          interest: <Text bold>{fmtScore(row.interestScore)}</Text>
+        </Text>
+        <Text>
+          overall: <Text bold>{fmtScore(row.overallScore)}</Text>
         </Text>
       </Box>
       {row.summary && (
