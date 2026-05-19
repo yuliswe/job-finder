@@ -119,10 +119,15 @@ export function qualifiedForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
 }
 
 // `inScopeForX` — pure scope predicates used by the TUI bar. Out-of-scope =
-// parent-table rows we deliberately skip (inactive tree, below relevancy
-// threshold). Status conditions (no upstream output yet, parserScript not set,
-// description not viewed) do NOT belong here — they're segmented into
-// done/noResult/failed/queued via LatestPipelineState.
+// parent-table rows the CLI would skip for this task: inactive tree,
+// deliberately filtered (below relevancy threshold), or upstream prerequisite
+// not yet ready (no parser script for run-scripts; not yet viewed for
+// evaluate).
+//
+// The one case where "not done" is NOT scope is the task's own work-status:
+// scripting's `parserScript IS NULL` describes "this task isn't done yet,"
+// which belongs in the queued/pending bucket, not out-of-scope — otherwise
+// done scripting rows would vanish.
 //
 // Seeding and sourcing have no skip rule (every SourceSeed is in scope), so
 // they have no predicate here — the TUI bar just omits the scope filter.
@@ -133,7 +138,8 @@ export function inScopeForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
 }
 
 /** A JobListSource is in scope for scripting iff it's in an active source
- * tree. */
+ * tree. The `parserScript` column is THIS task's own work output, so it's
+ * deliberately not part of scope. */
 export function inScopeForScripting(
   eb: ExpressionBuilder<DB, 'JobListSource'>
 ) {
@@ -141,11 +147,15 @@ export function inScopeForScripting(
 }
 
 /** A JobListSource is in scope for run-scripts iff it's in an active source
- * tree. */
+ * tree AND scripting has produced a parser script (the upstream
+ * prerequisite). */
 export function inScopeForRunScripts(
   eb: ExpressionBuilder<DB, 'JobListSource'>
 ) {
-  return jobListSourceInActiveSource(eb);
+  return eb.and([
+    jobListSourceInActiveSource(eb),
+    eb('JobListSource.parserScript', 'is not', null),
+  ]);
 }
 
 /** A JobPost is in scope for viewing iff its tree is active AND its title
@@ -168,8 +178,14 @@ export function inScopeForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
   ]);
 }
 
-/** A JobPost is in scope for evaluate iff it was in scope for viewing — an
- * un-viewable post can't be evaluated. */
+/** A JobPost is in scope for evaluate iff it was in scope for viewing AND
+ * viewing has actually populated description + skillRequirements (the
+ * upstream prerequisite). Unviewed posts are out-of-scope until viewing
+ * fills those columns. */
 export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
-  return inScopeForViewing(eb);
+  return eb.and([
+    inScopeForViewing(eb),
+    eb('JobPost.description', 'is not', null),
+    eb('JobPost.skillRequirements', 'is not', null),
+  ]);
 }

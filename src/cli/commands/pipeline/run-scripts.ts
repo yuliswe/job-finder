@@ -18,6 +18,7 @@ import {
   batchEvaluateJobTitlesRelevancy,
   type JobRelevanceScore,
 } from 'src/llm/batchEvaluateJobTitlesRelevancy.js';
+import { extractUserFilterPrefs } from 'src/llm/extractUserFilterPrefs.js';
 import { runParserScript } from 'src/llm/runParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -28,15 +29,15 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 export function createRunScriptsCommand(): Command {
   return new Command('run-scripts')
     .description(
-      'For every JobListSource with a validated parserScript, ask the LLM to map the supplied division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost'
+      'For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost'
     )
-    .requiredOption(
+    .option(
       '-d, --division <division>',
-      'Division/department to filter by (e.g. "engineering")'
+      'Division/department to filter by (e.g. "engineering"). Overrides the value extracted from interests.md.'
     )
-    .requiredOption(
+    .option(
       '-l, --location <location>',
-      'Location to filter by (e.g. "Toronto, ON")'
+      'Location to filter by (e.g. "Toronto, ON"). Overrides the value extracted from interests.md.'
     )
     .addOption(
       new Option(
@@ -45,23 +46,17 @@ export function createRunScriptsCommand(): Command {
       )
     )
     .action(
-      async (opts: { division: string; location: string; all?: boolean }) => {
-        await withBrowserInstance(context =>
-          runAll(context, {
-            division: opts.division,
-            location: opts.location,
-            all: opts.all,
-          })
-        );
+      async (opts: { division?: string; location?: string; all?: boolean }) => {
+        await withBrowserInstance(context => runAll(context, opts));
       }
     );
 }
 
 async function runAll(
   context: BrowserContext,
-  args: { division: string; location: string; all?: boolean }
+  opts: { division?: string; location?: string; all?: boolean }
 ): Promise<void> {
-  if (args.all) await requeueAllTerminal('run-scripts');
+  if (opts.all) await requeueAllTerminal('run-scripts');
 
   const targets = await db
     .selectFrom('JobListSource')
@@ -89,9 +84,24 @@ async function runAll(
     );
   }
 
+  const { division, location } = await resolveFilterPrefs({
+    cliDivision: opts.division,
+    cliLocation: opts.location,
+    interests,
+  });
+
+  terminal.log(`Using division="${division}" location="${location}"`);
+
   const results = await Promise.all(
     targets.map(target =>
-      tabLimit(() => runScriptsForTarget({ context, target, args, interests }))
+      tabLimit(() =>
+        runScriptsForTarget({
+          context,
+          target,
+          args: { division, location },
+          interests,
+        })
+      )
     )
   );
 
@@ -101,6 +111,30 @@ async function runAll(
   );
 
   terminal.log(`Inserted ${jobPostInserted} rows into JobPost\n`);
+}
+
+async function resolveFilterPrefs(args: {
+  interests: string;
+  cliDivision?: string;
+  cliLocation?: string;
+}): Promise<{ division: string; location: string }> {
+  const { cliDivision, cliLocation, interests } = args;
+  if (cliDivision && cliLocation) {
+    return { division: cliDivision, location: cliLocation };
+  }
+
+  if (!interests) {
+    throw new Error(
+      'Both --division and --location must be supplied when interests text is empty (seeds/interests.local.md / seeds/interests.md is missing).'
+    );
+  }
+
+  terminal.log('Extracting division/location from interests via LLM…');
+  const extracted = await extractUserFilterPrefs({ interests });
+  return {
+    division: cliDivision ?? extracted.division,
+    location: cliLocation ?? extracted.location,
+  };
 }
 
 async function runScriptsForTarget(args: {
