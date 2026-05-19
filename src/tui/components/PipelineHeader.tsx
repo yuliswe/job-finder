@@ -44,6 +44,7 @@ export function PipelineHeader({
       </Box>
     );
   }
+
   const labelWidth = Math.max(...stats.map(s => s.label.length));
   // Pipeline rows visual width: dot + space + label + space + 18-char bar +
   // space + counts.
@@ -131,6 +132,7 @@ function progressSegments(
   const order = raw
     .map((r, i) => ({ i, frac: r - out[i]!, n: counts[i]! }))
     .sort((a, b) => b.frac - a.frac || b.n - a.n);
+
   for (const entry of order) {
     if (leftover <= 0) break;
     out[entry.i]!++;
@@ -149,6 +151,7 @@ function progressSegments(
         donorCells = out[j]!;
       }
     }
+
     if (donor >= 0) {
       out[donor]!--;
       out[i]!++;
@@ -169,11 +172,13 @@ function countSummary(s: PipelineStageStats): string {
  * stays `true` so non-pulsing call sites see a stable value. */
 function usePulse(active: boolean): boolean {
   const [on, setOn] = useState(true);
+
   useEffect(() => {
     if (!active) {
       setOn(true);
       return;
     }
+
     const id = setInterval(() => setOn(prev => !prev), PULSE_MS);
     return () => clearInterval(id);
   }, [active]);

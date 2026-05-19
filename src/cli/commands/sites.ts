@@ -39,6 +39,7 @@ export function createSitesCommand(): Command {
         ...JOB_TYPES.map(j => `  ${j}`),
         '',
       ];
+
       terminal.log(lines.join('\n'), s => s);
     });
 }

@@ -73,16 +73,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
       ON PipelineTrigger (task, ofSourceSeedId)
       WHERE ofSourceSeedId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobSourceId_uniq
       ON PipelineTrigger (task, ofJobSourceId)
       WHERE ofJobSourceId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobListSourceId_uniq
       ON PipelineTrigger (task, ofJobListSourceId)
       WHERE ofJobListSourceId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobPostId_uniq
       ON PipelineTrigger (task, ofJobPostId)
@@ -104,29 +107,35 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofSourceSeedId)
     SELECT lower(hex(randomblob(16))), 'seeding', 1, id FROM SourceSeed
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofSourceSeedId)
     SELECT lower(hex(randomblob(16))), 'sourcing', isProcessed, id FROM SourceSeed
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofJobSourceId)
     SELECT lower(hex(randomblob(16))), 'listing', isProcessed, id FROM JobSource
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofJobListSourceId)
     SELECT lower(hex(randomblob(16))), 'scripting',
            CASE WHEN parserScript IS NOT NULL THEN 1 ELSE 0 END, id
     FROM JobListSource
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofJobListSourceId)
     SELECT lower(hex(randomblob(16))), 'run-scripts', isProcessed, id
     FROM JobListSource WHERE parserScript IS NOT NULL
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofJobPostId)
     SELECT lower(hex(randomblob(16))), 'viewing', isProcessed, id FROM JobPost
   `.execute(db);
+
   await sql`
     INSERT INTO PipelineTrigger (id, task, isProcessed, ofJobPostId)
     SELECT lower(hex(randomblob(16))), 'evaluate',
@@ -141,6 +150,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
   await db.schema.alterTable('SourceSeed').dropColumn('isProcessed').execute();
   await db.schema.alterTable('JobSource').dropColumn('isProcessed').execute();
+
   await db.schema
     .alterTable('JobListSource')
     .dropColumn('isProcessed')
@@ -155,18 +165,21 @@ export async function down(db: Kysely<unknown>): Promise<void> {
       c.notNull().defaultTo(Bool.False)
     )
     .execute();
+
   await db.schema
     .alterTable('JobSource')
     .addColumn('isProcessed', sql`integer_boolean`, c =>
       c.notNull().defaultTo(Bool.False)
     )
     .execute();
+
   await db.schema
     .alterTable('JobListSource')
     .addColumn('isProcessed', sql`integer_boolean`, c =>
       c.notNull().defaultTo(Bool.False)
     )
     .execute();
+
   await db.schema
     .alterTable('JobPost')
     .addColumn('isProcessed', sql`integer_boolean`, c =>
@@ -183,6 +196,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
        LIMIT 1
     ), 0)
   `.execute(db);
+
   await sql`
     UPDATE JobSource SET isProcessed = COALESCE((
       SELECT isProcessed FROM PipelineTrigger
@@ -191,6 +205,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
        LIMIT 1
     ), 0)
   `.execute(db);
+
   await sql`
     UPDATE JobListSource SET isProcessed = COALESCE((
       SELECT isProcessed FROM PipelineTrigger
@@ -199,6 +214,7 @@ export async function down(db: Kysely<unknown>): Promise<void> {
        LIMIT 1
     ), 0)
   `.execute(db);
+
   await sql`
     UPDATE JobPost SET isProcessed = COALESCE((
       SELECT isProcessed FROM PipelineTrigger

@@ -51,6 +51,7 @@ function listTables(): string[] {
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
     )
     .all() as { name: string }[];
+
   return rows
     .map(r => r.name)
     .filter(n => !EXCLUDED_TABLES.has(n) && !n.startsWith('sqlite_'));
@@ -58,10 +59,13 @@ function listTables(): string[] {
 
 const tableInfo = (t: string) =>
   sqlite.prepare(`PRAGMA table_info(${quoteIdent(t)})`).all() as Column[];
+
 const indexList = (t: string) =>
   sqlite.prepare(`PRAGMA index_list(${quoteIdent(t)})`).all() as IndexInfo[];
+
 const indexInfo = (i: string) =>
   sqlite.prepare(`PRAGMA index_info(${quoteIdent(i)})`).all() as IndexColumn[];
+
 const foreignKeys = (t: string) =>
   sqlite.prepare(`PRAGMA foreign_key_list(${quoteIdent(t)})`).all() as FkInfo[];
 
@@ -135,6 +139,7 @@ function main(): void {
     'Timestamp',
     'Bool',
   ];
+
   for (const f of knownFlags)
     if (usedFlags.has(f)) lines.push(`type ${f} = '${f}'`);
 
@@ -175,6 +180,7 @@ function main(): void {
       else if (fkByCol.has(c.name)) relCols.push(c);
       else fieldCols.push(c);
     }
+
     baseCols.sort(
       (a, b) => COMMON_FIELDS.indexOf(a.name) - COMMON_FIELDS.indexOf(b.name)
     );
@@ -184,6 +190,7 @@ function main(): void {
       if (aN !== bN) return aN - bN;
       return a.name.localeCompare(b.name);
     };
+
     fieldCols.sort(nullableThenAlpha);
     relCols.sort(nullableThenAlpha);
 
@@ -201,6 +208,7 @@ function main(): void {
           flags.push(`DEFAULT<${tsStringLiteral(inner)}>`);
         }
       }
+
       const fk = fkByCol.get(c.name);
       if (fk && !EXCLUDED_TABLES.has(fk.table)) {
         flags.push(
@@ -208,6 +216,7 @@ function main(): void {
         );
         flags.push(`${fk.table}['${fk.to}']`);
       }
+
       const propName = c.notnull ? c.name : `${c.name}?`;
       lines.push(`  ${propName}: ${flags.join(' | ')}`);
     };
@@ -216,10 +225,12 @@ function main(): void {
       lines.push('  // ── base ──');
       baseCols.forEach(emit);
     }
+
     if (fieldCols.length) {
       lines.push('  // ── fields ──');
       fieldCols.forEach(emit);
     }
+
     if (relCols.length) {
       lines.push('  // ── relations ──');
       relCols.forEach(emit);
@@ -240,11 +251,13 @@ function main(): void {
             baseName = baseName.slice(prefix.length);
           baseName = baseName.replace(/_(idx|key)$/, '');
         }
+
         const allFlags: string[] = [`[${colRefs}]`];
         if (idx.unique) allFlags.push('UNIQUE');
         if (idx.partial) allFlags.push('PARTIAL_IDX');
         lines.push(`    ${baseName}: ${allFlags.join(' | ')}`);
       }
+
       lines.push('  }');
     }
 

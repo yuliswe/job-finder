@@ -19,8 +19,10 @@ export class OpenRouterPlugin {
           'OpenRouter API key not provided (set OPENROUTER_API_KEY)'
         );
       }
+
       this.client = new OpenRouter({ apiKey });
     }
+
     return this.client;
   }
 

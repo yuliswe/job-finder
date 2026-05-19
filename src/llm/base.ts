@@ -19,6 +19,7 @@ function getSchemaName(schema: v.GenericSchema): string {
     name = 's_' + createHash('sha256').update(json).digest('hex').slice(0, 12);
     schemaNameCache.set(schema, name);
   }
+
   return name;
 }
 
@@ -33,6 +34,7 @@ function strictifyJsonSchema(
     result.additionalProperties = false;
     if (result.properties) {
       const props = result.properties as Record<string, unknown>;
+
       result.properties = Object.fromEntries(
         Object.entries(props).map(([k, val]) => [
           k,
@@ -100,6 +102,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
       toJsonSchema(schema) as Record<string, unknown>
     ),
   };
+
   const schemaBlock = `\n\n# Required response format\n\nYour response MUST be a single JSON object validating against this schema (descriptions explain each field; read them carefully):\n\n\`\`\`json\n${JSON.stringify(responseFormat.schema, null, 2)}\n\`\`\``;
   const messagesWithSchema = appendToLastSystemMessage(messages, schemaBlock);
   const { content, totalTokens } = await plugin.send({
@@ -108,6 +111,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
     reasoningEffort,
     responseFormat,
   });
+
   if (!content) throw new Error('LLM returned empty response');
   const result = v.parse(schema, JSON.parse(content));
   return { result, totalTokens };
@@ -127,9 +131,11 @@ function appendToLastSystemMessage(
     if (messages[i]!.role === 'system') lastSystemIdx = i;
     else break;
   }
+
   if (lastSystemIdx === -1) {
     return [{ role: 'system', content: suffix.trimStart() }, ...messages];
   }
+
   return messages.map((m, i) =>
     i === lastSystemIdx ? { ...m, content: m.content + suffix } : m
   );
@@ -156,6 +162,7 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         messages: memory.toMessages(),
         reasoningEffort,
       });
+
       totalTokens += sendResult.totalTokens;
       return { result: sendResult.result, totalTokens };
     } catch (error) {
@@ -164,8 +171,10 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         (error.name === 'ResponseValidationError' ||
           error instanceof v.ValiError ||
           error instanceof SyntaxError);
+
       const isNetworkError =
         error instanceof TypeError && error.message === 'terminated';
+
       const isRetryable = isSchemaError || isNetworkError;
 
       if (isRetryable && retry < MAX_SEND_RETRIES - 1) {
@@ -177,6 +186,7 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
             'Your previous response was not valid or did not match the expected schema. Please respond with valid JSON only, matching the required schema exactly.'
           );
         }
+
         continue;
       }
 
@@ -226,6 +236,7 @@ export async function feedbackLoop<
       logger,
       reasoningEffort,
     });
+
     totalTokens += sendResult.totalTokens;
 
     memory.addAssistant(JSON.stringify(sendResult.result));

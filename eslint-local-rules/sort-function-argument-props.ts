@@ -36,6 +36,7 @@ export default createRule<Options, MessageIds>({
       const isFunction =
         prop.value.type === AST_NODE_TYPES.FunctionExpression ||
         prop.value.type === AST_NODE_TYPES.ArrowFunctionExpression;
+
       if (!optional && !isFunction) return 0;
       if (!optional && isFunction) return 1;
       if (optional && !isFunction) return 2;
@@ -50,6 +51,7 @@ export default createRule<Options, MessageIds>({
         if (a.order !== b.order) {
           return a.order - b.order;
         }
+
         return a.index - b.index;
       });
     }
@@ -59,16 +61,19 @@ export default createRule<Options, MessageIds>({
       if (node.parent.type !== AST_NODE_TYPES.CallExpression) {
         return;
       }
+
       const properties = node.properties.filter(
         (prop): prop is TSESTree.Property =>
           prop.type === AST_NODE_TYPES.Property
       );
+
       // Map each property with its current index and computed order.
       const propsWithOrder = properties.map((prop, idx) => ({
         order: getObjectPropertyOrder(prop),
         index: idx,
         node: prop,
       }));
+
       const sorted = sortProperties(propsWithOrder);
       // Compare original order with sorted order.
       for (let i = 0; i < propsWithOrder.length; i++) {
@@ -86,6 +91,7 @@ export default createRule<Options, MessageIds>({
               const sortedText = sorted
                 .map(propObj => sourceCode.getText(propObj.node))
                 .join(', ');
+
               return fixer.replaceTextRange(
                 [openBrace.range[1], closeBrace.range[0]],
                 ` ${sortedText} `
@@ -105,6 +111,7 @@ export default createRule<Options, MessageIds>({
         const ta = prop.typeAnnotation.typeAnnotation;
         isFunction = ta.type === AST_NODE_TYPES.TSFunctionType;
       }
+
       if (!optional && !isFunction) return 0;
       if (!optional && isFunction) return 1;
       if (optional && !isFunction) return 2;
@@ -122,6 +129,7 @@ export default createRule<Options, MessageIds>({
         if (a.order !== b.order) {
           return a.order - b.order;
         }
+
         return a.index - b.index;
       });
     }
@@ -137,15 +145,18 @@ export default createRule<Options, MessageIds>({
       ) {
         return;
       }
+
       const members = node.members.filter(
         (member): member is TSESTree.TSPropertySignature =>
           member.type === AST_NODE_TYPES.TSPropertySignature
       );
+
       const membersWithOrder = members.map((member, idx) => ({
         order: getTSPropertyOrder(member),
         index: idx,
         node: member,
       }));
+
       const sorted = sortTSProperties(membersWithOrder);
       for (let i = 0; i < membersWithOrder.length; i++) {
         if (membersWithOrder[i].node !== sorted[i].node) {
@@ -158,6 +169,7 @@ export default createRule<Options, MessageIds>({
               const sortedText = sorted
                 .map(memberObj => sourceCode.getText(memberObj.node))
                 .join('\n');
+
               // Calculate the fix range: between the first and last member tokens.
               const firstToken = sourceCode.getFirstToken(node)!;
               const lastToken = sourceCode.getLastToken(node)!;

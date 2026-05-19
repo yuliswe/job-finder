@@ -38,9 +38,11 @@ export function App({ initial }: { initial: AppOptions }) {
   const activity = useLiveData(
     useCallback(() => getRecentActivity(ACTIVITY_ROWS), [])
   );
+
   const jobPosts = useLiveData(
     useCallback(() => listJobPosts({ sort }), [sort])
   );
+
   const sources = useLiveData(useCallback(() => listSources(), []));
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
@@ -50,47 +52,59 @@ export function App({ initial }: { initial: AppOptions }) {
     openJobId == null
       ? null
       : (jobPosts?.find(j => j.id === openJobId) ?? null);
+
   useInput(
     (input, key) => {
       if (input === 'q') {
         exit();
         return;
       }
+
       if (key.escape) {
         // ESC returns to table focus when pipeline is focused; otherwise exits.
         if (focus === 'pipeline') {
           setFocus('table');
           return;
         }
+
         exit();
         return;
       }
+
       if (input === 'p') {
         setFocus(f => (f === 'pipeline' ? 'table' : 'pipeline'));
         return;
       }
+
       if (focus === 'pipeline') {
         if (key.upArrow) {
           setPipelineCursor(c => Math.max(0, c - 1));
         }
+
         if (key.downArrow) {
           setPipelineCursor(c => Math.min(Math.max(0, stageCount - 1), c + 1));
         }
+
         return;
       }
+
       if (input === '\t' || key.rightArrow || key.leftArrow) {
         const delta = key.leftArrow ? -1 : 1;
         const idx = TAB_LABELS.findIndex(t => t.key === tab);
         const next =
           TAB_LABELS[(idx + delta + TAB_LABELS.length) % TAB_LABELS.length]!;
+
         setTab(next.key);
       }
+
       if (input === 's' && tab === 'jobs') {
         const idx = JOB_POST_SORTS.indexOf(sort);
         const next =
           JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
+
         setSort(next);
       }
+
       if (input === 'y') {
         copyToClipboard(`jobfinder tui --tab ${tab} --sort ${sort}`);
       }

@@ -62,6 +62,7 @@ export function Table<T>({
       priority: c.priority,
     }))
   );
+
   const visible = rows.slice(windowStart, windowStart + visibleCount);
   const localCursor = cursor - windowStart;
 

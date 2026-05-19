@@ -34,6 +34,7 @@ async function acquireTab(): Promise<void> {
     activeTabs++;
     return;
   }
+
   await new Promise<void>(resolve => {
     tabWaiters.push(() => {
       activeTabs++;

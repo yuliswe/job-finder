@@ -104,6 +104,7 @@ Score each entry by TITLE relevance only. Return one score per index, in order.`
           feedback: `You returned ${parsed.scores.length} scores but there were ${batch.length} candidates. Return exactly one score per candidate.`,
         };
       }
+
       for (const s of parsed.scores) {
         if (s.titleRelavency < 0 || s.titleRelavency > 1) {
           return {
@@ -112,6 +113,7 @@ Score each entry by TITLE relevance only. Return one score per index, in order.`
           };
         }
       }
+
       // Place by index so position matches the caller's order even if the LLM
       // returned them out of order.
       const result: JobRelevanceScore[] = new Array(batch.length);
@@ -122,17 +124,20 @@ Score each entry by TITLE relevance only. Return one score per index, in order.`
             feedback: `index ${s.index} is out of range [0, ${batch.length}). Return one score per input index.`,
           };
         }
+
         if (result[s.index] !== undefined) {
           return {
             valid: false,
             feedback: `index ${s.index} appeared more than once. Return exactly one score per input index.`,
           };
         }
+
         result[s.index] = {
           titleRelavency: s.titleRelavency,
           titleRelavencyReason: s.titleRelavencyReason,
         };
       }
+
       return { valid: true, result };
     },
   });

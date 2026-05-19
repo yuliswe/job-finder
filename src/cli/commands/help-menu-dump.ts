@@ -46,6 +46,7 @@ function dumpOption(option: Option): OptionDump {
     defaultValue?: unknown;
     hidden?: boolean;
   };
+
   return {
     flags: option.flags,
     ...(option.description ? { description: option.description } : {}),
@@ -71,6 +72,7 @@ function dumpArgument(arg: unknown): ArgumentDump {
     argChoices?: string[];
     defaultValue?: unknown;
   };
+
   return {
     name: a._name,
     ...(a.description ? { description: a.description } : {}),
@@ -93,9 +95,11 @@ function dumpCommand(cmd: Command): CommandDump {
       return long !== 'help' && long !== 'version';
     })
     .map(dumpOption);
+
   const commands = cmd.commands
     .filter(sub => sub.name() !== 'help')
     .map(dumpCommand);
+
   const usage = cmd.usage();
   const summary = cmd.summary();
   return {
@@ -128,6 +132,7 @@ export function createHelpMenuDumpCommand(program: Command): Command {
         '../../..',
         '__generated__/cli/help-menu.json'
       );
+
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, rendered, 'utf-8');
       terminal.log(rendered, s => s);

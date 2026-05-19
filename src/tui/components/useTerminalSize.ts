@@ -11,11 +11,13 @@ export function useTerminalSize(): { rows: number; cols: number } {
     rows: stdout?.rows ?? 40,
     cols: stdout?.columns ?? 120,
   }));
+
   useEffect(() => {
     if (!stdout) return;
     const handler = () => {
       setSize({ rows: stdout.rows ?? 40, cols: stdout.columns ?? 120 });
     };
+
     stdout.on('resize', handler);
     return () => {
       stdout.off('resize', handler);

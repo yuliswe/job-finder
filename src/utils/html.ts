@@ -31,6 +31,7 @@ export async function cleanHtmlForLlm(page: Page): Promise<string> {
           el.removeAttribute(attr.name);
           continue;
         }
+
         if (
           (attr.name === 'src' ||
             attr.name === 'srcset' ||
@@ -44,5 +45,6 @@ export async function cleanHtmlForLlm(page: Page): Promise<string> {
 
     return root.innerHTML;
   });
+
   return html.replace(/\s+/g, ' ').trim();
 }

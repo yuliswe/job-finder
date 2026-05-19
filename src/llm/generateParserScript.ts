@@ -123,6 +123,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
               page,
               script: parsed.parserScript,
             });
+
             terminal.log(
               `Exploration pass: ${explore.logs.length} console log line(s) captured`
             );
@@ -151,6 +152,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
                   'You set hasLocationFilter=true, but listLocations() returned an empty array. Either implement listLocations() so it enumerates every selectable location option visible in the page filter, or set hasLocationFilter=false if no such filter actually exists.',
               };
             }
+
             if (parsed.hasDivisionFilter && probe.divisions.length === 0) {
               return {
                 valid: false,
@@ -158,6 +160,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
                   'You set hasDivisionFilter=true, but listDivisions() returned an empty array. Either implement listDivisions() so it enumerates every selectable department/division option visible in the page filter, or set hasDivisionFilter=false if no such filter actually exists.',
               };
             }
+
             terminal.log(
               `Script validated: ${probe.jobs.length} jobs returned (probe shape: ${JSON.stringify(probe.probed)}; ${probe.logs.length} console log line(s) captured)`,
               COLOURS.green
@@ -171,9 +174,11 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
               },
             };
           }
+
           return { valid: false, feedback: probe.feedback };
         },
       });
+
       return result;
     } catch (error) {
       if (error instanceof ParserScriptAbort) {
@@ -182,6 +187,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
         );
         return null;
       }
+
       terminal.error(`Error generating parser script: ${String(error)}`);
 
       return null;
@@ -203,6 +209,7 @@ async function loadPageSnapshot(
       `Timeout/network error loading ${url}; proceeding with whatever content loaded`
     );
   }
+
   const title = await page.title();
   const html = await cleanHtmlForLlm(page);
   return { title, html };
@@ -270,6 +277,7 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
       divisions: divisions[0] ? [divisions[0]] : [],
     });
   }
+
   probeShapes.push({ locations: [], divisions: [] });
 
   let lastLogs: string[] = [];
@@ -310,17 +318,20 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
               return String(v);
             }
           };
+
           const wrap =
             (level: string) =>
             (...xs: unknown[]) => {
               logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
             };
+
           const orig = {
             log: console.log,
             warn: console.warn,
             error: console.error,
             info: console.info,
           };
+
           console.log = wrap('log');
           console.warn = wrap('warn');
           console.error = wrap('error');
@@ -386,6 +397,7 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
             formatLogs(run.logs),
         };
       }
+
       const obj = j as Record<string, unknown>;
       if (typeof obj.jobTitle !== 'string' || typeof obj.url !== 'string') {
         return {
@@ -438,17 +450,20 @@ async function exploreScript(args: {
             return String(v);
           }
         };
+
         const wrap =
           (level: string) =>
           (...xs: unknown[]) => {
             logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
           };
+
         const orig = {
           log: console.log,
           warn: console.warn,
           error: console.error,
           info: console.info,
         };
+
         console.log = wrap('log');
         console.warn = wrap('warn');
         console.error = wrap('error');
@@ -487,10 +502,12 @@ function formatLogs(logs: string[]): string {
   if (logs.length === 0) {
     return "\n\n(No console output captured. You can add console.log/info/warn/error to the script to inspect the DOM, see the next attempt's feedback.)";
   }
+
   const MAX = 50;
   const shown = logs.slice(0, MAX);
   const more =
     logs.length > MAX ? `\n… and ${logs.length - MAX} more line(s)` : '';
+
   return `\n\nCaptured console output from your script (${logs.length} line(s)):\n${shown.join('\n')}${more}`;
 }
 
@@ -515,17 +532,20 @@ async function probeListFn(
           return String(v);
         }
       };
+
       const wrap =
         (level: string) =>
         (...xs: unknown[]) => {
           logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
         };
+
       const orig = {
         log: console.log,
         warn: console.warn,
         error: console.error,
         info: console.info,
       };
+
       console.log = wrap('log');
       console.warn = wrap('warn');
       console.error = wrap('error');
@@ -534,6 +554,7 @@ async function probeListFn(
         const fn = new Function(
           `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
         );
+
         const value = fn();
         return { ok: true as const, value, logs };
       } catch (err) {

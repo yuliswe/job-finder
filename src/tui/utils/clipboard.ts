@@ -9,9 +9,11 @@ export function copyToClipboard(text: string): void {
       : process.platform === 'win32'
         ? 'clip'
         : 'xclip';
+
   const args = cmd === 'xclip' ? ['-selection', 'clipboard'] : [];
   try {
     const p = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'] });
+
     p.on('error', () => {
       // No clipboard tool available — silently no-op.
     });

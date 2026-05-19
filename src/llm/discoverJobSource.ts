@@ -40,6 +40,7 @@ export async function discoverJobSource(args: {
         `Failed to load page ${url} within timeout, proceeding with whatever content loaded`
       );
     }
+
     const title = await page.title();
     const text = await page.evaluate(() => document.body.innerText);
     return { pageText: text, pageTitle: title };
@@ -99,6 +100,7 @@ ${pageText}`,
         if (rawUrl) {
           const hostname = toHostname(rawUrl);
           if (hostname) return { valid: true, result: { name, url: hostname } };
+
           terminal.warn(
             `LLM returned unparseable url "${rawUrl}" for "${name}" — falling back to web search`
           );
@@ -158,6 +160,7 @@ async function findCompanyWebsite(args: {
       model: LLM_SOURCING_MODEL,
       maxAttempts: MAX_WEB_SEARCH_ATTEMPTS,
     });
+
     const raw = result.url.trim();
     if (!raw) return null;
     return toHostname(raw);

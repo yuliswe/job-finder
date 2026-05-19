@@ -127,6 +127,7 @@ export function scrapeJobs(
       new JobspyError('python launcher is empty', '', null)
     );
   }
+
   const stderrMode = config.stderr ?? 'inherit';
 
   return new Promise((resolveP, rejectP) => {
@@ -134,17 +135,20 @@ export function scrapeJobs(
       cwd: config.cwd,
       stdio: ['pipe', 'pipe', stderrMode],
     });
+
     const childStdin = proc.stdin!;
     const childStdout = proc.stdout!;
 
     let stdout = '';
     let stderrBuf = '';
     childStdout.setEncoding('utf8');
+
     childStdout.on('data', (chunk: string) => {
       stdout += chunk;
     });
     if (proc.stderr) {
       proc.stderr.setEncoding('utf8');
+
       proc.stderr.on('data', (chunk: string) => {
         stderrBuf += chunk;
       });
@@ -171,10 +175,12 @@ export function scrapeJobs(
         );
         return;
       }
+
       try {
         resolveP(JSON.parse(stdout) as JobResult[]);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
+
         rejectP(
           new JobspyError(
             `failed to parse jobspy output as JSON: ${reason}`,

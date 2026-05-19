@@ -55,6 +55,7 @@ export async function runParserScript(args: {
     try {
       availableLocations = await callListFn(page, script, 'listLocations');
       availableDivisions = await callListFn(page, script, 'listDivisions');
+
       terminal.log(
         `This company hires from ${availableLocations.length} locations and ${availableDivisions.length} divisions`
       );
@@ -118,15 +119,18 @@ async function callListFn(
       const fn = new Function(
         `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
       );
+
       return fn();
     },
     { s: script, name: fnName }
   );
+
   if (!Array.isArray(value)) {
     throw new Error(
       `${fnName}() did not return an array (got ${typeof value})`
     );
   }
+
   return value.filter((x): x is string => typeof x === 'string');
 }
 
@@ -149,9 +153,11 @@ async function callSearchJobs(
     },
     { s: script, a: args }
   );
+
   if (!Array.isArray(value)) {
     throw new Error('searchJobs() did not return an array');
   }
+
   const out: { jobTitle: string; url: string }[] = [];
   for (const item of value) {
     if (
@@ -166,6 +172,7 @@ async function callSearchJobs(
       });
     }
   }
+
   return out;
 }
 

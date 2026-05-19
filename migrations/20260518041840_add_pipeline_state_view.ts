@@ -14,16 +14,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .on('PipelineState')
     .columns(['task', 'ofSourceSeedId', 'createdAt'])
     .execute();
+
   await db.schema
     .createIndex('PipelineState_task_ofJobSourceId_createdAt_idx')
     .on('PipelineState')
     .columns(['task', 'ofJobSourceId', 'createdAt'])
     .execute();
+
   await db.schema
     .createIndex('PipelineState_task_ofJobListSourceId_createdAt_idx')
     .on('PipelineState')
     .columns(['task', 'ofJobListSourceId', 'createdAt'])
     .execute();
+
   await db.schema
     .createIndex('PipelineState_task_ofJobPostId_createdAt_idx')
     .on('PipelineState')
@@ -94,15 +97,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropView('LatestPipelineState').execute();
+
   await db.schema
     .dropIndex('PipelineState_task_ofJobPostId_createdAt_idx')
     .execute();
+
   await db.schema
     .dropIndex('PipelineState_task_ofJobListSourceId_createdAt_idx')
     .execute();
+
   await db.schema
     .dropIndex('PipelineState_task_ofJobSourceId_createdAt_idx')
     .execute();
+
   await db.schema
     .dropIndex('PipelineState_task_ofSourceSeedId_createdAt_idx')
     .execute();

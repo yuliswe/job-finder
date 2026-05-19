@@ -47,26 +47,31 @@ export async function down(db: Kysely<unknown>): Promise<void> {
     .on('PipelineTrigger')
     .column('task')
     .execute();
+
   await db.schema
     .createIndex('PipelineTrigger_isProcessed_idx')
     .on('PipelineTrigger')
     .column('isProcessed')
     .execute();
+
   await db.schema
     .createIndex('PipelineTrigger_ofSourceSeedId_idx')
     .on('PipelineTrigger')
     .column('ofSourceSeedId')
     .execute();
+
   await db.schema
     .createIndex('PipelineTrigger_ofJobSourceId_idx')
     .on('PipelineTrigger')
     .column('ofJobSourceId')
     .execute();
+
   await db.schema
     .createIndex('PipelineTrigger_ofJobListSourceId_idx')
     .on('PipelineTrigger')
     .column('ofJobListSourceId')
     .execute();
+
   await db.schema
     .createIndex('PipelineTrigger_ofJobPostId_idx')
     .on('PipelineTrigger')
@@ -78,16 +83,19 @@ export async function down(db: Kysely<unknown>): Promise<void> {
       ON PipelineTrigger (task, ofSourceSeedId)
       WHERE ofSourceSeedId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobSourceId_uniq
       ON PipelineTrigger (task, ofJobSourceId)
       WHERE ofJobSourceId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobListSourceId_uniq
       ON PipelineTrigger (task, ofJobListSourceId)
       WHERE ofJobListSourceId IS NOT NULL
   `.execute(db);
+
   await sql`
     CREATE UNIQUE INDEX PipelineTrigger_task_ofJobPostId_uniq
       ON PipelineTrigger (task, ofJobPostId)

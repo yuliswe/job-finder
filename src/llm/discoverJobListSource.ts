@@ -35,6 +35,7 @@ export async function findJobListPage(args: {
     terminal.warn(`Invalid start URL: ${startUrl}`);
     return null;
   }
+
   queue.push({ url: normalizedStart, depth: 0 });
 
   while (queue.length > 0) {
@@ -165,15 +166,18 @@ ${page.links.join('\n')}`,
             'You said this is NOT a job-listing page AND returned no candidateLinks. That leaves the search with no next step. Either (a) pick the most plausible links from the provided links list, or (b) reconsider whether this page actually is a listing page.',
         };
       }
+
       const hallucinated = parsed.candidateLinks.filter(
         l => !linksOnPageSet.has(l)
       );
+
       if (hallucinated.length > 0) {
         return {
           valid: false,
           feedback: `candidateLinks must be copied verbatim FROM THE LINKS LIST. These ${hallucinated.length} are not in the list and look invented: ${JSON.stringify(hallucinated.slice(0, 5))}. Pick only URLs that appear in the provided list.`,
         };
       }
+
       return { valid: true, result: parsed };
     },
   });
@@ -202,6 +206,7 @@ async function loadPage(
         `Timeout/network error loading ${url}; proceeding with whatever content loaded`
       );
     }
+
     const title = await page.title();
 
     // Only read text/anchors from the main frame — if listings live in an
@@ -212,6 +217,7 @@ async function loadPage(
     const text = await main
       .evaluate(() => document.body.innerText)
       .catch(() => '');
+
     const mainLinks = await main
       .evaluate(() =>
         Array.from(document.querySelectorAll('a[href]'))
@@ -232,6 +238,7 @@ async function loadPage(
       0,
       300
     );
+
     return { title, text, links };
   });
 }

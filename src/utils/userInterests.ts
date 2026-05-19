@@ -10,6 +10,7 @@ async function readSeed(name: string): Promise<string> {
       // file missing — try the next one
     }
   }
+
   return '';
 }
 

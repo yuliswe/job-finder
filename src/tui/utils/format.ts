@@ -45,6 +45,7 @@ export function allocateContentColumns(
   const desired = cols.map(c =>
     Math.max(c.min, Math.min(c.contentMax, c.max ?? Number.POSITIVE_INFINITY))
   );
+
   const totalDesired = desired.reduce((s, n) => s + n, 0);
 
   if (totalDesired <= available) {
@@ -54,6 +55,7 @@ export function allocateContentColumns(
     // most-flexible / least-important cols). That keeps it from being smeared
     // across small score columns that happen to be unbounded.
     const unbounded: number[] = [];
+
     cols.forEach((c, i) => {
       if (c.max == null) unbounded.push(i);
     });
@@ -62,15 +64,19 @@ export function allocateContentColumns(
       const maxPri = Math.max(...unbounded.map(i => cols[i]!.priority ?? 0));
       sinks = unbounded.filter(i => (cols[i]!.priority ?? 0) === maxPri);
     }
+
     if (sinks.length === 0) {
       const widestIdx = cols.reduce(
         (best, c, i) => (c.contentMax > cols[best]!.contentMax ? i : best),
         0
       );
+
       sinks = [widestIdx];
     }
+
     const per = Math.floor(slack / sinks.length);
     const rem = slack - per * sinks.length;
+
     sinks.forEach((i, idx) => {
       out[i]! += per + (idx === sinks.length - 1 ? rem : 0);
     });
@@ -91,6 +97,7 @@ export function allocateContentColumns(
     out[i] = take;
     remaining -= take;
   }
+
   return out;
 }
 

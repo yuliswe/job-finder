@@ -58,6 +58,7 @@ function formatOptionSpec(option: OptionLike): string {
   if (short && long) {
     return `'(${short} ${long})'{${short},${long}}'[${desc}]${valueSuffix}'`;
   }
+
   const flag = long ?? short!;
   return `'${flag}[${desc}]${valueSuffix}'`;
 }
@@ -105,10 +106,12 @@ function generateBranchHandler(
         const leaf = generateLeafHandler(sub, subFnName);
         if (leaf) leafFunctions.push(leaf);
       }
+
       const hasContent =
         subSubs.length > 0 ||
         getVisibleOptions(sub).length > 0 ||
         getRegisteredArguments(sub).length > 0;
+
       const body = hasContent ? subFnName : '_normal';
       const matchPattern = [sub.name(), ...sub.aliases()].join('|');
       return `    ${matchPattern}) ${body} ;;`;
@@ -132,6 +135,7 @@ ${caseBranches}
   esac
 }
 `;
+
   leafFunctions.push(fn);
   return fn;
 }
@@ -171,6 +175,7 @@ export function createCompletionScriptDumpCommand(program: Command): Command {
         '../../..',
         '__generated__/cli/_completion.zsh'
       );
+
       await mkdir(dirname(outputPath), { recursive: true });
       await writeFile(outputPath, content, 'utf-8');
       terminal.log(content, s => s);

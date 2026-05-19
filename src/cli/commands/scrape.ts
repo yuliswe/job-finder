@@ -153,6 +153,7 @@ function toCsv(jobs: JobResult[]): string {
   const body = jobs
     .map(j => cols.map(c => escapeCsv(j[c])).join(','))
     .join('\n');
+
   return `${header}\n${body}\n`;
 }
 
@@ -162,5 +163,6 @@ function escapeCsv(value: JobResult[keyof JobResult]): string {
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
+
   return s;
 }

@@ -46,6 +46,7 @@ export function useLiveData<T>(fetch: () => Promise<T>): T | null {
         queued = true;
         return;
       }
+
       inFlight = true;
       try {
         const next = await fetchRef.current();

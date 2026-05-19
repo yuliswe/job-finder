@@ -72,10 +72,12 @@ export function TabView({
         const row = jobPosts?.[cursor];
         if (row && onOpenJob) onOpenJob(row.id);
       }
+
       if (input === 'a' && tab === 'sources') {
         const row = sources?.[cursor];
         if (row) void toggleSourceActive(row);
       }
+
       if (input === 'l') {
         const url =
           tab === 'jobs'
@@ -83,6 +85,7 @@ export function TabView({
             : (sources?.[cursor]?.listUrl ??
               sources?.[cursor]?.sourceUrl ??
               null);
+
         if (url) openUrl(url);
       }
     },

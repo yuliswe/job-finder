@@ -20,6 +20,7 @@ function requiredEnvVar(name: string, defaultValue?: string): string {
   if (!value) {
     throw new Error(`Environment variable ${name} is required but not set`);
   }
+
   return value;
 }
 
