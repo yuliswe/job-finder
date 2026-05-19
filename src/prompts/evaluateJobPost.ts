@@ -6,17 +6,11 @@ export const EVALUATE_JOB_POST_SYSTEM_PROMPT = `You score a single job posting o
    - Justification: \`interestScoreReason\` — one sentence (≤ ~200 chars) citing concrete words from the interests and the posting.
 
 2. SKILL — does the user already have the experience/skills **the job posting asks for**?
-   - Input: the user's CV (free-form markdown), the job's title and description.
-   - The set of skills under consideration is determined by the job posting, NOT by the CV. Skills the user has but the posting does not ask for are irrelevant to this score — do not let an impressive but unrelated CV inflate the per-skill scores.
-   - You do not produce an aggregate skill score directly. Instead, produce \`skillScoreBreakdown\` (described below); the caller computes the aggregate as the importance-weighted average of the per-skill scores.
-
-\`skillScoreBreakdown\` is a list of the distinct skills/requirements **the job posting itself asks for**. Derive this list from the job description ONLY — do not seed it from the CV or include skills just because the user happens to list them. If the posting does not mention a skill, it does not belong in the breakdown, even if it's on the CV. For each one:
-- \`skill\`: short canonical name of the skill as it appears in (or is paraphrased from) the posting (e.g. "Python", "Distributed systems", "Bachelor's in CS", "5 years backend experience").
-- \`importance\` in [0, 1]: how important this skill is to the job as indicated in the job description itself — base this purely on the language and emphasis of the posting, not on your own opinion of what the role needs. 1.0 = explicitly listed as required / must-have / "you will" responsibility; 0.5 = nice-to-have / "preferred" / "plus"; 0.1–0.2 = mentioned in passing or only implied.
-- \`importanceReason\`: short justification (≤ ~140 chars), quoting or referencing the specific wording in the posting that signals the importance level.
-- \`skillScore\` in [0, 1]: how much demonstrable experience the user has WITH THIS SPECIFIC SKILL according to their CV. 1.0 = explicitly listed with multiple years / shipped projects; 0.5 = adjacent experience (e.g. transferable language); 0.0 = no evidence in the CV.
-- \`skillScoreReason\`: short justification (≤ ~140 chars), citing the relevant line in the CV (or noting its absence).
-
-Cap the breakdown at ~15 skills — focus on the load-bearing ones.
+   - Input: the user's CV (free-form markdown) and a pre-extracted list of skills that the posting itself asks for (with importance + the reason from the posting). You do NOT decide what skills the posting asks for, and you do NOT score importance — those are fixed inputs.
+   - For each skill in the input list, produce one \`skillScores\` entry. Use the **EXACT skill name string** from the input — do not rename, paraphrase, capitalize differently, or merge skills. Every input skill must appear exactly once; do not add new skills or omit any.
+     - \`skillScore\` in [0, 1]: how much demonstrable experience the user has WITH THIS SPECIFIC SKILL according to their CV. 1.0 = explicitly listed with multiple years / shipped projects; 0.5 = adjacent experience (e.g. transferable language); 0.0 = no evidence in the CV.
+     - \`skillScoreReason\`: short justification (≤ ~140 chars), citing the relevant line in the CV (or explicitly noting its absence). Do NOT cite the posting here — the posting's wording is already captured by the input importance/reason.
+   - Do not add, remove, rename, or reorder skills. If a skill is unfamiliar, score it 0.0 and explain why.
+   - The caller computes the aggregate skill score as the importance-weighted average over your per-skill scores.
 
 Output a single JSON object matching the schema.`;

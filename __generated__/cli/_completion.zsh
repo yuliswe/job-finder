@@ -32,10 +32,36 @@ _jobfinder_scrape() {
     '(-o --output)'{-o,--output}'[output]:output:'
 }
 
+_jobfinder_pipeline_sourcing() {
+  _arguments -s -S \
+    '--all[all]'
+}
+
+_jobfinder_pipeline_listing() {
+  _arguments -s -S \
+    '--all[all]'
+}
+
+_jobfinder_pipeline_scripting() {
+  _arguments -s -S \
+    '--all[all]'
+}
+
 _jobfinder_pipeline_run_scripts() {
   _arguments -s -S \
     '(-d --division)'{-d,--division}'[division]:division:' \
-    '(-l --location)'{-l,--location}'[location]:location:'
+    '(-l --location)'{-l,--location}'[location]:location:' \
+    '--all[all]'
+}
+
+_jobfinder_pipeline_viewing() {
+  _arguments -s -S \
+    '--all[all]'
+}
+
+_jobfinder_pipeline_evaluate() {
+  _arguments -s -S \
+    '--all[all]'
 }
 
 _jobfinder_pipeline() {
@@ -50,12 +76,12 @@ _jobfinder_pipeline() {
     args)
       case $line[1] in
     seeding) _normal ;;
-    sourcing) _normal ;;
-    listing) _normal ;;
-    scripting) _normal ;;
+    sourcing) _jobfinder_pipeline_sourcing ;;
+    listing) _jobfinder_pipeline_listing ;;
+    scripting) _jobfinder_pipeline_scripting ;;
     run-scripts) _jobfinder_pipeline_run_scripts ;;
-    viewing) _normal ;;
-    evaluate) _normal ;;
+    viewing) _jobfinder_pipeline_viewing ;;
+    evaluate) _jobfinder_pipeline_evaluate ;;
       esac
       ;;
   esac
@@ -63,8 +89,8 @@ _jobfinder_pipeline() {
 
 _jobfinder_tui() {
   _arguments -s -S \
-    '--tab[tab]:tab:(jobpost jobsource joblistsource)' \
-    '--sort[sort]:sort:(score postedAt company title salary)'
+    '--tab[tab]:tab:(jobs sources)' \
+    '--sort[sort]:sort:(overall interest skill)'
 }
 
 _jobfinder_help_menu_dump() {
@@ -96,3 +122,5 @@ _jobfinder() {
 }
 
 compdef _jobfinder jobfinder ./bin/jobfinder
+
+# wrote /Users/yuli/lab/job-finder/dist/__generated__/cli/_completion.zsh

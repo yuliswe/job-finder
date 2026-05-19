@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 
 import { db } from 'src/db/index.js';
@@ -8,9 +8,11 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForEvaluate } from 'src/db/pipelineQualified.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobPost.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
 
@@ -19,15 +21,27 @@ import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
 const CONCURRENCY = 5;
 const limit = pLimit(CONCURRENCY);
 
+type EvaluateOptions = {
+  all?: boolean;
+};
+
 export function createEvaluateCommand(): Command {
   return new Command('evaluate')
     .description(
       'For each viewed JobPost (description populated), score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.'
     )
-    .action(() => runEvaluate());
+    .addOption(
+      new Option(
+        '--all',
+        'Re-evaluate every qualifying JobPost regardless of pipeline state. Useful after a prompt change.'
+      )
+    )
+    .action((opts: EvaluateOptions) => runEvaluate(opts));
 }
 
-async function runEvaluate(): Promise<void> {
+async function runEvaluate(opts: EvaluateOptions): Promise<void> {
+  if (opts.all) await requeueAllTerminal('evaluate');
+
   const [interests, cv] = await Promise.all([getUserInterests(), getUserCV()]);
 
   if (!interests) {
@@ -35,6 +49,7 @@ async function runEvaluate(): Promise<void> {
       'No user interests found (seeds/interests.local.md or seeds/interests.md). interestScore will be unreliable.'
     );
   }
+
   if (!cv) {
     terminal.warn(
       'No CV found (seeds/cv.local.md or seeds/cv.md). skillScore will be unreliable.'
@@ -43,7 +58,7 @@ async function runEvaluate(): Promise<void> {
 
   const targets = await db
     .selectFrom('JobPost')
-    .select(['id', 'title', 'description'])
+    .select(['id', 'title', 'description', 'skillRequirements'])
     .where(qualifiedForEvaluate)
     .where(
       eligibleForPipelineTask({
@@ -63,6 +78,7 @@ async function runEvaluate(): Promise<void> {
   const results = await Promise.all(
     targets.map(target => limit(() => evaluateOne({ target, interests, cv })))
   );
+
   const jobPostEvaluated = results.reduce(
     (sum, r) => sum + (r?.jobPostEvaluated ?? 0),
     0
@@ -72,7 +88,12 @@ async function runEvaluate(): Promise<void> {
 }
 
 async function evaluateOne(args: {
-  target: { id: string; title: string; description: string | null };
+  target: {
+    id: string;
+    title: string;
+    description: string | null;
+    skillRequirements: string | null;
+  };
   interests: string;
   cv: string;
 }): Promise<{ jobPostEvaluated: number } | undefined> {
@@ -86,12 +107,17 @@ async function evaluateOne(args: {
         throw new Error(`JobPost ${target.id} has no description`);
       }
 
+      const skillRequirements: SkillRequirements = target.skillRequirements
+        ? JSON.parse(target.skillRequirements)
+        : [];
+
       terminal.log(`Evaluating "${target.title}" (${target.id})`);
 
       const eva = await evaluateJobPost({
         interests,
         cv,
         job: { title: target.title, description: target.description },
+        skillRequirements,
       });
 
       await db

@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
@@ -11,6 +11,7 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForRunScripts } from 'src/db/pipelineQualified.js';
 import {
@@ -37,17 +38,31 @@ export function createRunScriptsCommand(): Command {
       '-l, --location <location>',
       'Location to filter by (e.g. "Toronto, ON")'
     )
-    .action(async (opts: { division: string; location: string }) => {
-      await withBrowserInstance(context =>
-        runAll(context, { division: opts.division, location: opts.location })
-      );
-    });
+    .addOption(
+      new Option(
+        '--all',
+        'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
+      )
+    )
+    .action(
+      async (opts: { division: string; location: string; all?: boolean }) => {
+        await withBrowserInstance(context =>
+          runAll(context, {
+            division: opts.division,
+            location: opts.location,
+            all: opts.all,
+          })
+        );
+      }
+    );
 }
 
 async function runAll(
   context: BrowserContext,
-  args: { division: string; location: string }
+  args: { division: string; location: string; all?: boolean }
 ): Promise<void> {
+  if (args.all) await requeueAllTerminal('run-scripts');
+
   const targets = await db
     .selectFrom('JobListSource')
     .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
@@ -79,6 +94,7 @@ async function runAll(
       tabLimit(() => runScriptsForTarget({ context, target, args, interests }))
     )
   );
+
   const jobPostInserted = results.reduce(
     (sum, r) => sum + (r?.jobPostInserted ?? 0),
     0
@@ -119,6 +135,7 @@ async function runScriptsForTarget(args: {
 
       if (!result.ok && result.reason === 'script_error') {
         terminal.error(`script_error for ${target.url}: ${result.error}`);
+
         await recordPipelineState({
           task: 'run-scripts',
           state: PIPELINE_STATE.SCRIPT_ERROR,
@@ -127,10 +144,12 @@ async function runScriptsForTarget(args: {
         });
         return { jobPostInserted: 0 };
       }
+
       if (!result.ok && result.reason === 'no_result_found') {
         terminal.warn(
           `no_result_found for ${target.url} (picked ${JSON.stringify(result.picked)})`
         );
+
         await recordPipelineState({
           task: 'run-scripts',
           state: PIPELINE_STATE.NO_RESULT_FOUND,
@@ -204,6 +223,7 @@ async function insertJobsWithScores(args: {
       let jobPostId: string;
       if (wasInserted) {
         jobPostId = newJobId;
+
         await enqueuePipelineTask({
           task: 'viewing',
           entity: { ofJobPostId: newJobId },
@@ -214,6 +234,7 @@ async function insertJobsWithScores(args: {
           .select('id')
           .where('url', '=', j.url)
           .executeTakeFirst();
+
         if (!existing) continue;
         jobPostId = existing.id;
       }

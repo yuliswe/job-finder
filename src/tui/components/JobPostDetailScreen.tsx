@@ -39,6 +39,7 @@ export function JobPostDetailScreen({
     () => buildScrollLines(row, termCols - 4),
     [row, termCols]
   );
+
   const maxScroll = Math.max(0, scrollLines.length - viewportRows);
   const visible = scrollLines.slice(scroll, scroll + viewportRows);
 
@@ -47,34 +48,42 @@ export function JobPostDetailScreen({
       onClose();
       return;
     }
+
     if (key.downArrow || input === 'j') {
       setScroll(s => Math.min(maxScroll, s + 1));
       return;
     }
+
     if (key.upArrow || input === 'k') {
       setScroll(s => Math.max(0, s - 1));
       return;
     }
+
     if (key.pageDown || input === ' ') {
       setScroll(s => Math.min(maxScroll, s + viewportRows));
       return;
     }
+
     if (key.pageUp) {
       setScroll(s => Math.max(0, s - viewportRows));
       return;
     }
+
     if (input === 'g') {
       setScroll(0);
       return;
     }
+
     if (input === 'G') {
       setScroll(maxScroll);
       return;
     }
+
     if (input === 'l') {
       openUrl(row.url);
       return;
     }
+
     if (input === 'y') {
       copyToClipboard(row.url);
       return;
@@ -141,6 +150,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
         </Text>
       );
     }
+
     out.push(<Text key={out.length}> </Text>);
   }
 
@@ -152,6 +162,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
       reason: 'interest * skill',
     });
   }
+
   if (row.interestScoreReason) {
     reasons.push({
       label: 'interest',
@@ -159,6 +170,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
       reason: row.interestScoreReason,
     });
   }
+
   if (row.skillScore != null) {
     reasons.push({
       label: 'skill',
@@ -166,6 +178,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
       reason: 'weighted average score of skill breakdown',
     });
   }
+
   if (reasons.length > 0) {
     out.push(
       <Text bold color='magenta' key={out.length}>
@@ -187,40 +200,56 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
         );
       }
     }
+
     out.push(<Text key={out.length}> </Text>);
   }
 
-  const breakdown = row.skillScoreBreakdown;
-  if (breakdown && breakdown.length > 0) {
+  if (row.skillRequirements && row.skillRequirements.length > 0) {
+    // skillRequirements (posting-derived, CV-free) is the source of truth for
+    // the skill list + importance + reason. Per-skill match scores against the
+    // CV come from JobPostEval.skillScoreBreakdown, joined here by skill name.
+    const scoreByName = new Map(
+      (row.skillScoreBreakdown ?? []).map(s => [
+        s.skill,
+        { skillScore: s.skillScore, skillScoreReason: s.skillScoreReason },
+      ])
+    );
+
     out.push(
       <Text bold color='magenta' key={out.length}>
         Skill breakdown <Text dimColor>(ranked by importance)</Text>
       </Text>
     );
-    const sorted = [...breakdown].sort((a, b) => b.importance - a.importance);
-    for (const s of sorted) {
-      const score = s.importance * s.skillScore;
+    const sorted = [...row.skillRequirements].sort(
+      (a, b) => b.importance - a.importance
+    );
+
+    for (const req of sorted) {
+      const match = scoreByName.get(req.skill);
+      const score = match != null ? req.importance * match.skillScore : null;
+
       out.push(
         <Text key={out.length}>
-          <Text bold>{s.skill}</Text>{' '}
-          <Text color='cyan'>score {score.toFixed(2)}</Text>
+          <Text bold>{req.skill}</Text>
+          {score != null ? (
+            <Text color='cyan'> score {score.toFixed(2)}</Text>
+          ) : (
+            <Text dimColor> (not yet evaluated)</Text>
+          )}
         </Text>
       );
-      pushBreakdownReason(
-        out,
-        'importance',
-        s.importance,
-        s.importanceReason,
-        width
-      );
-      pushBreakdownReason(
-        out,
-        'your skill',
-        s.skillScore,
-        s.skillScoreReason,
-        width
-      );
+      pushBreakdownReason(out, 'importance', req.importance, req.reason, width);
+      if (match) {
+        pushBreakdownReason(
+          out,
+          'your skill',
+          match.skillScore,
+          match.skillScoreReason,
+          width
+        );
+      }
     }
+
     out.push(<Text key={out.length}> </Text>);
   }
 
@@ -240,6 +269,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
       </Text>
     );
   }
+
   return out;
 }
 
@@ -257,6 +287,7 @@ function pushBreakdownReason(
 ): void {
   if (!text) return;
   const indent = '  ';
+
   out.push(
     <Text dimColor key={out.length}>
       {`${indent}${label}: ${score.toFixed(2)}`}
@@ -284,6 +315,7 @@ function wrapToWidth(text: string, width: number): string[] {
     .replace(/\\n/g, '\n')
     .replace(/\\t/g, '\t')
     .replace(/\r\n?/g, '\n');
+
   if (width <= 0) return normalized.split('\n');
   const out: string[] = [];
   for (const para of normalized.split('\n')) {
@@ -291,10 +323,12 @@ function wrapToWidth(text: string, width: number): string[] {
       out.push('');
       continue;
     }
+
     if (para.length <= width) {
       out.push(para);
       continue;
     }
+
     let line = '';
     for (const word of para.split(/(\s+)/)) {
       if ((line + word).length <= width) {
@@ -307,7 +341,9 @@ function wrapToWidth(text: string, width: number): string[] {
         line = word.trimStart();
       }
     }
+
     if (line.length > 0) out.push(line);
   }
+
   return out;
 }

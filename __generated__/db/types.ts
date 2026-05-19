@@ -38,6 +38,7 @@ export interface JobPost {
   salaryInterval: string | null;
   salaryMax: number | null;
   salaryMin: number | null;
+  skillRequirements: string | null;
   summary: string | null;
   title: string;
   updatedAt: Generated<Timestamp>;

@@ -96,6 +96,31 @@ export default [
       'object-shorthand': ['error', 'properties'],
       'no-useless-rename': 'error',
 
+      // Blank line enforcement
+      'padding-line-between-statements': [
+        'error',
+        // Blank line after the import block
+        { blankLine: 'always', prev: 'import', next: '*' },
+        { blankLine: 'any', prev: 'import', next: 'import' },
+
+        // Blank line around function declarations
+        { blankLine: 'always', prev: '*', next: 'function' },
+        { blankLine: 'always', prev: 'function', next: '*' },
+
+        // Blank line after a closing block (if/for/while/try/switch)
+        { blankLine: 'always', prev: 'block-like', next: '*' },
+
+        // Blank line after multi-line const/let
+        {
+          blankLine: 'always',
+          prev: ['multiline-const', 'multiline-let'],
+          next: '*',
+        },
+
+        // Blank line before multi-line expressions
+        { blankLine: 'always', prev: '*', next: 'multiline-expression' },
+      ],
+
       // Restricted globals
       'no-restricted-globals': [
         'error',

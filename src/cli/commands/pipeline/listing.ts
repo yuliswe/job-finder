@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
@@ -11,6 +11,7 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForListing } from 'src/db/pipelineQualified.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
@@ -19,17 +20,32 @@ import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
+type ListingOptions = {
+  all?: boolean;
+};
+
 export function createListingCommand(): Command {
   return new Command('listing')
     .description(
       'For each unprocessed JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in)'
     )
-    .action(async () => {
-      await withBrowserInstance(context => runListing(context));
-    });
+    .addOption(
+      new Option(
+        '--all',
+        'Re-process every qualifying JobSource regardless of pipeline state. Useful after a prompt change.'
+      )
+    )
+    .action((opts: ListingOptions) =>
+      withBrowserInstance(context => runListing(context, opts))
+    );
 }
 
-async function runListing(context: BrowserContext): Promise<void> {
+async function runListing(
+  context: BrowserContext,
+  opts: ListingOptions
+): Promise<void> {
+  if (opts.all) await requeueAllTerminal('listing');
+
   const sources = await db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
@@ -45,6 +61,7 @@ async function runListing(context: BrowserContext): Promise<void> {
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))
   );
+
   const jobListSourceInserted = results.reduce(
     (sum, r) => sum + (r?.jobListSourceInserted ?? 0),
     0
@@ -73,6 +90,7 @@ async function listOneSource(args: {
         terminal.warn(
           `No job-listing page found within depth limit for "${source.name}"`
         );
+
         await recordPipelineState({
           task: 'listing',
           state: PIPELINE_STATE.NO_LISTING_FOUND,

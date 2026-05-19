@@ -65,6 +65,7 @@ type JobPost = {
   salaryInterval?: Text;
   salaryMax?: Real;
   salaryMin?: Real;
+  skillRequirements?: Text;
   summary?: Text;
   // ── relations ──
   ofJobSourceId: Text | ON_DELETE.CASCADE | JobSource['id'];

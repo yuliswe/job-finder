@@ -11,6 +11,14 @@ import { withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { terminal } from 'src/utils/terminal';
 
+export type SkillRequirement = {
+  skill: string;
+  importance: number;
+  reason: string;
+};
+
+export type SkillRequirements = SkillRequirement[];
+
 export type ViewedJobPost = {
   isJobPosting: boolean;
   title: string | null;
@@ -25,6 +33,7 @@ export type ViewedJobPost = {
   salaryMax: number | null;
   salaryMin: number | null;
   summary: string | null;
+  skillRequirements: SkillRequirements;
 };
 
 /**
@@ -52,6 +61,7 @@ export async function viewJobPost(args: {
           `Timeout/network error loading ${url}; proceeding with whatever content loaded`
         );
       }
+
       title = await page.title();
       html = await cleanHtmlForLlm(page);
     } catch (err) {
@@ -146,6 +156,33 @@ Extract the fields. Return null for anything the page does not actually state.`,
               '1-2 sentence neutral summary of the role for a list view. null if there is not enough info.'
             )
           ),
+          skillRequirements: v.pipe(
+            v.array(
+              v.object({
+                skill: v.pipe(
+                  v.string(),
+                  v.description(
+                    'Short canonical name of a skill / qualification / requirement the posting itself asks for.'
+                  )
+                ),
+                importance: v.pipe(
+                  v.number(),
+                  v.description(
+                    'How load-bearing the posting makes this skill, in [0, 1]. 1.0 = must-have; 0.5 = nice-to-have; ~0.1 = mentioned in passing.'
+                  )
+                ),
+                reason: v.pipe(
+                  v.string(),
+                  v.description(
+                    'Natural-prose sentence (≤ ~300 chars), in your own words, paraphrasing what the posting demands and noting how strongly it is framed (hard requirement / nice-to-have / passing mention). Do NOT use quote marks or copy raw phrases from the posting. Do NOT add facts the posting does not state.'
+                  )
+                ),
+              })
+            ),
+            v.description(
+              'Per-skill list derived entirely from the posting. Cap at ~15 entries. Empty array if the page is not a posting.'
+            )
+          ),
         }),
         maxAttempts: 3,
         model: LLM_VIEWING_MODEL,
@@ -161,9 +198,11 @@ Extract the fields. Return null for anything the page does not actually state.`,
                 'You returned null/empty for `description` but `isJobPosting` is true. Either: (a) re-extract the description (look harder — responsibilities, requirements, about-the-role, what-you-will-do sections), or (b) if the page genuinely is not a job posting, set `isJobPosting` to false and null every other field.',
             };
           }
+
           return { valid: true, result: parsed };
         },
       });
+
       return result;
     } catch (err) {
       terminal.error(`viewJobPost LLM call failed for ${url}: ${String(err)}`);

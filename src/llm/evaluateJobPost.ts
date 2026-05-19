@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 import { LLM_EVALUATION_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
+import type { SkillRequirements } from 'src/llm/viewJobPost.js';
 import { EVALUATE_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/evaluateJobPost.js';
 import { terminal } from 'src/utils/terminal';
 
@@ -9,8 +10,6 @@ const MAX_ATTEMPTS = 2;
 
 export type SkillBreakdownEntry = {
   skill: string;
-  importance: number;
-  importanceReason: string;
   skillScore: number;
   skillScoreReason: string;
 };
@@ -25,17 +24,26 @@ export type JobPostEvaluation = {
 
 /**
  * Ask the LLM to score a single job posting against the user's interests + CV
- * along two axes (interest and skill), and to break the skill score down per
- * skill the posting calls for.
+ * along two axes (interest and skill). The set of skills under consideration
+ * comes from the posting-derived `skillRequirements` (extracted at viewing
+ * time, CV-free); here the LLM only scores the user's experience with each.
  */
 export async function evaluateJobPost(args: {
   interests: string;
   cv: string;
   job: { title: string; description: string };
+  skillRequirements: SkillRequirements;
 }): Promise<JobPostEvaluation> {
-  const { interests, cv, job } = args;
+  const { interests, cv, job, skillRequirements } = args;
 
   const memory = new Memory([{ system: EVALUATE_JOB_POST_SYSTEM_PROMPT }]);
+
+  const skillsBlock = skillRequirements
+    .map(
+      (s, i) =>
+        `${i + 1}. "${s.skill}" — importance ${s.importance.toFixed(2)} (${s.reason})`
+    )
+    .join('\n');
 
   const { result } = await feedbackLoop({
     memory,
@@ -53,7 +61,10 @@ Job description:
 
 ${job.description}
 
-Score this posting and return the structured evaluation.`,
+Skills the posting asks for (pre-extracted, in priority order):
+${skillsBlock || '(none)'}
+
+Score this posting and return the structured evaluation. For skillScores, return one entry for every skill listed above — no more, no fewer — using the EXACT skill name strings from the list (do not rename, paraphrase, or merge).`,
     schema: v.object({
       interestScore: v.pipe(
         v.number(),
@@ -67,25 +78,13 @@ Score this posting and return the structured evaluation.`,
           'One sentence (≤ ~200 chars) justifying interestScore, citing concrete words from the interests and the posting.'
         )
       ),
-      skillScoreBreakdown: v.pipe(
+      skillScores: v.pipe(
         v.array(
           v.object({
             skill: v.pipe(
               v.string(),
               v.description(
-                'Short canonical name of a skill or requirement the posting asks for.'
-              )
-            ),
-            importance: v.pipe(
-              v.number(),
-              v.description(
-                'How load-bearing this skill is for the role, in [0, 1]. 1.0 = must-have; 0.5 = nice-to-have; ~0.1 = mentioned in passing.'
-              )
-            ),
-            importanceReason: v.pipe(
-              v.string(),
-              v.description(
-                'Short justification (≤ ~140 chars), referencing where the posting calls it out.'
+                'Exact skill name copied from the input skillRequirements list.'
               )
             ),
             skillScore: v.pipe(
@@ -103,7 +102,7 @@ Score this posting and return the structured evaluation.`,
           })
         ),
         v.description(
-          'Per-skill breakdown. Cap at ~15 entries; focus on load-bearing skills.'
+          'One entry for every skill in the input skillRequirements, using the EXACT skill name strings. Each input skill must appear exactly once; do not add, rename, or omit any.'
         )
       ),
     }),
@@ -119,23 +118,81 @@ Score this posting and return the structured evaluation.`,
         };
       }
 
-      for (const s of parsed.skillScoreBreakdown) {
-        if (!inRange(s.importance) || !inRange(s.skillScore)) {
+      const expected = new Set(skillRequirements.map(s => s.skill));
+      const seen = new Set<string>();
+      const duplicates: string[] = [];
+      const unknown: string[] = [];
+
+      for (const got of parsed.skillScores) {
+        if (!expected.has(got.skill)) {
+          unknown.push(got.skill);
+          continue;
+        }
+
+        if (seen.has(got.skill)) {
+          duplicates.push(got.skill);
+          continue;
+        }
+
+        seen.add(got.skill);
+        if (!inRange(got.skillScore)) {
           return {
             valid: false,
-            feedback: `Per-skill importance and skillScore must be in [0, 1]; offender: ${JSON.stringify(s)}.`,
+            feedback: `skillScores entry for "${got.skill}" has skillScore ${got.skillScore}; must be in [0, 1].`,
           };
         }
       }
+
+      if (unknown.length > 0) {
+        return {
+          valid: false,
+          feedback: `skillScores contains skill names not in the input skillRequirements: ${unknown.map(s => `"${s}"`).join(', ')}. Use the EXACT skill names from the input — do not rename, paraphrase, or invent.`,
+        };
+      }
+
+      if (duplicates.length > 0) {
+        return {
+          valid: false,
+          feedback: `skillScores has duplicate entries for: ${duplicates.map(s => `"${s}"`).join(', ')}. Each input skill must appear exactly once.`,
+        };
+      }
+
+      const missing = [...expected].filter(s => !seen.has(s));
+      if (missing.length > 0) {
+        return {
+          valid: false,
+          feedback: `skillScores is missing entries for: ${missing.map(s => `"${s}"`).join(', ')}. Every skill in the input skillRequirements must be scored.`,
+        };
+      }
+
       return { valid: true, result: parsed };
     },
   });
 
+  // Index the LLM scores by skill name (validator already enforced
+  // exact name match + no duplicates + no missing entries).
+  const scoreByName = new Map(result.skillScores.map(s => [s.skill, s]));
+
+  const skillScoreBreakdown: SkillBreakdownEntry[] = skillRequirements.map(
+    req => {
+      const s = scoreByName.get(req.skill)!;
+      return {
+        skill: s.skill,
+        skillScore: s.skillScore,
+        skillScoreReason: s.skillScoreReason,
+      };
+    }
+  );
+
   // skillScore is derived, not LLM-supplied: it's the importance-weighted
-  // average of the per-skill scores in the breakdown. This keeps the aggregate
-  // mechanically consistent with the breakdown the UI shows.
+  // average over the (importance, skillScore) pairs, where importance comes
+  // from the posting-derived skillRequirements and skillScore comes from the
+  // LLM's CV match.
   const { skillScore, skillScoreReason } = aggregateSkillScore(
-    result.skillScoreBreakdown
+    skillRequirements.map(req => ({
+      importance: req.importance,
+      skillScore: scoreByName.get(req.skill)!.skillScore,
+    }))
   );
 
   return {
@@ -143,35 +200,40 @@ Score this posting and return the structured evaluation.`,
     interestScoreReason: result.interestScoreReason,
     skillScore,
     skillScoreReason,
-    skillScoreBreakdown: result.skillScoreBreakdown,
+    skillScoreBreakdown,
   };
 }
 
-function aggregateSkillScore(breakdown: SkillBreakdownEntry[]): {
+function aggregateSkillScore(
+  pairs: { importance: number; skillScore: number }[]
+): {
   skillScore: number;
   skillScoreReason: string;
 } {
-  if (breakdown.length === 0) {
+  if (pairs.length === 0) {
     return {
       skillScore: 0,
       skillScoreReason: 'No skills extracted from the posting.',
     };
   }
+
   let weighted = 0;
   let totalImportance = 0;
-  for (const s of breakdown) {
-    weighted += s.importance * s.skillScore;
-    totalImportance += s.importance;
+  for (const p of pairs) {
+    weighted += p.importance * p.skillScore;
+    totalImportance += p.importance;
   }
+
   if (totalImportance === 0) {
     return {
       skillScore: 0,
-      skillScoreReason: `All ${breakdown.length} skills had importance=0.`,
+      skillScoreReason: `All ${pairs.length} skills had importance=0.`,
     };
   }
+
   const skillScore = weighted / totalImportance;
   return {
     skillScore,
-    skillScoreReason: `Importance-weighted average over ${breakdown.length} skill${breakdown.length === 1 ? '' : 's'} (Σ importance = ${totalImportance.toFixed(2)}).`,
+    skillScoreReason: `Importance-weighted average over ${pairs.length} skill${pairs.length === 1 ? '' : 's'} (Σ importance = ${totalImportance.toFixed(2)}).`,
   };
 }

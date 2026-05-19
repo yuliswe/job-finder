@@ -135,6 +135,7 @@ async function discoverSeedJobs(): Promise<JobResult[]> {
     logger: terminal,
     validate: validateScrapeArgs,
   });
+
   return result;
 }
 
@@ -148,6 +149,7 @@ async function validateScrapeArgs(
   const options = Object.fromEntries(
     Object.entries(args).filter(([, value]) => value !== null)
   );
+
   try {
     const results = await scrapeJobs(options);
     if (results.length === 0) {
@@ -157,12 +159,14 @@ async function validateScrapeArgs(
           'The scrape returned 0 jobs. Broaden the search_term or try different sites/locations.',
       };
     }
+
     return { valid: true, result: results };
   } catch (err) {
     const detail =
       err instanceof JobspyError
         ? `${err.message}\n${err.stderr}`
         : String(err);
+
     return {
       valid: false,
       feedback: `The scrape call failed: ${detail}\n\nFix the arguments and try again.`,
@@ -179,6 +183,7 @@ async function readSeedFile(path: string): Promise<string> {
   } catch {
     // local file absent — fall through to base
   }
+
   return readFile(path, 'utf-8');
 }
 
@@ -189,11 +194,13 @@ async function insertSeeds(
   for (const j of jobs) {
     if (j.job_url && !dedup.has(j.job_url)) dedup.set(j.job_url, j);
   }
+
   let sourceSeedInserted = 0;
   for (const j of dedup.values()) {
     const result = await seedOne({ job: j });
     sourceSeedInserted += result.sourceSeedInserted;
   }
+
   return { sourceSeedInserted };
 }
 
@@ -215,6 +222,7 @@ async function seedOne(args: {
         title: job.title,
       })
       .execute();
+
     // Seeding "completes" the moment the row exists — record done inline so
     // progress reflects reality. Then queue the next stage.
     await recordPipelineState({
@@ -222,6 +230,7 @@ async function seedOne(args: {
       state: PIPELINE_STATE.DONE,
       entity: { ofSourceSeedId: id },
     });
+
     await enqueuePipelineTask({
       task: 'sourcing',
       entity: { ofSourceSeedId: id },

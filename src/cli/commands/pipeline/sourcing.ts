@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
@@ -11,6 +11,7 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForSourcing } from 'src/db/pipelineQualified.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
@@ -20,17 +21,32 @@ import { terminal } from 'src/utils/terminal.js';
 const PER_NAME_RETRY_LIMIT = 3;
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
+type SourcingOptions = {
+  all?: boolean;
+};
+
 export function createSourcingCommand(): Command {
   return new Command('sourcing')
     .description(
       'Discover JobSource rows from recent SourceSeed URLs via headless browse + LLM'
     )
-    .action(async () => {
-      await withBrowserInstance(context => runSourcing(context));
-    });
+    .addOption(
+      new Option(
+        '--all',
+        'Re-process every qualifying SourceSeed regardless of pipeline state. Useful after a prompt change.'
+      )
+    )
+    .action((opts: SourcingOptions) =>
+      withBrowserInstance(context => runSourcing(context, opts))
+    );
 }
 
-async function runSourcing(context: BrowserContext): Promise<void> {
+async function runSourcing(
+  context: BrowserContext,
+  opts: SourcingOptions
+): Promise<void> {
+  if (opts.all) await requeueAllTerminal('sourcing');
+
   const names = await db
     .selectFrom('SourceSeed')
     .select('name')
@@ -52,6 +68,7 @@ async function runSourcing(context: BrowserContext): Promise<void> {
   const results = await Promise.all(
     names.map(({ name }) => tabLimit(() => sourceOneGroup({ context, name })))
   );
+
   const jobSourceInserted = results.reduce(
     (sum, r) => sum + r.jobSourceInserted,
     0
@@ -101,6 +118,7 @@ async function sourceOneGroup(args: {
       .select('id')
       .where('name', '=', name)
       .execute();
+
     for (const seed of groupSeeds) {
       await recordPipelineState({
         task: 'sourcing',
@@ -127,6 +145,7 @@ async function sourceOneSeedUrl(args: {
       const source = await discoverJobSource({ context, url: seed.url });
       if (!source) {
         terminal.warn(`discoverJobSource returned no result for ${seed.url}`);
+
         await recordPipelineState({
           task: 'sourcing',
           state: PIPELINE_STATE.NO_SOURCE_FOUND,
@@ -145,6 +164,7 @@ async function sourceOneSeedUrl(args: {
         })
         .onConflict(oc => oc.column('url').doNothing())
         .executeTakeFirst();
+
       const wasInserted = (insertResult.numInsertedOrUpdatedRows ?? 0n) > 0n;
 
       await recordPipelineState({

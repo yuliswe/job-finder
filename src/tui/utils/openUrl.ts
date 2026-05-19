@@ -8,11 +8,13 @@ export function openUrl(url: string): void {
       : process.platform === 'win32'
         ? 'start'
         : 'xdg-open';
+
   try {
     const p = spawn(cmd, [url], {
       stdio: 'ignore',
       detached: true,
     });
+
     p.on('error', () => {
       // No opener available — silently no-op.
     });

@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
@@ -11,6 +11,7 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForViewing } from 'src/db/pipelineQualified.js';
 import { viewJobPost } from 'src/llm/viewJobPost.js';
@@ -19,17 +20,36 @@ import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
+type ViewingOptions = {
+  all?: boolean;
+};
+
 export function createViewingCommand(): Command {
   return new Command('viewing')
     .description(
       'For each unprocessed JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields'
     )
-    .action(async () => {
-      await withBrowserInstance(context => runAll(context));
-    });
+    .addOption(
+      new Option(
+        '--all',
+        'Re-view every qualifying JobPost regardless of pipeline state — including ones already done / not_a_job_posting / failed. Useful after a prompt change.'
+      )
+    )
+    .action((opts: ViewingOptions) =>
+      withBrowserInstance(context => runAll(context, opts))
+    );
 }
 
-async function runAll(context: BrowserContext): Promise<void> {
+async function runAll(
+  context: BrowserContext,
+  opts: ViewingOptions
+): Promise<void> {
+  // With --all, requeue every qualifying terminal viewing row first. Going
+  // through 'queued' (instead of just bypassing the eligibility filter) keeps
+  // the TUI pipeline bar honest — the numerator sees them transition through
+  // queued → started → done like any normal pickup.
+  if (opts.all) await requeueAllTerminal('viewing');
+
   // qualifiedForViewing handles the active-source filter AND the
   // titleRelavency threshold against PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
   const targets = await db
@@ -52,6 +72,7 @@ async function runAll(context: BrowserContext): Promise<void> {
   const results = await Promise.all(
     targets.map(target => tabLimit(() => viewOneTarget({ context, target })))
   );
+
   const jobPostUpdated = results.reduce(
     (sum, r) => sum + (r?.jobPostUpdated ?? 0),
     0
@@ -73,6 +94,7 @@ async function viewOneTarget(args: {
       terminal.log(`Viewing JobPost ${target.url}`);
 
       const parsed = await viewJobPost({ context, url: target.url });
+
       if (!parsed) {
         await recordPipelineState({
           task: 'viewing',
@@ -82,6 +104,7 @@ async function viewOneTarget(args: {
         });
         return { jobPostUpdated: 0 };
       }
+
       if (!parsed.isJobPosting) {
         // LLM determined the URL is not a job posting (expired, login wall,
         // error page, listings page, etc.). Treat this as a terminal verdict
@@ -94,6 +117,10 @@ async function viewOneTarget(args: {
         });
         return { jobPostUpdated: 0 };
       }
+
+      const sortedSkillRequirements = [...parsed.skillRequirements].sort(
+        (a, b) => b.importance - a.importance
+      );
 
       const update: Record<string, unknown> = {
         company: parsed.company,
@@ -111,8 +138,10 @@ async function viewOneTarget(args: {
         salaryInterval: parsed.salaryInterval,
         salaryMax: parsed.salaryMax,
         salaryMin: parsed.salaryMin,
+        skillRequirements: JSON.stringify(sortedSkillRequirements),
         summary: parsed.summary,
       };
+
       // Only overwrite title if the LLM produced one — preserve the
       // run-scripts title as a fallback otherwise.
       if (parsed.title) update.title = parsed.title;
@@ -128,10 +157,12 @@ async function viewOneTarget(args: {
         state: PIPELINE_STATE.DONE,
         entity: { ofJobPostId: target.id },
       });
+
       await enqueuePipelineTask({
         task: 'evaluate',
         entity: { ofJobPostId: target.id },
       });
+
       return { jobPostUpdated: 1 };
     },
   });

@@ -105,10 +105,11 @@ export function qualifiedForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
 }
 
 /** A JobPost is qualified for evaluate when its source tree is active AND its
- * description has been populated by `viewing`. */
+ * description + skillRequirements have been populated by `viewing`. */
 export function qualifiedForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
   return eb.and([
     jobPostInActiveSource(eb),
     eb('JobPost.description', 'is not', null),
+    eb('JobPost.skillRequirements', 'is not', null),
   ]);
 }

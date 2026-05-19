@@ -19,6 +19,7 @@ import {
   qualifiedForViewing,
 } from 'src/db/pipelineQualified.js';
 import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobPost.js';
 import { bumpLocalRevision } from 'src/tui/useLiveData.js';
 
 export type PipelineStageStats = {
@@ -67,6 +68,8 @@ export type JobPostRow = {
   skillScoreReason: string | null;
   /** Parsed from the JSON-encoded JobPostEval.skillScoreBreakdown column. */
   skillScoreBreakdown: SkillBreakdownEntry[] | null;
+  /** Parsed from JobPost.skillRequirements — posting-derived only (no CV). */
+  skillRequirements: SkillRequirements | null;
   overallScore: number | null;
   description: string | null;
   summary: string | null;
@@ -139,6 +142,7 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
     else if (r.state === PIPELINE_STATE.STARTED) started += n;
     else failed += n;
   }
+
   return {
     task,
     label: task,
@@ -158,6 +162,7 @@ function stageStatsQuery(task: PipelineTask) {
   const q = db
     .selectFrom('LatestPipelineState')
     .where('LatestPipelineState.task', '=', task);
+
   switch (task) {
     case 'seeding':
     case 'sourcing':
@@ -258,6 +263,7 @@ export async function listJobPosts(args: {
       'JobPost.salaryCurrency as salaryCurrency',
       'JobPost.description as description',
       'JobPost.summary as summary',
+      'JobPost.skillRequirements as skillRequirementsJson',
       'JobPostEval.titleRelavency as titleRelavency',
       'JobPostEval.titleRelavencyReason as titleRelavencyReason',
       'JobPostEval.interestScore as interestScore',
@@ -284,10 +290,15 @@ export async function listJobPosts(args: {
 
   const rows = await q.limit(limit).execute();
   return rows.map(r => {
-    const { skillScoreBreakdownJson, ...rest } = r;
+    const { skillScoreBreakdownJson, skillRequirementsJson, ...rest } = r;
     return {
       ...rest,
-      skillScoreBreakdown: parseSkillBreakdown(skillScoreBreakdownJson),
+      skillScoreBreakdown: parseJsonArray<SkillBreakdownEntry>(
+        skillScoreBreakdownJson
+      ),
+      skillRequirements: parseJsonArray<SkillRequirements[number]>(
+        skillRequirementsJson
+      ),
       overallScore:
         r.skillScore != null && r.interestScore != null
           ? r.skillScore * r.interestScore
@@ -296,13 +307,11 @@ export async function listJobPosts(args: {
   });
 }
 
-function parseSkillBreakdown(
-  json: string | null
-): SkillBreakdownEntry[] | null {
+function parseJsonArray<T>(json: string | null): T[] | null {
   if (!json) return null;
   try {
     const parsed = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as SkillBreakdownEntry[]) : null;
+    return Array.isArray(parsed) ? (parsed as T[]) : null;
   } catch {
     return null;
   }
@@ -343,6 +352,7 @@ export async function listSources(): Promise<SourceRow[]> {
     .orderBy('JobSource.name', 'asc')
     .orderBy('JobListSource.createdAt', 'asc')
     .execute();
+
   return rows.map(r => {
     const listIsActive = r.listIsActive ?? null;
     const sourceIsActive = r.sourceIsActive ?? 0;
@@ -389,6 +399,7 @@ export async function toggleSourceActive(row: SourceRow): Promise<void> {
       .where('id', '=', row.sourceId)
       .execute();
   }
+
   bumpLocalRevision();
 }
 
@@ -408,6 +419,7 @@ export async function getRecentActivity(limit = 20): Promise<ActivityRow[]> {
     .orderBy('createdAt', 'desc')
     .limit(limit)
     .execute();
+
   return rows.map(r => ({
     task: r.task,
     state: r.state,

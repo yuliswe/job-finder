@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
@@ -10,6 +10,7 @@ import {
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
+  requeueAllTerminal,
 } from 'src/db/pipelineState.js';
 import { qualifiedForScripting } from 'src/db/pipelineQualified.js';
 import { generateParserScript } from 'src/llm/generateParserScript.js';
@@ -18,17 +19,32 @@ import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
+type ScriptingOptions = {
+  all?: boolean;
+};
+
 export function createScriptingCommand(): Command {
   return new Command('scripting')
     .description(
       'For each unprocessed JobListSource, generate and validate a parser script (listLocations + searchJobs) and store it in JobListSource.parserScript'
     )
-    .action(async () => {
-      await withBrowserInstance(context => runScripting(context));
-    });
+    .addOption(
+      new Option(
+        '--all',
+        'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
+      )
+    )
+    .action((opts: ScriptingOptions) =>
+      withBrowserInstance(context => runScripting(context, opts))
+    );
 }
 
-async function runScripting(context: BrowserContext): Promise<void> {
+async function runScripting(
+  context: BrowserContext,
+  opts: ScriptingOptions
+): Promise<void> {
+  if (opts.all) await requeueAllTerminal('scripting');
+
   const targets = await db
     .selectFrom('JobListSource')
     .select(['id', 'url'])
@@ -44,6 +60,7 @@ async function runScripting(context: BrowserContext): Promise<void> {
   const results = await Promise.all(
     targets.map(target => tabLimit(() => scriptOneTarget({ context, target })))
   );
+
   const jobListSourceUpdated = results.reduce(
     (sum, r) => sum + (r?.jobListSourceUpdated ?? 0),
     0
@@ -70,10 +87,12 @@ async function scriptOneTarget(args: {
         context,
         listingUrl: target.url,
       });
+
       if (!generated) {
         terminal.warn(
           `Could not produce a validated script for ${target.url} — leaving unprocessed for retry`
         );
+
         await recordPipelineState({
           task: 'scripting',
           state: PIPELINE_STATE.ABORTED,

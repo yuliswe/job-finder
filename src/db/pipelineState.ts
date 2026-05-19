@@ -3,6 +3,14 @@ import type { ExpressionBuilder } from 'kysely';
 import type { DB } from '__generated__/db/types.js';
 import { db, sqlite } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
+import {
+  qualifiedForEvaluate,
+  qualifiedForListing,
+  qualifiedForRunScripts,
+  qualifiedForScripting,
+  qualifiedForSourcing,
+  qualifiedForViewing,
+} from 'src/db/pipelineQualified.js';
 import { terminal } from 'src/utils/terminal.js';
 
 export type PipelineEntity =
@@ -135,6 +143,151 @@ export async function enqueuePipelineTask(args: {
   });
 }
 
+/** Tasks that operate on a pre-existing parent entity and can therefore be
+ * requeued in bulk. `seeding` is excluded — it generates new SourceSeed rows
+ * from interests/CV rather than picking up existing ones. */
+export type RequeueableTask = Exclude<PipelineTask, 'seeding'>;
+
+/** For `task`, insert a fresh 'queued' state for every qualifying parent
+ * entity whose latest state is terminal (not in {queued, started,
+ * user_interrupted} — skipping those avoids racing with in-flight work and
+ * duplicating already-pending rows). Returns the number of entities requeued.
+ *
+ * "Qualifying" uses the same `qualifiedForX` predicate the pipeline runner
+ * uses to pick work, so we never requeue rows that the next run wouldn't pick
+ * up anyway (e.g. from inactive sources). */
+export async function requeueAllTerminal(
+  task: RequeueableTask
+): Promise<number> {
+  const skipStates = [
+    PIPELINE_STATE.QUEUED,
+    PIPELINE_STATE.STARTED,
+    PIPELINE_STATE.USER_INTERRUPTED,
+  ];
+
+  const ids = await (async (): Promise<string[]> => {
+    switch (task) {
+      case 'sourcing': {
+        const rows = await db
+          .selectFrom('SourceSeed')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofSourceSeedId',
+            'SourceSeed.id'
+          )
+          .select('SourceSeed.id as id')
+          .where(qualifiedForSourcing)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'listing': {
+        const rows = await db
+          .selectFrom('JobSource')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofJobSourceId',
+            'JobSource.id'
+          )
+          .select('JobSource.id as id')
+          .where(qualifiedForListing)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'scripting': {
+        const rows = await db
+          .selectFrom('JobListSource')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofJobListSourceId',
+            'JobListSource.id'
+          )
+          .select('JobListSource.id as id')
+          .where(qualifiedForScripting)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'run-scripts': {
+        const rows = await db
+          .selectFrom('JobListSource')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofJobListSourceId',
+            'JobListSource.id'
+          )
+          .select('JobListSource.id as id')
+          .where(qualifiedForRunScripts)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'viewing': {
+        const rows = await db
+          .selectFrom('JobPost')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofJobPostId',
+            'JobPost.id'
+          )
+          .select('JobPost.id as id')
+          .where(qualifiedForViewing)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'evaluate': {
+        const rows = await db
+          .selectFrom('JobPost')
+          .innerJoin(
+            'LatestPipelineState',
+            'LatestPipelineState.ofJobPostId',
+            'JobPost.id'
+          )
+          .select('JobPost.id as id')
+          .where(qualifiedForEvaluate)
+          .where('LatestPipelineState.task', '=', task)
+          .where('LatestPipelineState.state', 'not in', skipStates)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+    }
+  })();
+
+  const fk = FK_BY_TASK[task];
+  for (const id of ids) {
+    await enqueuePipelineTask({
+      task,
+      entity: { [fk]: id } as PipelineEntity,
+    });
+  }
+
+  if (ids.length === 0) {
+    terminal.log(`--all: nothing to requeue for ${task} (no terminal rows).`);
+  } else {
+    terminal.log(`--all: requeued ${ids.length} rows for ${task}.`);
+  }
+
+  return ids.length;
+}
+
 /** Returns the latest `PipelineState` row for (task, entity) via the
  * `LatestPipelineState` view, or null if no row exists. */
 export async function getLatestPipelineState(args: {
@@ -149,6 +302,7 @@ export async function getLatestPipelineState(args: {
     .where('task', '=', args.task)
     .where(fk, '=', entityId)
     .executeTakeFirst();
+
   // View columns are typed as nullable by kysely-codegen, but rows in this
   // view are derived from non-null `PipelineState` columns — narrow here.
   if (row == null || row.state == null || row.createdAt == null) return null;
@@ -236,7 +390,9 @@ export async function processOne<T>(args: {
     fk: FK_BY_TASK[args.task],
     entityId: entityIdOf(args.entity),
   };
+
   inFlight.add(entry);
+
   await recordPipelineState({
     task: args.task,
     state: PIPELINE_STATE.STARTED,
@@ -248,6 +404,7 @@ export async function processOne<T>(args: {
     terminal.error(
       `${args.task} failed${args.label ? ` for ${args.label}` : ''}: ${String(err)}`
     );
+
     await recordPipelineState({
       task: args.task,
       state: PIPELINE_STATE.FAILED,
@@ -296,6 +453,7 @@ function flushInFlightAsInterrupted(): void {
         ofSourceSeedId, ofJobSourceId, ofJobListSourceId, ofJobPostId)
      VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`
   );
+
   for (const e of inFlight) {
     stmt.run(
       newId(),
@@ -307,5 +465,6 @@ function flushInFlightAsInterrupted(): void {
       e.fk === 'ofJobPostId' ? e.entityId : null
     );
   }
+
   inFlight.clear();
 }

@@ -103,7 +103,13 @@ Requires:
 For each unprocessed `JobPost` (i.e. `isProcessed=false`), open the posting URL, clean the page HTML, and ask the LLM to extract structured fields (`title`, `company`, `location`, `description`, `isRemote`, `jobType`, `postedAt`, `salaryMin`/`salaryMax`/`salaryCurrency`/`salaryInterval`, `summary`). The row is updated with whatever fields the LLM populates and marked `isProcessed`. Each row is recorded in `PipelineState` with `task='viewing'` and state `done` / `failed`.
 
 ```bash
-./src/cli/bin/cli pipeline viewing
+jobfinder pipeline viewing
+```
+
+Pass `--all` to re-view every qualifying `JobPost` regardless of pipeline state — including ones already `done` / `not_a_job_posting` / `failed`. Useful after a prompt change.
+
+```bash
+jobfinder pipeline viewing --all
 ```
 
 Requires:
@@ -116,7 +122,14 @@ Requires:
 For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.
 
 ```bash
-./src/cli/bin/cli pipeline sourcing
+jobfinder pipeline sourcing
+```
+
+All pipeline subcommands (except `seeding`) accept `--all` to re-process every qualifying parent regardless of pipeline state — including ones already `done` / `failed` / `aborted`. Useful after a prompt change. Available on `sourcing`, `listing`, `scripting`, `run-scripts`, `viewing`, `evaluate`:
+
+```bash
+jobfinder pipeline sourcing --all
+jobfinder pipeline evaluate --all
 ```
 
 Requires:
