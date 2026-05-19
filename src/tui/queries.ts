@@ -78,6 +78,10 @@ export type JobPostRow = {
 export type SourceRow = {
   /** Composite of source + list id, stable for React keys. */
   rowKey: string;
+  /** `'source'` for JobSource-backed rows; `'seed'` for SourceSeed rows whose
+   * sourcing hasn't yet landed a JobSource. Seed rows are display-only — not
+   * toggleable, no list, no posts. */
+  kind: 'source' | 'seed';
   sourceId: string;
   sourceName: string;
   sourceUrl: string;
@@ -91,8 +95,9 @@ export type SourceRow = {
   listDivisions: string | null;
   hasScript: number;
   jobPostCount: number;
-  /** Effective active flag — JobListSource's when present, else JobSource's. */
-  isActive: number;
+  /** Effective active flag — JobListSource's when present, else JobSource's.
+   * `null` for `kind === 'seed'`, where the concept doesn't apply. */
+  isActive: number | null;
 };
 
 export type ActivityRow = {
@@ -353,11 +358,12 @@ export async function listSources(): Promise<SourceRow[]> {
     .orderBy('JobListSource.createdAt', 'asc')
     .execute();
 
-  return rows.map(r => {
+  const sourceRows: SourceRow[] = rows.map(r => {
     const listIsActive = r.listIsActive ?? null;
     const sourceIsActive = r.sourceIsActive ?? 0;
     return {
       rowKey: `${r.sourceId}::${r.listId ?? ''}`,
+      kind: 'source',
       sourceId: r.sourceId,
       sourceName: r.sourceName,
       sourceUrl: r.sourceUrl,
@@ -375,6 +381,50 @@ export async function listSources(): Promise<SourceRow[]> {
       isActive: r.listId ? (listIsActive ?? 0) : sourceIsActive,
     };
   });
+
+  const seedRows = await listPendingSeedRows();
+  return [...sourceRows, ...seedRows];
+}
+
+/** SourceSeeds whose latest `sourcing` state is anything other than `done` —
+ * i.e. they've been approved but haven't yet produced a JobSource (queued,
+ * started, failed, user_interrupted, no_source_found, etc.). Rendered as
+ * read-only "seed" rows alongside real sources. */
+async function listPendingSeedRows(): Promise<SourceRow[]> {
+  const rows = await db
+    .selectFrom('SourceSeed')
+    .innerJoin('LatestPipelineState', join =>
+      join
+        .onRef('LatestPipelineState.ofSourceSeedId', '=', 'SourceSeed.id')
+        .on('LatestPipelineState.task', '=', 'sourcing')
+    )
+    .select([
+      'SourceSeed.id as sourceId',
+      'SourceSeed.name as sourceName',
+      'SourceSeed.url as sourceUrl',
+    ])
+    .where('LatestPipelineState.state', '!=', PIPELINE_STATE.DONE)
+    .orderBy('SourceSeed.name', 'asc')
+    .execute();
+
+  return rows.map(r => ({
+    rowKey: `seed::${r.sourceId}`,
+    kind: 'seed',
+    sourceId: r.sourceId,
+    sourceName: r.sourceName,
+    sourceUrl: r.sourceUrl,
+    sourceIsActive: 0,
+    sourceIsProcessed: 0,
+    listId: null,
+    listUrl: null,
+    listIsActive: null,
+    listIsProcessed: null,
+    listLocations: null,
+    listDivisions: null,
+    hasScript: 0,
+    jobPostCount: 0,
+    isActive: null,
+  }));
 }
 
 function isDoneState(state: string | null | undefined): boolean {
@@ -385,6 +435,8 @@ function isDoneState(state: string | null | undefined): boolean {
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
+  // Seed rows aren't backed by a JobSource yet — there's nothing to toggle.
+  if (row.kind === 'seed') return;
   const next = row.isActive ? Bool.False : Bool.True;
   if (row.listId) {
     await db

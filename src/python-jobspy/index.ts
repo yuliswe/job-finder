@@ -98,8 +98,15 @@ export type RunnerConfig = {
   python?: readonly string[];
   /** Working dir for the subprocess; defaults to inherited cwd. */
   cwd?: string;
-  /** Forwarded to the child stderr stream; defaults to 'inherit'. */
-  stderr?: 'inherit' | 'pipe' | 'ignore';
+  /** How to handle the child's stderr.
+   *
+   * - `'tee'` (default): pipe to the parent process so we can capture it on
+   *   `JobspyError.stderr`, while still streaming each chunk to
+   *   `process.stderr` in real time. Use this when callers need to inspect
+   *   the trace (e.g. to decide whether an error is unrecoverable).
+   * - `'inherit'` / `'pipe'` / `'ignore'`: forwarded directly to spawn. Note
+   *   `'inherit'` leaves `stderr` on the error empty. */
+  stderr?: 'tee' | 'inherit' | 'pipe' | 'ignore';
 };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -109,7 +116,8 @@ export class JobspyError extends Error {
   constructor(
     message: string,
     readonly stderr: string,
-    readonly exitCode: number | null
+    readonly exitCode: number | null,
+    readonly signal: NodeJS.Signals | null = null
   ) {
     super(message);
     this.name = 'JobspyError';
@@ -128,12 +136,13 @@ export function scrapeJobs(
     );
   }
 
-  const stderrMode = config.stderr ?? 'inherit';
+  const stderrMode = config.stderr ?? 'tee';
+  const spawnStderr = stderrMode === 'tee' ? 'pipe' : stderrMode;
 
   return new Promise((resolveP, rejectP) => {
     const proc = spawn(cmd, [...launcherArgs, RUNNER], {
       cwd: config.cwd,
-      stdio: ['pipe', 'pipe', stderrMode],
+      stdio: ['pipe', 'pipe', spawnStderr],
     });
 
     const childStdin = proc.stdin!;
@@ -141,21 +150,71 @@ export function scrapeJobs(
 
     let stdout = '';
     let stderrBuf = '';
+    let settled = false;
+
+    // Single-shot reject so the first failure wins. Stream and process events
+    // can fire in either order (spawn ENOENT fires both `error` and `close`;
+    // a Python crash mid-stream can fire stream `error` before `close`), and
+    // we want exactly one JobspyError per call.
+    const fail = (err: JobspyError): void => {
+      if (settled) return;
+      settled = true;
+      rejectP(err);
+    };
+
+    const succeed = (result: JobResult[]): void => {
+      if (settled) return;
+      settled = true;
+      resolveP(result);
+    };
+
     childStdout.setEncoding('utf8');
 
     childStdout.on('data', (chunk: string) => {
       stdout += chunk;
     });
+
+    childStdout.on('error', err => {
+      fail(
+        new JobspyError(`stdout stream error: ${err.message}`, stderrBuf, null)
+      );
+    });
+
     if (proc.stderr) {
       proc.stderr.setEncoding('utf8');
 
       proc.stderr.on('data', (chunk: string) => {
         stderrBuf += chunk;
+        if (stderrMode === 'tee') process.stderr.write(chunk);
+      });
+
+      proc.stderr.on('error', err => {
+        fail(
+          new JobspyError(
+            `stderr stream error: ${err.message}`,
+            stderrBuf,
+            null
+          )
+        );
       });
     }
 
+    // If the child dies before draining stdin, the write fails with EPIPE.
+    // Without this listener that becomes an unhandled 'error' event and
+    // crashes the Node process — capture it and convert to a JobspyError so
+    // `close` (which fires shortly after) finds the promise already failed.
+    childStdin.on('error', err => {
+      fail(
+        new JobspyError(
+          `failed to write options to jobspy runner stdin: ${err.message}`,
+          stderrBuf,
+          null
+        )
+      );
+    });
+
     proc.on('error', err => {
-      rejectP(
+      fail(
         new JobspyError(
           `failed to spawn ${cmd}: ${err.message}`,
           stderrBuf,
@@ -164,9 +223,21 @@ export function scrapeJobs(
       );
     });
 
-    proc.on('close', code => {
+    proc.on('close', (code, signal) => {
+      if (signal != null) {
+        fail(
+          new JobspyError(
+            `jobspy runner killed by signal ${signal}`,
+            stderrBuf,
+            code,
+            signal
+          )
+        );
+        return;
+      }
+
       if (code !== 0) {
-        rejectP(
+        fail(
           new JobspyError(
             `jobspy runner exited with code ${code}`,
             stderrBuf,
@@ -176,12 +247,23 @@ export function scrapeJobs(
         return;
       }
 
+      if (stdout.trim() === '') {
+        fail(
+          new JobspyError(
+            'jobspy runner exited cleanly but produced no output',
+            stderrBuf,
+            code
+          )
+        );
+        return;
+      }
+
       try {
-        resolveP(JSON.parse(stdout) as JobResult[]);
+        succeed(JSON.parse(stdout) as JobResult[]);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
 
-        rejectP(
+        fail(
           new JobspyError(
             `failed to parse jobspy output as JSON: ${reason}`,
             stderrBuf,

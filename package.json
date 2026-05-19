@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "jest",
-    "build": "babel . --out-dir dist --extensions .ts,.tsx --ignore \"node_modules/**\",\"dist/**\",\"build/**\",\"tests/**\",\"scripts/**\",\"**/*.test.ts\",\"**/*.test.tsx\"",
+    "build": "babel . --out-dir dist --extensions .ts,.tsx --ignore \"node_modules/**\",\"dist/**\",\"build/**\",\"tests/**\",\"scripts/**\",\"**/*.test.ts\",\"**/*.test.tsx\" && npm run build:assets",
+    "build:assets": "mkdir -p dist/src/python-jobspy && ln -sf ../../../src/python-jobspy/runner.py dist/src/python-jobspy/runner.py",
     "build:watch": "npm run build -- --watch",
     "start": "npm run build:watch",
     "postinstall": "scripts/postinstall.sh",
