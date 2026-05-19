@@ -22,6 +22,7 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ViewingOptions = {
   all?: boolean;
+  jobPostId?: string;
 };
 
 export function createViewingCommand(): Command {
@@ -34,6 +35,10 @@ export function createViewingCommand(): Command {
         '--all',
         'Re-view every qualifying JobPost regardless of pipeline state — including ones already done / not_a_job_posting / failed. Useful after a prompt change.'
       )
+    )
+    .option(
+      '--job-post-id <id>',
+      'Re-view only the JobPost with this ID, regardless of pipeline state or qualification.'
     )
     .action((opts: ViewingOptions) =>
       withBrowserInstance(context => runAll(context, opts))
@@ -48,21 +53,44 @@ async function runAll(
   // through 'queued' (instead of just bypassing the eligibility filter) keeps
   // the TUI pipeline bar honest — the numerator sees them transition through
   // queued → started → done like any normal pickup.
-  if (opts.all) await requeueAllTerminal('viewing');
+  if (opts.jobPostId) {
+    const exists = await db
+      .selectFrom('JobPost')
+      .select('id')
+      .where('id', '=', opts.jobPostId)
+      .executeTakeFirst();
 
-  // qualifiedForViewing handles the active-source filter AND the
-  // titleRelavency threshold against PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
-  const targets = await db
-    .selectFrom('JobPost')
-    .select(['JobPost.id as id', 'JobPost.url as url'])
-    .where(qualifiedForViewing)
-    .where(
-      eligibleForPipelineTask({
-        task: 'viewing',
-        parentIdRef: 'JobPost.id',
-      })
-    )
-    .execute();
+    if (!exists) {
+      throw new Error(`JobPost with id ${opts.jobPostId} not found.`);
+    }
+
+    await enqueuePipelineTask({
+      task: 'viewing',
+      entity: { ofJobPostId: opts.jobPostId },
+    });
+  } else if (opts.all) {
+    await requeueAllTerminal('viewing');
+  }
+
+  const targets = opts.jobPostId
+    ? await db
+        .selectFrom('JobPost')
+        .select(['JobPost.id as id', 'JobPost.url as url'])
+        .where('JobPost.id', '=', opts.jobPostId)
+        .execute()
+    : // qualifiedForViewing handles the active-source filter AND the
+      // titleRelavency threshold against PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
+      await db
+        .selectFrom('JobPost')
+        .select(['JobPost.id as id', 'JobPost.url as url'])
+        .where(qualifiedForViewing)
+        .where(
+          eligibleForPipelineTask({
+            task: 'viewing',
+            parentIdRef: 'JobPost.id',
+          })
+        )
+        .execute();
 
   if (targets.length === 0) {
     terminal.log('No unprocessed JobPost rows. Nothing to do.');

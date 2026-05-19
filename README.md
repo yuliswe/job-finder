@@ -132,6 +132,20 @@ jobfinder pipeline sourcing --all
 jobfinder pipeline evaluate --all
 ```
 
+Each of those subcommands also accepts a `--<parent-table>-id <id>` flag to force-process a single record regardless of pipeline state or qualification (the record is re-queued before the task runs):
+
+- `sourcing --source-seed-id <id>`
+- `listing --job-source-id <id>`
+- `scripting --job-list-source-id <id>`
+- `run-scripts --job-list-source-id <id>`
+- `viewing --job-post-id <id>`
+- `evaluate --job-post-id <id>`
+
+```bash
+jobfinder pipeline viewing --job-post-id 0192...abcd
+jobfinder pipeline run-scripts --job-list-source-id 0192...abcd
+```
+
 Requires:
 
 - A locally installed Chrome/Chromium (run `npx puppeteer browsers install chrome` once if not).

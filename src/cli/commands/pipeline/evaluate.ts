@@ -5,6 +5,7 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
   eligibleForPipelineTask,
+  enqueuePipelineTask,
   PIPELINE_STATE,
   processOne,
   recordPipelineState,
@@ -23,6 +24,7 @@ const limit = pLimit(CONCURRENCY);
 
 type EvaluateOptions = {
   all?: boolean;
+  jobPostId?: string;
 };
 
 export function createEvaluateCommand(): Command {
@@ -36,11 +38,32 @@ export function createEvaluateCommand(): Command {
         'Re-evaluate every qualifying JobPost regardless of pipeline state. Useful after a prompt change.'
       )
     )
+    .option(
+      '--job-post-id <id>',
+      'Re-evaluate only the JobPost with this ID, regardless of pipeline state or qualification.'
+    )
     .action((opts: EvaluateOptions) => runEvaluate(opts));
 }
 
 async function runEvaluate(opts: EvaluateOptions): Promise<void> {
-  if (opts.all) await requeueAllTerminal('evaluate');
+  if (opts.jobPostId) {
+    const exists = await db
+      .selectFrom('JobPost')
+      .select('id')
+      .where('id', '=', opts.jobPostId)
+      .executeTakeFirst();
+
+    if (!exists) {
+      throw new Error(`JobPost with id ${opts.jobPostId} not found.`);
+    }
+
+    await enqueuePipelineTask({
+      task: 'evaluate',
+      entity: { ofJobPostId: opts.jobPostId },
+    });
+  } else if (opts.all) {
+    await requeueAllTerminal('evaluate');
+  }
 
   const [interests, cv] = await Promise.all([getUserInterests(), getUserCV()]);
 
@@ -56,17 +79,23 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
     );
   }
 
-  const targets = await db
-    .selectFrom('JobPost')
-    .select(['id', 'title', 'description', 'skillRequirements'])
-    .where(qualifiedForEvaluate)
-    .where(
-      eligibleForPipelineTask({
-        task: 'evaluate',
-        parentIdRef: 'JobPost.id',
-      })
-    )
-    .execute();
+  const targets = opts.jobPostId
+    ? await db
+        .selectFrom('JobPost')
+        .select(['id', 'title', 'description', 'skillRequirements'])
+        .where('JobPost.id', '=', opts.jobPostId)
+        .execute()
+    : await db
+        .selectFrom('JobPost')
+        .select(['id', 'title', 'description', 'skillRequirements'])
+        .where(qualifiedForEvaluate)
+        .where(
+          eligibleForPipelineTask({
+            task: 'evaluate',
+            parentIdRef: 'JobPost.id',
+          })
+        )
+        .execute();
 
   if (targets.length === 0) {
     terminal.log(

@@ -22,6 +22,7 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ListingOptions = {
   all?: boolean;
+  jobSourceId?: string;
 };
 
 export function createListingCommand(): Command {
@@ -35,6 +36,10 @@ export function createListingCommand(): Command {
         'Re-process every qualifying JobSource regardless of pipeline state. Useful after a prompt change.'
       )
     )
+    .option(
+      '--job-source-id <id>',
+      'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
+    )
     .action((opts: ListingOptions) =>
       withBrowserInstance(context => runListing(context, opts))
     );
@@ -44,19 +49,42 @@ async function runListing(
   context: BrowserContext,
   opts: ListingOptions
 ): Promise<void> {
-  if (opts.all) await requeueAllTerminal('listing');
+  if (opts.jobSourceId) {
+    const exists = await db
+      .selectFrom('JobSource')
+      .select('id')
+      .where('id', '=', opts.jobSourceId)
+      .executeTakeFirst();
 
-  const sources = await db
-    .selectFrom('JobSource')
-    .select(['id', 'name', 'url'])
-    .where(qualifiedForListing)
-    .where(
-      eligibleForPipelineTask({
-        task: 'listing',
-        parentIdRef: 'JobSource.id',
-      })
-    )
-    .execute();
+    if (!exists) {
+      throw new Error(`JobSource with id ${opts.jobSourceId} not found.`);
+    }
+
+    await enqueuePipelineTask({
+      task: 'listing',
+      entity: { ofJobSourceId: opts.jobSourceId },
+    });
+  } else if (opts.all) {
+    await requeueAllTerminal('listing');
+  }
+
+  const sources = opts.jobSourceId
+    ? await db
+        .selectFrom('JobSource')
+        .select(['id', 'name', 'url'])
+        .where('JobSource.id', '=', opts.jobSourceId)
+        .execute()
+    : await db
+        .selectFrom('JobSource')
+        .select(['id', 'name', 'url'])
+        .where(qualifiedForListing)
+        .where(
+          eligibleForPipelineTask({
+            task: 'listing',
+            parentIdRef: 'JobSource.id',
+          })
+        )
+        .execute();
 
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))

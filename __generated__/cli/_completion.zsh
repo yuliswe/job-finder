@@ -34,34 +34,40 @@ _jobfinder_scrape() {
 
 _jobfinder_pipeline_sourcing() {
   _arguments -s -S \
-    '--all[all]'
+    '--all[all]' \
+    '--source-seed-id[source-seed-id]:source-seed-id:'
 }
 
 _jobfinder_pipeline_listing() {
   _arguments -s -S \
-    '--all[all]'
+    '--all[all]' \
+    '--job-source-id[job-source-id]:job-source-id:'
 }
 
 _jobfinder_pipeline_scripting() {
   _arguments -s -S \
-    '--all[all]'
+    '--all[all]' \
+    '--job-list-source-id[job-list-source-id]:job-list-source-id:'
 }
 
 _jobfinder_pipeline_run_scripts() {
   _arguments -s -S \
     '(-d --division)'{-d,--division}'[division]:division:' \
     '(-l --location)'{-l,--location}'[location]:location:' \
-    '--all[all]'
+    '--all[all]' \
+    '--job-list-source-id[job-list-source-id]:job-list-source-id:'
 }
 
 _jobfinder_pipeline_viewing() {
   _arguments -s -S \
-    '--all[all]'
+    '--all[all]' \
+    '--job-post-id[job-post-id]:job-post-id:'
 }
 
 _jobfinder_pipeline_evaluate() {
   _arguments -s -S \
-    '--all[all]'
+    '--all[all]' \
+    '--job-post-id[job-post-id]:job-post-id:'
 }
 
 _jobfinder_pipeline() {
@@ -69,13 +75,14 @@ _jobfinder_pipeline() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seeding sourcing listing scripting run-scripts viewing evaluate)' \
+    '1:subcommand:(seeding approve-seeds sourcing listing scripting run-scripts viewing evaluate)' \
     '*:: :->args'
 
   case $state in
     args)
       case $line[1] in
     seeding) _normal ;;
+    approve-seeds) _normal ;;
     sourcing) _jobfinder_pipeline_sourcing ;;
     listing) _jobfinder_pipeline_listing ;;
     scripting) _jobfinder_pipeline_scripting ;;
@@ -122,5 +129,3 @@ _jobfinder() {
 }
 
 compdef _jobfinder jobfinder ./bin/jobfinder
-
-# wrote /Users/yuli/lab/job-finder/dist/__generated__/cli/_completion.zsh

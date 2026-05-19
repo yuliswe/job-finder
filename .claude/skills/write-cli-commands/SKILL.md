@@ -1,6 +1,6 @@
 ---
 name: write-cli-commands
-description: Checklist for implementing a new CLI subcommand under src/cli.
+description: Checklist for implementing or modifying a CLI subcommand's interface under src/cli.
 ---
 
 # Write CLI Commands

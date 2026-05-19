@@ -23,6 +23,7 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type SourcingOptions = {
   all?: boolean;
+  sourceSeedId?: string;
 };
 
 export function createSourcingCommand(): Command {
@@ -36,6 +37,10 @@ export function createSourcingCommand(): Command {
         'Re-process every qualifying SourceSeed regardless of pipeline state. Useful after a prompt change.'
       )
     )
+    .option(
+      '--source-seed-id <id>',
+      'Re-process only the SourceSeed with this ID, regardless of pipeline state or qualification. Bypasses the per-company name grouping.'
+    )
     .action((opts: SourcingOptions) =>
       withBrowserInstance(context => runSourcing(context, opts))
     );
@@ -45,6 +50,11 @@ async function runSourcing(
   context: BrowserContext,
   opts: SourcingOptions
 ): Promise<void> {
+  if (opts.sourceSeedId) {
+    await runSourcingForOneSeed(context, opts.sourceSeedId);
+    return;
+  }
+
   if (opts.all) await requeueAllTerminal('sourcing');
 
   const names = await db
@@ -74,6 +84,30 @@ async function runSourcing(
     0
   );
 
+  terminal.log(`Inserted ${jobSourceInserted} rows into JobSource\n`);
+}
+
+async function runSourcingForOneSeed(
+  context: BrowserContext,
+  sourceSeedId: string
+): Promise<void> {
+  const seed = await db
+    .selectFrom('SourceSeed')
+    .select(['id', 'url'])
+    .where('id', '=', sourceSeedId)
+    .executeTakeFirst();
+
+  if (!seed) {
+    throw new Error(`SourceSeed with id ${sourceSeedId} not found.`);
+  }
+
+  await enqueuePipelineTask({
+    task: 'sourcing',
+    entity: { ofSourceSeedId: sourceSeedId },
+  });
+
+  const result = await sourceOneSeedUrl({ context, seed });
+  const jobSourceInserted = result?.jobSourceInserted ?? 0;
   terminal.log(`Inserted ${jobSourceInserted} rows into JobSource\n`);
 }
 

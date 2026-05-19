@@ -21,6 +21,7 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ScriptingOptions = {
   all?: boolean;
+  jobListSourceId?: string;
 };
 
 export function createScriptingCommand(): Command {
@@ -34,6 +35,10 @@ export function createScriptingCommand(): Command {
         'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
       )
     )
+    .option(
+      '--job-list-source-id <id>',
+      'Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.'
+    )
     .action((opts: ScriptingOptions) =>
       withBrowserInstance(context => runScripting(context, opts))
     );
@@ -43,19 +48,44 @@ async function runScripting(
   context: BrowserContext,
   opts: ScriptingOptions
 ): Promise<void> {
-  if (opts.all) await requeueAllTerminal('scripting');
+  if (opts.jobListSourceId) {
+    const exists = await db
+      .selectFrom('JobListSource')
+      .select('id')
+      .where('id', '=', opts.jobListSourceId)
+      .executeTakeFirst();
 
-  const targets = await db
-    .selectFrom('JobListSource')
-    .select(['id', 'url'])
-    .where(qualifiedForScripting)
-    .where(
-      eligibleForPipelineTask({
-        task: 'scripting',
-        parentIdRef: 'JobListSource.id',
-      })
-    )
-    .execute();
+    if (!exists) {
+      throw new Error(
+        `JobListSource with id ${opts.jobListSourceId} not found.`
+      );
+    }
+
+    await enqueuePipelineTask({
+      task: 'scripting',
+      entity: { ofJobListSourceId: opts.jobListSourceId },
+    });
+  } else if (opts.all) {
+    await requeueAllTerminal('scripting');
+  }
+
+  const targets = opts.jobListSourceId
+    ? await db
+        .selectFrom('JobListSource')
+        .select(['id', 'url'])
+        .where('JobListSource.id', '=', opts.jobListSourceId)
+        .execute()
+    : await db
+        .selectFrom('JobListSource')
+        .select(['id', 'url'])
+        .where(qualifiedForScripting)
+        .where(
+          eligibleForPipelineTask({
+            task: 'scripting',
+            parentIdRef: 'JobListSource.id',
+          })
+        )
+        .execute();
 
   const results = await Promise.all(
     targets.map(target => tabLimit(() => scriptOneTarget({ context, target })))

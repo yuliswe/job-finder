@@ -45,8 +45,17 @@ export function createRunScriptsCommand(): Command {
         'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
       )
     )
+    .option(
+      '--job-list-source-id <id>',
+      'Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.'
+    )
     .action(
-      async (opts: { division?: string; location?: string; all?: boolean }) => {
+      async (opts: {
+        division?: string;
+        location?: string;
+        all?: boolean;
+        jobListSourceId?: string;
+      }) => {
         await withBrowserInstance(context => runAll(context, opts));
       }
     );
@@ -54,21 +63,51 @@ export function createRunScriptsCommand(): Command {
 
 async function runAll(
   context: BrowserContext,
-  opts: { division?: string; location?: string; all?: boolean }
+  opts: {
+    division?: string;
+    location?: string;
+    all?: boolean;
+    jobListSourceId?: string;
+  }
 ): Promise<void> {
-  if (opts.all) await requeueAllTerminal('run-scripts');
+  if (opts.jobListSourceId) {
+    const exists = await db
+      .selectFrom('JobListSource')
+      .select('id')
+      .where('id', '=', opts.jobListSourceId)
+      .executeTakeFirst();
 
-  const targets = await db
-    .selectFrom('JobListSource')
-    .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
-    .where(qualifiedForRunScripts)
-    .where(
-      eligibleForPipelineTask({
-        task: 'run-scripts',
-        parentIdRef: 'JobListSource.id',
-      })
-    )
-    .execute();
+    if (!exists) {
+      throw new Error(
+        `JobListSource with id ${opts.jobListSourceId} not found.`
+      );
+    }
+
+    await enqueuePipelineTask({
+      task: 'run-scripts',
+      entity: { ofJobListSourceId: opts.jobListSourceId },
+    });
+  } else if (opts.all) {
+    await requeueAllTerminal('run-scripts');
+  }
+
+  const targets = opts.jobListSourceId
+    ? await db
+        .selectFrom('JobListSource')
+        .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
+        .where('JobListSource.id', '=', opts.jobListSourceId)
+        .execute()
+    : await db
+        .selectFrom('JobListSource')
+        .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
+        .where(qualifiedForRunScripts)
+        .where(
+          eligibleForPipelineTask({
+            task: 'run-scripts',
+            parentIdRef: 'JobListSource.id',
+          })
+        )
+        .execute();
 
   if (targets.length === 0) {
     terminal.log(
