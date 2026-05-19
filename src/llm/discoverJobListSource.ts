@@ -9,6 +9,7 @@ import {
 } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT } from 'src/prompts/classifyAndRankLinks.js';
+import { VERIFY_IS_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/verifyIsJobPost.js';
 import { withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
@@ -71,8 +72,34 @@ export async function findJobListPage(args: {
     }
 
     if (decision.isJobListingPage) {
-      terminal.log(`Found listing page: ${url} — ${decision.reason}`);
-      return url;
+      // Sanity-check: open the first job post URL the LLM extracted and ask
+      // the LLM to confirm it actually looks like a job posting. Catches
+      // false positives where the LLM mislabels a careers/landing page as a
+      // listing.
+      const sampleUrl = decision.jobPostUrls[0]?.url;
+      if (!sampleUrl) {
+        terminal.warn(
+          `Listing claim for ${url} rejected — LLM returned no jobPostUrls to validate against.`
+        );
+      } else {
+        try {
+          const verdict = await verifyIsJobPost({ context, url: sampleUrl });
+          if (verdict.isJobPost) {
+            terminal.log(
+              `Found listing page: ${url} — ${decision.reason} (sample ${sampleUrl}: ${verdict.reason})`
+            );
+            return url;
+          }
+
+          terminal.warn(
+            `Listing claim for ${url} rejected — sample ${sampleUrl} is not a job posting: ${verdict.reason}`
+          );
+        } catch (err) {
+          terminal.warn(
+            `Listing claim for ${url} unverified — verifyIsJobPost failed for ${sampleUrl}: ${String(err)}`
+          );
+        }
+      }
     }
 
     if (depth < PIPELINE_LISTING_BFS_MAX_DEPTH) {
@@ -181,6 +208,43 @@ ${page.links.join('\n')}`,
 
       return { valid: true, result: parsed };
     },
+  });
+
+  return result;
+}
+
+/** Open `url`, grab innerText, and ask the LLM whether the page looks like a
+ * single job posting. Throws on load or LLM failure — the BFS loop catches
+ * and treats the listing claim as unverified. */
+async function verifyIsJobPost(args: {
+  context: BrowserContext;
+  url: string;
+}): Promise<{ isJobPost: boolean; reason: string }> {
+  const { context, url } = args;
+
+  const { text } = await loadPage(context, url);
+
+  const memory = new Memory([{ system: VERIFY_IS_JOB_POST_SYSTEM_PROMPT }]);
+  const { result } = await feedbackLoop({
+    memory,
+    initialPrompt: `URL: ${url}\n\nPage text:\n${text}`,
+    schema: v.object({
+      isJobPost: v.pipe(
+        v.boolean(),
+        v.description(
+          'True if the page is a single job posting (title + role description and/or requirements). False for landing/listing pages, errors, login walls, etc.'
+        )
+      ),
+      reason: v.pipe(
+        v.string(),
+        v.description('One short sentence explaining your call.')
+      ),
+    }),
+    maxAttempts: 1,
+    model: LLM_LISTING_MODEL,
+    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    logger: terminal,
+    validate: parsed => ({ valid: true, result: parsed }),
   });
 
   return result;
