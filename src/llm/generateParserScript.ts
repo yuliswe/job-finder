@@ -106,6 +106,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
         }),
         maxAttempts: MAX_SCRIPT_ATTEMPTS,
         model: LLM_CODING_MODEL,
+        metadata: { configKey: 'LLM_CODING_MODEL' },
         logger: terminal,
         reasoningEffort: LlmReasoningEffort.High,
         validate: async parsed => {

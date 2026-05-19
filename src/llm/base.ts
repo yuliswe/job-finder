@@ -94,8 +94,9 @@ async function llmSend<S extends v.GenericSchema>(args: {
   model: string;
   messages: LlmMessage[];
   reasoningEffort?: LlmReasoningEffort;
+  metadata?: Record<string, string>;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { schema, model, messages, reasoningEffort } = args;
+  const { schema, model, messages, reasoningEffort, metadata } = args;
   const responseFormat = {
     name: getSchemaName(schema),
     schema: strictifyJsonSchema(
@@ -110,6 +111,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
     messages: messagesWithSchema,
     reasoningEffort,
     responseFormat,
+    metadata,
   });
 
   if (!content) throw new Error('LLM returned empty response');
@@ -150,8 +152,9 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
   model: string;
   logger: Terminal;
   reasoningEffort?: LlmReasoningEffort;
+  metadata?: Record<string, string>;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { memory, schema, model, logger, reasoningEffort } = args;
+  const { memory, schema, model, logger, reasoningEffort, metadata } = args;
 
   let totalTokens = 0;
   for (let retry = 0; retry < MAX_SEND_RETRIES; retry++) {
@@ -161,6 +164,7 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         model,
         messages: memory.toMessages(),
         reasoningEffort,
+        metadata,
       });
 
       totalTokens += sendResult.totalTokens;
@@ -213,6 +217,9 @@ export async function feedbackLoop<
     parsed: v.InferOutput<S>
   ) => Promise<ValidateResult<R>> | ValidateResult<R>;
   reasoningEffort?: LlmReasoningEffort;
+  /** Free-form tags forwarded to the OpenRouter `metadata` field on every
+   * underlying request — used for per-task cost analytics. */
+  metadata?: Record<string, string>;
 }): Promise<{ result: R; totalTokens: number }> {
   const {
     memory,
@@ -223,6 +230,7 @@ export async function feedbackLoop<
     logger,
     model,
     reasoningEffort,
+    metadata,
   } = args;
 
   memory.add(initialPrompt);
@@ -235,6 +243,7 @@ export async function feedbackLoop<
       model,
       logger,
       reasoningEffort,
+      metadata,
     });
 
     totalTokens += sendResult.totalTokens;

@@ -157,6 +157,7 @@ ${page.links.join('\n')}`,
     }),
     maxAttempts: MAX_CRAWL_DECISION_ATTEMPTS,
     model: LLM_LISTING_MODEL,
+    metadata: { configKey: 'LLM_LISTING_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (!parsed.isJobListingPage && parsed.candidateLinks.length === 0) {

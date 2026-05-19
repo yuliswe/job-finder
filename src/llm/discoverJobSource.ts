@@ -83,6 +83,7 @@ ${pageText}`,
       }),
       maxAttempts: MAX_DISCOVER_ATTEMPTS,
       model: LLM_SOURCING_MODEL,
+      metadata: { configKey: 'LLM_SOURCING_MODEL' },
       logger: terminal,
       validate: async parsed => {
         const name = parsed.name.trim();
@@ -159,6 +160,7 @@ async function findCompanyWebsite(args: {
       systemPrompt: FIND_COMPANY_WEBSITE_SYSTEM_PROMPT,
       model: LLM_SOURCING_MODEL,
       maxAttempts: MAX_WEB_SEARCH_ATTEMPTS,
+      metadata: { configKey: 'LLM_SOURCING_MODEL' },
     });
 
     const raw = result.url.trim();

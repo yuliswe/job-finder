@@ -25,6 +25,8 @@ export async function webSearch<
   model: string;
   maxAttempts?: number;
   reasoningEffort?: LlmReasoningEffort;
+  /** Forwarded verbatim to OpenRouter's `metadata` for cost analytics. */
+  metadata?: Record<string, string>;
   /** Optional custom validator. Defaults to accepting any schema-parsed response. */
   validate?: (
     parsed: v.InferOutput<S>
@@ -39,6 +41,7 @@ export async function webSearch<
     validate,
     maxAttempts = 3,
     reasoningEffort,
+    metadata,
   } = args;
 
   const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
@@ -67,6 +70,7 @@ ${pageText}`,
     model,
     logger: terminal,
     reasoningEffort,
+    metadata,
     validate:
       validate ?? (parsed => ({ valid: true, result: parsed as unknown as R })),
   });

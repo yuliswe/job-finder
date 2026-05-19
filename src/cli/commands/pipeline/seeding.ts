@@ -141,6 +141,7 @@ async function printLlmSummary(inserted: JobResult[]): Promise<void> {
     }),
     maxAttempts: 3,
     model: LLM_SEEDING_MODEL,
+    metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),
   });
@@ -228,6 +229,7 @@ async function discoverSeedJobs(): Promise<JobResult[]> {
     }),
     maxAttempts: MAX_ATTEMPTS,
     model: LLM_SEEDING_MODEL,
+    metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
     validate: args => runAttempt(args, state, accumulated),
   });

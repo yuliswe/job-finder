@@ -26,6 +26,9 @@ export type LlmSendArgs = {
   messages: LlmMessage[];
   reasoningEffort?: LlmReasoningEffort;
   responseFormat: LlmResponseFormat;
+  /** Free-form tags persisted on the request for cost / observability
+   * analytics. Forwarded verbatim to OpenRouter's `metadata` field. */
+  metadata?: Record<string, string>;
 };
 
 export type LlmRawResponse = {
