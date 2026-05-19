@@ -10,10 +10,14 @@ import { Bool } from 'src/db/customTypes.js';
 
 // Per-task "qualified" predicates: the conditions an entity must satisfy to
 // even be considered for this pipeline task. Eligibility (queued/started) is
-// orthogonal and applied via `eligibleForPipelineTask`. These predicates are
-// the single source of truth shared between the pipeline runner (which picks
-// work) and the TUI bar (which counts the universe of work for the task), so
-// the two views can never drift.
+// orthogonal and applied via `eligibleForPipelineTask`. The CLI work-picker
+// uses these.
+//
+// The TUI bar uses `inScopeForX` predicates below — pure scope filters with
+// no work-status clauses. A bar denominator is the parent table's row count;
+// rows that fail `inScopeForX` count as "out of scope" (rows we deliberately
+// skip), while rows that pass partition into done/noResult/failed/queued by
+// their latest pipeline state.
 
 /** A SourceSeed counts for sourcing unless every JobSource matched by name is
  * inactive. Seeds with no produced source yet (or at least one active source)
@@ -112,4 +116,60 @@ export function qualifiedForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
     eb('JobPost.description', 'is not', null),
     eb('JobPost.skillRequirements', 'is not', null),
   ]);
+}
+
+// `inScopeForX` — pure scope predicates used by the TUI bar. Out-of-scope =
+// parent-table rows we deliberately skip (inactive tree, below relevancy
+// threshold). Status conditions (no upstream output yet, parserScript not set,
+// description not viewed) do NOT belong here — they're segmented into
+// done/noResult/failed/queued via LatestPipelineState.
+//
+// Seeding and sourcing have no skip rule (every SourceSeed is in scope), so
+// they have no predicate here — the TUI bar just omits the scope filter.
+
+/** A JobSource is in scope for listing iff it's active. */
+export function inScopeForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return eb('JobSource.isActive', '=', Bool.True);
+}
+
+/** A JobListSource is in scope for scripting iff it's in an active source
+ * tree. */
+export function inScopeForScripting(
+  eb: ExpressionBuilder<DB, 'JobListSource'>
+) {
+  return jobListSourceInActiveSource(eb);
+}
+
+/** A JobListSource is in scope for run-scripts iff it's in an active source
+ * tree. */
+export function inScopeForRunScripts(
+  eb: ExpressionBuilder<DB, 'JobListSource'>
+) {
+  return jobListSourceInActiveSource(eb);
+}
+
+/** A JobPost is in scope for viewing iff its tree is active AND its title
+ * cleared the relevancy threshold (low-relevancy posts are skipped by
+ * design). */
+export function inScopeForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return eb.and([
+    jobPostInActiveSource(eb),
+    eb.exists(
+      eb
+        .selectFrom('JobPostEval')
+        .select('JobPostEval.id')
+        .whereRef('JobPostEval.ofJobPostId', '=', 'JobPost.id')
+        .where(
+          'JobPostEval.titleRelavency',
+          '>=',
+          PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+        )
+    ),
+  ]);
+}
+
+/** A JobPost is in scope for evaluate iff it was in scope for viewing — an
+ * un-viewable post can't be evaluated. */
+export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return inScopeForViewing(eb);
 }

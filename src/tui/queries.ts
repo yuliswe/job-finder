@@ -11,12 +11,11 @@ import {
   TERMINAL_SUCCESS_STATES,
 } from 'src/db/pipelineState.js';
 import {
-  qualifiedForEvaluate,
-  qualifiedForListing,
-  qualifiedForRunScripts,
-  qualifiedForScripting,
-  qualifiedForSourcing,
-  qualifiedForViewing,
+  inScopeForEvaluate,
+  inScopeForListing,
+  inScopeForRunScripts,
+  inScopeForScripting,
+  inScopeForViewing,
 } from 'src/db/pipelineQualified.js';
 import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
 import type { SkillRequirements } from 'src/llm/viewJobPost.js';
@@ -31,20 +30,25 @@ export type PipelineStageStats = {
     | 'run-scripts'
     | 'viewing'
     | 'evaluate';
-  /** Entities whose latest state is a terminal-success value with a result. */
+  /** Parent-table rows we deliberately skip (inactive tree, below relevancy
+   * threshold). Not drawn in the bar; surfaced in the count summary text. */
+  outOfScope: number;
+  /** In-scope; latest state is a terminal-success value with a result. */
   done: number;
-  /** Entities whose latest state is terminal-completed but produced no result
+  /** In-scope; latest state is terminal-completed but produced no result
    * (not_a_job_posting, no_*_found). */
   noResult: number;
-  /** Entities whose latest state is a terminal failure (failed, aborted,
+  /** In-scope; latest state is a terminal failure (failed, aborted,
    * script_error, etc.). */
   failed: number;
-  /** Entities whose latest state is queued — waiting for pickup. */
+  /** In-scope; latest state is queued OR no LatestPipelineState row exists
+   * for this task yet (not-yet-enqueued counts as pending). */
   queued: number;
-  /** Entities whose latest state is started — actively being processed (or
-   * left over from a crashed run, which the next pipeline call will retry). */
+  /** In-scope; latest state is started — actively being processed (or left
+   * over from a crashed run). */
   started: number;
-  /** done + noResult + failed + queued + started. */
+  /** outOfScope + done + noResult + failed + queued + started — equals the
+   * parent table's row count. */
   total: number;
   label: string;
 };
@@ -111,137 +115,163 @@ export type ActivityRow = {
 export type JobPostSortKey = 'overall' | 'interest' | 'skill';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
-  // For each task X, group LatestPipelineState rows by `state` and count.
-  // `total` is every entity that has any history for this task; `done` is the
-  // subset whose latest state is a terminal-success value. The base query
-  // filters to entities whose owning source tree is still active so toggling
-  // a Source/ListSource off shrinks the bar in the TUI to match what the
-  // pipeline will actually process.
+  // Each bar's denominator is its parent table's row count (e.g., scripting →
+  // every JobListSource). Parent rows partition into 5 buckets:
+  //   outOfScope = fails `inScopeForX` (deliberately skipped — inactive tree,
+  //                below relevancy threshold);
+  //   done / noResult / failed = in-scope; bucketed by latest pipeline state;
+  //   queued = in-scope; latest state is queued/started/user_interrupted, OR
+  //            no LatestPipelineState row exists yet (not-yet-enqueued).
   return Promise.all(TASK_ORDER.map(stageStats));
 }
 
-async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
-  const rows = await stageStatsQuery(task)
-    .select([
-      'LatestPipelineState.state as state',
-      db.fn.countAll<number>().as('n'),
-    ])
-    .groupBy('LatestPipelineState.state')
-    .execute();
+type RawBucket = { inScope: number; state: string | null; n: number };
 
+async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
+  const buckets = await stageRawBuckets(task);
+
+  let outOfScope = 0;
   let done = 0;
   let noResult = 0;
   let failed = 0;
   let queued = 0;
   let started = 0;
-  for (const r of rows) {
-    const n = Number(r.n ?? 0);
-    if (r.state == null) continue;
+  for (const b of buckets) {
+    const n = Number(b.n ?? 0);
+    if (b.inScope === 0) {
+      outOfScope += n;
+      continue;
+    }
+
+    if (b.state == null) {
+      queued += n;
+      continue;
+    }
+
     // user_interrupted is terminal in the data model (won't be auto-re-picked)
     // but the TUI buckets it under `queued` so it shows as pending in the bar
     // rather than a yellow "no-result" — a Ctrl+C is not really an outcome.
-    if (r.state === PIPELINE_STATE.USER_INTERRUPTED) queued += n;
-    else if (TERMINAL_SUCCESS_STATES.has(r.state)) done += n;
-    else if (TERMINAL_NO_RESULT_STATES.has(r.state)) noResult += n;
-    else if (r.state === PIPELINE_STATE.QUEUED) queued += n;
-    else if (r.state === PIPELINE_STATE.STARTED) started += n;
+    if (b.state === PIPELINE_STATE.USER_INTERRUPTED) queued += n;
+    else if (TERMINAL_SUCCESS_STATES.has(b.state)) done += n;
+    else if (TERMINAL_NO_RESULT_STATES.has(b.state)) noResult += n;
+    else if (b.state === PIPELINE_STATE.QUEUED) queued += n;
+    else if (b.state === PIPELINE_STATE.STARTED) started += n;
     else failed += n;
   }
 
   return {
     task,
     label: task,
+    outOfScope,
     done,
     noResult,
     failed,
     queued,
     started,
-    total: done + noResult + failed + queued + started,
+    total: outOfScope + done + noResult + failed + queued + started,
   };
 }
 
-function stageStatsQuery(task: PipelineTask) {
-  // Every bar uses the SAME predicate the pipeline command uses to pick work,
-  // wrapped in an EXISTS keyed on the relevant FK. That way bar counts and
-  // what the CLI will actually process are guaranteed to agree.
-  const q = db
-    .selectFrom('LatestPipelineState')
-    .where('LatestPipelineState.task', '=', task);
-
+async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
+  // Each branch starts from the parent table and LEFT JOINs LatestPipelineState
+  // so rows that haven't been enqueued yet (no state row) are still counted.
+  // The `inScope` CASE expression separates rows we'd ever process from rows
+  // we deliberately skip; rows are grouped by (inScope, state) and counted.
   switch (task) {
     case 'seeding':
     case 'sourcing':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('SourceSeed')
-            .select('SourceSeed.id')
-            .whereRef(
-              'SourceSeed.id',
-              '=',
-              'LatestPipelineState.ofSourceSeedId'
-            )
-            .where(qualifiedForSourcing)
+      // Every SourceSeed is in scope — no skip rule.
+      return db
+        .selectFrom('SourceSeed')
+        .leftJoin('LatestPipelineState', join =>
+          join
+            .onRef('LatestPipelineState.ofSourceSeedId', '=', 'SourceSeed.id')
+            .on('LatestPipelineState.task', '=', task)
         )
-      );
+        .select(eb => [
+          sql<number>`1`.as('inScope'),
+          eb.ref('LatestPipelineState.state').as('state'),
+          eb.fn.countAll<number>().as('n'),
+        ])
+        .groupBy(['LatestPipelineState.state'])
+        .execute();
     case 'listing':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('JobSource')
-            .select('JobSource.id')
-            .whereRef('JobSource.id', '=', 'LatestPipelineState.ofJobSourceId')
-            .where(qualifiedForListing)
+      return db
+        .selectFrom('JobSource')
+        .leftJoin('LatestPipelineState', join =>
+          join
+            .onRef('LatestPipelineState.ofJobSourceId', '=', 'JobSource.id')
+            .on('LatestPipelineState.task', '=', task)
         )
-      );
+        .select(eb => [
+          eb
+            .case()
+            .when(inScopeForListing(eb))
+            .then(1)
+            .else(0)
+            .end()
+            .as('inScope'),
+          eb.ref('LatestPipelineState.state').as('state'),
+          eb.fn.countAll<number>().as('n'),
+        ])
+        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
+        .execute();
     case 'scripting':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('JobListSource')
-            .select('JobListSource.id')
-            .whereRef(
-              'JobListSource.id',
-              '=',
-              'LatestPipelineState.ofJobListSourceId'
-            )
-            .where(qualifiedForScripting)
-        )
-      );
     case 'run-scripts':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('JobListSource')
-            .select('JobListSource.id')
-            .whereRef(
-              'JobListSource.id',
+      return db
+        .selectFrom('JobListSource')
+        .leftJoin('LatestPipelineState', join =>
+          join
+            .onRef(
+              'LatestPipelineState.ofJobListSourceId',
               '=',
-              'LatestPipelineState.ofJobListSourceId'
+              'JobListSource.id'
             )
-            .where(qualifiedForRunScripts)
+            .on('LatestPipelineState.task', '=', task)
         )
-      );
+        .select(eb => [
+          eb
+            .case()
+            .when(
+              task === 'scripting'
+                ? inScopeForScripting(eb)
+                : inScopeForRunScripts(eb)
+            )
+            .then(1)
+            .else(0)
+            .end()
+            .as('inScope'),
+          eb.ref('LatestPipelineState.state').as('state'),
+          eb.fn.countAll<number>().as('n'),
+        ])
+        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
+        .execute();
     case 'viewing':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('JobPost')
-            .select('JobPost.id')
-            .whereRef('JobPost.id', '=', 'LatestPipelineState.ofJobPostId')
-            .where(qualifiedForViewing)
-        )
-      );
     case 'evaluate':
-      return q.where(eb =>
-        eb.exists(
-          eb
-            .selectFrom('JobPost')
-            .select('JobPost.id')
-            .whereRef('JobPost.id', '=', 'LatestPipelineState.ofJobPostId')
-            .where(qualifiedForEvaluate)
+      return db
+        .selectFrom('JobPost')
+        .leftJoin('LatestPipelineState', join =>
+          join
+            .onRef('LatestPipelineState.ofJobPostId', '=', 'JobPost.id')
+            .on('LatestPipelineState.task', '=', task)
         )
-      );
+        .select(eb => [
+          eb
+            .case()
+            .when(
+              task === 'viewing'
+                ? inScopeForViewing(eb)
+                : inScopeForEvaluate(eb)
+            )
+            .then(1)
+            .else(0)
+            .end()
+            .as('inScope'),
+          eb.ref('LatestPipelineState.state').as('state'),
+          eb.fn.countAll<number>().as('n'),
+        ])
+        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
+        .execute();
   }
 }
 

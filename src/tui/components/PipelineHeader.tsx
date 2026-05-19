@@ -76,8 +76,10 @@ export function PipelineHeader({
                 <Text color='red'>{'█'.repeat(segs.red)}</Text>
                 <Text color='yellow'>{'█'.repeat(segs.yellow)}</Text>
                 <Text color='green'>{'█'.repeat(segs.green)}</Text>
-                <Text dimColor>{'░'.repeat(segs.empty)}</Text>{' '}
-                {countSummary(s)}{' '}
+                <Text dimColor>{'░'.repeat(segs.empty)}</Text> {countSummary(s)}
+                {s.outOfScope > 0 && (
+                  <Text dimColor> ({s.outOfScope} out-of-scope)</Text>
+                )}{' '}
               </Text>
             );
           })}
@@ -96,7 +98,8 @@ export function PipelineHeader({
             <Text dimColor>
               done {selected.done} · no-result {selected.noResult} · failed{' '}
               {selected.failed} · queued {selected.queued} · started{' '}
-              {selected.started} · total {selected.total}
+              {selected.started} · out-of-scope {selected.outOfScope} · total{' '}
+              {selected.total}
             </Text>
           </Box>
         )}
@@ -106,12 +109,13 @@ export function PipelineHeader({
   );
 }
 
-/** Four-segment progress bar:
+/** Four-segment progress bar (over the in-scope subset only — out-of-scope
+ * rows are surfaced in the count summary text instead):
  *   green  = succeeded with a result (terminal-success),
  *   yellow = ran successfully but produced no result (not_a_job_posting,
  *            no_*_found),
  *   red    = terminal failure (failed / aborted / script_error),
- *   empty  = not yet processed (queued / started).
+ *   empty  = not yet processed (queued / started / not yet enqueued).
  * Cells are allocated via the largest-remainder method so the four segments
  * always sum to exactly `width` — no trailing gap when nothing is pending.
  * Any non-zero count is guaranteed at least one cell (stolen from the largest
@@ -121,12 +125,13 @@ function progressSegments(
   s: PipelineStageStats,
   width = 18
 ): { green: number; yellow: number; red: number; empty: number } {
-  if (s.total <= 0) return { green: 0, yellow: 0, red: 0, empty: width };
+  const inScope = s.total - s.outOfScope;
+  if (inScope <= 0) return { green: 0, yellow: 0, red: 0, empty: width };
   const pending = s.queued + s.started;
   const counts = [s.done, s.noResult, s.failed, pending];
 
   // 1. Largest-remainder rounding so cells sum to exactly `width`.
-  const raw = counts.map(n => (n / s.total) * width);
+  const raw = counts.map(n => (n / inScope) * width);
   const out = raw.map(Math.floor);
   let leftover = width - out.reduce((a, b) => a + b, 0);
   const order = raw
@@ -165,7 +170,7 @@ function countSummary(s: PipelineStageStats): string {
   const parts = [`${s.done}✓`];
   if (s.noResult > 0) parts.push(`${s.noResult}∅`);
   if (s.failed > 0) parts.push(`${s.failed}✗`);
-  return `${parts.join(' ')} / ${s.total}`;
+  return `${parts.join(' ')} / ${s.total - s.outOfScope}`;
 }
 
 /** Returns a boolean that flips every PULSE_MS while `active`. When inactive,
