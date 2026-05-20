@@ -1,5 +1,6 @@
 import { sql } from 'kysely';
 
+import { PIPELINE_VIEWING_MIN_TITLE_RELEVANCY } from 'jobfinder.config.js';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
@@ -278,35 +279,51 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
 export async function listJobPosts(args: {
   sort: JobPostSortKey;
   limit?: number;
+  /** If set, only return JobPosts belonging to this JobSource. Used by the
+   * source-jobs screen. */
+  ofJobSourceId?: string;
+  /** If true, only return JobPosts that pass `inScopeForViewing` — i.e. that
+   * cleared the relevancy threshold and are in an active source tree. Matches
+   * the per-source count shown in the Sources list. */
+  inScopeOnly?: boolean;
 }): Promise<JobPostRow[]> {
-  const { sort, limit = 500 } = args;
+  const { sort, limit = 500, ofJobSourceId, inScopeOnly = false } = args;
 
-  let q = db
+  let base = db
     .selectFrom('JobPost')
     .leftJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
-    .where(jobPostInActiveSource)
-    .select([
-      'JobPost.id as id',
-      'JobPost.title as title',
-      'JobPost.url as url',
-      'JobPost.company as company',
-      'JobPost.location as location',
-      'JobPost.isRemote as isRemote',
-      'JobPost.postedAt as postedAt',
-      'JobPost.salaryMin as salaryMin',
-      'JobPost.salaryMax as salaryMax',
-      'JobPost.salaryCurrency as salaryCurrency',
-      'JobPost.description as description',
-      'JobPost.summary as summary',
-      'JobPost.skillRequirements as skillRequirementsJson',
-      'JobPostEval.titleRelavency as titleRelavency',
-      'JobPostEval.titleRelavencyReason as titleRelavencyReason',
-      'JobPostEval.interestScore as interestScore',
-      'JobPostEval.interestScoreReason as interestScoreReason',
-      'JobPostEval.skillScore as skillScore',
-      'JobPostEval.skillScoreReason as skillScoreReason',
-      'JobPostEval.skillScoreBreakdown as skillScoreBreakdownJson',
-    ]);
+    .where(jobPostInActiveSource);
+
+  if (ofJobSourceId) {
+    base = base.where('JobPost.ofJobSourceId', '=', ofJobSourceId);
+  }
+
+  if (inScopeOnly) {
+    base = base.where(inScopeForViewing);
+  }
+
+  let q = base.select([
+    'JobPost.id as id',
+    'JobPost.title as title',
+    'JobPost.url as url',
+    'JobPost.company as company',
+    'JobPost.location as location',
+    'JobPost.isRemote as isRemote',
+    'JobPost.postedAt as postedAt',
+    'JobPost.salaryMin as salaryMin',
+    'JobPost.salaryMax as salaryMax',
+    'JobPost.salaryCurrency as salaryCurrency',
+    'JobPost.description as description',
+    'JobPost.summary as summary',
+    'JobPost.skillRequirements as skillRequirementsJson',
+    'JobPostEval.titleRelavency as titleRelavency',
+    'JobPostEval.titleRelavencyReason as titleRelavencyReason',
+    'JobPostEval.interestScore as interestScore',
+    'JobPostEval.interestScoreReason as interestScoreReason',
+    'JobPostEval.skillScore as skillScore',
+    'JobPostEval.skillScoreReason as skillScoreReason',
+    'JobPostEval.skillScoreBreakdown as skillScoreBreakdownJson',
+  ]);
 
   switch (sort) {
     case 'overall':
@@ -353,10 +370,19 @@ function parseJsonArray<T>(json: string | null): T[] | null {
 }
 
 export async function listSources(): Promise<SourceRow[]> {
+  // jobPostCount only counts posts whose JobPostEval.titleRelavency cleared
+  // the viewing threshold — i.e. the same set the bar's `inScopeForViewing`
+  // gates on. Posts below the threshold won't be viewed/evaluated, so they
+  // shouldn't pad the per-source "posts" column either. Implemented as a
+  // conditional COUNT over the LEFT JOIN to JobPostEval; uses SUM(CASE…) to
+  // avoid the gotcha where COUNT(NULL) returns 0 from a LEFT JOIN — the same
+  // expression works on rows whose JobPostEval is missing (titleRelavency
+  // IS NULL → falls in the ELSE 0 branch).
   const rows = await db
     .selectFrom('JobSource')
     .leftJoin('JobListSource', 'JobListSource.ofJobSourceId', 'JobSource.id')
     .leftJoin('JobPost', 'JobPost.ofJobListSourceId', 'JobListSource.id')
+    .leftJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
     .leftJoin('LatestPipelineState as sourceState', join =>
       join
         .onRef('sourceState.ofJobSourceId', '=', 'JobSource.id')
@@ -367,7 +393,7 @@ export async function listSources(): Promise<SourceRow[]> {
         .onRef('listState.ofJobListSourceId', '=', 'JobListSource.id')
         .on('listState.task', '=', 'run-scripts')
     )
-    .select([
+    .select(eb => [
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
@@ -380,7 +406,20 @@ export async function listSources(): Promise<SourceRow[]> {
       'JobListSource.locations as listLocations',
       'JobListSource.divisions as listDivisions',
       'JobListSource.parserScript as listParserScript',
-      db.fn.count<number>('JobPost.id').as('jobPostCount'),
+      eb.fn
+        .sum<number>(
+          eb
+            .case()
+            .when(
+              'JobPostEval.titleRelavency',
+              '>=',
+              PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+            )
+            .then(1)
+            .else(0)
+            .end()
+        )
+        .as('jobPostCount'),
     ])
     .groupBy(['JobSource.id', 'JobListSource.id'])
     .orderBy(sql`"jobPostCount"`, 'desc')

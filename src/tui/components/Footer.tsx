@@ -4,7 +4,7 @@ import React from 'react';
 const HINTS: { keys: string; label: string }[] = [
   { keys: '↑↓', label: 'nav' },
   { keys: '←→/Tab', label: 'tab' },
-  { keys: 'Enter', label: 'open (JobPost)' },
+  { keys: 'Enter', label: 'open (Job / Source)' },
   { keys: 'p', label: 'pipeline focus' },
   { keys: 's', label: 'sort (JobPost)' },
   { keys: 'a', label: 'toggle active (Source)' },

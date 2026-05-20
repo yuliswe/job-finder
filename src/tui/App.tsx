@@ -14,6 +14,7 @@ import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { Footer } from 'src/tui/components/Footer.js';
 import { JobPostDetailScreen } from 'src/tui/components/JobPostDetailScreen.js';
 import { PipelineHeader } from 'src/tui/components/PipelineHeader.js';
+import { SourceJobsScreen } from 'src/tui/components/SourceJobsScreen.js';
 import { TabBar } from 'src/tui/components/TabBar.js';
 import { TabView } from 'src/tui/components/TabView.js';
 import {
@@ -33,6 +34,7 @@ export function App({ initial }: { initial: AppOptions }) {
   const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
   const [pipelineCursor, setPipelineCursor] = useState(0);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
+  const [openSourceId, setOpenSourceId] = useState<string | null>(null);
 
   const stats = useLiveData(useCallback(() => getPipelineStats(), []));
   const activity = useLiveData(
@@ -40,7 +42,7 @@ export function App({ initial }: { initial: AppOptions }) {
   );
 
   const jobPosts = useLiveData(
-    useCallback(() => listJobPosts({ sort }), [sort])
+    useCallback(() => listJobPosts({ sort, inScopeOnly: true }), [sort])
   );
 
   const sources = useLiveData(useCallback(() => listSources(), []));
@@ -52,6 +54,11 @@ export function App({ initial }: { initial: AppOptions }) {
     openJobId == null
       ? null
       : (jobPosts?.find(j => j.id === openJobId) ?? null);
+
+  const openSource =
+    openSourceId == null
+      ? null
+      : (sources?.find(s => s.sourceId === openSourceId) ?? null);
 
   useInput(
     (input, key) => {
@@ -109,14 +116,25 @@ export function App({ initial }: { initial: AppOptions }) {
         copyToClipboard(`jobfinder tui --tab ${tab} --sort ${sort}`);
       }
     },
-    // App-level keys go silent while the JobPost detail screen is open —
-    // that screen owns all input (scroll/close/copy/etc.).
-    { isActive: openJob == null }
+    // App-level keys go silent while a layered screen (JobPost detail or
+    // SourceJobs) is open — those screens own all input.
+    { isActive: openJob == null && openSource == null }
   );
 
   if (openJob) {
     return (
       <JobPostDetailScreen row={openJob} onClose={() => setOpenJobId(null)} />
+    );
+  }
+
+  if (openSource) {
+    return (
+      <SourceJobsScreen
+        source={openSource}
+        initialSort={sort}
+        onClose={() => setOpenSourceId(null)}
+        onOpenJob={id => setOpenJobId(id)}
+      />
     );
   }
 
@@ -148,6 +166,7 @@ export function App({ initial }: { initial: AppOptions }) {
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}
         onOpenJob={id => setOpenJobId(id)}
+        onOpenSource={id => setOpenSourceId(id)}
       />
       <ActivityFeed rows={activity ?? []} />
       <Footer />

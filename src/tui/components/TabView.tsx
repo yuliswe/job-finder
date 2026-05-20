@@ -22,6 +22,7 @@ export function TabView({
   activityCount,
   active = true,
   onOpenJob,
+  onOpenSource,
 }: {
   tab: AppTab;
   jobPosts: JobPostRow[] | null;
@@ -31,6 +32,8 @@ export function TabView({
   active?: boolean;
   /** Open the full-screen detail view for the given JobPost id. */
   onOpenJob?: (id: string) => void;
+  /** Open the full-screen "jobs from this source" view. */
+  onOpenSource?: (sourceId: string) => void;
 }) {
   const [cursor, setCursor] = useState(0);
   const { rows: terminalRows, cols: terminalCols } = useTerminalSize();
@@ -71,6 +74,11 @@ export function TabView({
       if (key.return && tab === 'jobs') {
         const row = jobPosts?.[cursor];
         if (row && onOpenJob) onOpenJob(row.id);
+      }
+
+      if (key.return && tab === 'sources') {
+        const row = sources?.[cursor];
+        if (row && onOpenSource) onOpenSource(row.sourceId);
       }
 
       if (input === 'a' && tab === 'sources') {
