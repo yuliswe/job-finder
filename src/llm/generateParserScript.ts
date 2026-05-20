@@ -85,10 +85,22 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
               "True if the listing page exposes a location / city / region / country filter the user can use to narrow postings. When true, listLocations() MUST return a non-empty array of every selectable option (e.g. ['Toronto', 'New York', 'Remote'])."
             )
           ),
+          hasLocationFilterReason: v.pipe(
+            v.string(),
+            v.description(
+              'One short sentence (≤ ~140 chars) citing the concrete DOM evidence behind hasLocationFilter — e.g. "<select id=location> with 12 options" or "no location dropdown found in filter sidebar".'
+            )
+          ),
           hasDivisionFilter: v.pipe(
             v.boolean(),
             v.description(
               "True if the listing page exposes a department / division / team / job-family filter the user can use to narrow postings. When true, listDivisions() MUST return a non-empty array of every selectable option (e.g. ['Engineering', 'Sales', 'Design'])."
+            )
+          ),
+          hasDivisionFilterReason: v.pipe(
+            v.string(),
+            v.description(
+              'One short sentence (≤ ~140 chars) citing the concrete DOM evidence behind hasDivisionFilter — e.g. "<select id=department> with 8 options" or "filter bar has only search + sort, no department".'
             )
           ),
           currentAction: v.pipe(
@@ -139,7 +151,12 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
             };
           }
 
-          const probe = await validateScript({
+          terminal.log(
+            `Filters — hasLocationFilter=${parsed.hasLocationFilter} (${parsed.hasLocationFilterReason}); hasDivisionFilter=${parsed.hasDivisionFilter} (${parsed.hasDivisionFilterReason})`,
+            COLOURS.cyan
+          );
+
+          const probe = await validateScriptBestOf3({
             page,
             listingUrl,
             script: parsed.parserScript,
@@ -229,6 +246,52 @@ type ProbeResult =
     }
   | { ok: false; feedback: string };
 
+/** Validation is flaky (network jitter, slow hydration, transient
+ * anti-bot challenges). Run the probe up to 3 times sequentially and pass
+ * as soon as we've seen 2 successes. Fail as soon as 2 attempts have failed
+ * (early-exit — no point running a 3rd attempt). Returns the first
+ * successful result on pass, or the first failure on fail. */
+async function validateScriptBestOf3(args: {
+  page: Page;
+  listingUrl: string;
+  script: string;
+}): Promise<ProbeResult> {
+  const ATTEMPTS = 3;
+  const NEEDED = 2;
+
+  let successes = 0;
+  let failures = 0;
+  let firstSuccess: ProbeResult | null = null;
+  let firstFailure: ProbeResult | null = null;
+
+  for (let i = 1; i <= ATTEMPTS; i++) {
+    const result = await validateScript(args);
+    if (result.ok) {
+      successes++;
+      if (!firstSuccess) firstSuccess = result;
+
+      terminal.log(
+        `Validation attempt ${i}/${ATTEMPTS}: PASS (${successes}/${NEEDED} passes so far)`,
+        COLOURS.green
+      );
+      if (successes >= NEEDED) return firstSuccess;
+    } else {
+      failures++;
+      if (!firstFailure) firstFailure = result;
+
+      terminal.log(
+        `Validation attempt ${i}/${ATTEMPTS}: FAIL (${failures}/${NEEDED} failures so far)`,
+        COLOURS.yellow
+      );
+      if (failures >= NEEDED) return firstFailure;
+    }
+  }
+
+  // Unreachable: with 3 attempts and NEEDED=2, we always hit one of the
+  // early returns above. Guard anyway for type narrowing.
+  return firstSuccess ?? firstFailure!;
+}
+
 async function validateScript(args: {
   page: Page;
   listingUrl: string;
@@ -270,162 +333,217 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
   if (!divisionsProbe.ok) return divisionsProbe;
   const { values: divisions } = divisionsProbe;
 
-  // Stage 3: searchJobs(locations, divisions, keywords) — try a few argument shapes
-  const probeShapes: ProbeShape[] = [];
-  if (locations.length > 0 || divisions.length > 0) {
-    probeShapes.push({
+  // Stage 3a: baseline — searchJobs with empty filters. This is the page's
+  // unfiltered listing; we use it as the reference set for filter-effectiveness.
+  const baselineShape: ProbeShape = { locations: [], divisions: [] };
+  const baseline = await runSearchJobs(page, script, baselineShape);
+  if (!baseline.ok) return baseline;
+
+  // Stage 3b: filtered probe — only meaningful if either filter has options.
+  // We compare against the baseline to make sure the script's filter logic
+  // actually changes the result set rather than ignoring its arguments and
+  // returning the page's default listing.
+  const canFilter = locations.length > 0 || divisions.length > 0;
+  if (canFilter) {
+    const filterShape: ProbeShape = {
       locations: locations[0] ? [locations[0]] : [],
       divisions: divisions[0] ? [divisions[0]] : [],
-    });
+    };
+
+    const filtered = await runSearchJobs(page, script, filterShape);
+    if (!filtered.ok) return filtered;
+
+    if (sameJobSet(baseline.jobs, filtered.jobs)) {
+      return {
+        ok: false,
+        feedback:
+          `searchJobs returned the same ${baseline.jobs.length} jobs for empty filters ${JSON.stringify({ ...baselineShape, keywords: [] })} AND for ${JSON.stringify({ ...filterShape, keywords: [] })}. ` +
+          "Your filter logic is a no-op — it returns the page's initial listing regardless of the locations/divisions arguments. " +
+          'Drive the actual filter UI (click the option, await the DOM update, then read the filtered results), or call the underlying search/XHR endpoint with the filter applied.' +
+          formatLogs(filtered.logs),
+      };
+    }
+
+    if (filtered.jobs.length > 0) {
+      return {
+        ok: true,
+        jobs: filtered.jobs,
+        probed: filterShape,
+        locations,
+        divisions,
+        logs: filtered.logs,
+      };
+    }
+    // Filtered probe came back empty but differs from baseline — fall through
+    // to the baseline result so we still surface a usable job list.
   }
 
-  probeShapes.push({ locations: [], divisions: [] });
-
-  let lastLogs: string[] = [];
-
-  for (const shape of probeShapes) {
-    const argsForLog = JSON.stringify({
-      locations: shape.locations,
-      divisions: shape.divisions,
-      keywords: [],
-    });
-
-    const run = await pageEval(
-      page,
-      async ({
-        s,
-        a,
-      }: {
-        s: string;
-        a: { locations: string[]; divisions: string[]; keywords: string[] };
-      }) => {
-        return await runWithConsoleCapture(async () => {
-          const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
-          return await fn(a);
-        });
-
-        function runWithConsoleCapture<R>(
-          body: () => Promise<R>
-        ): Promise<
-          | { ok: true; value: R; logs: string[] }
-          | { ok: false; error: string; logs: string[] }
-        > {
-          const logs: string[] = [];
-          const fmt = (v: unknown): string => {
-            if (typeof v === 'string') return v;
-            try {
-              return JSON.stringify(v);
-            } catch {
-              return String(v);
-            }
-          };
-
-          const wrap =
-            (level: string) =>
-            (...xs: unknown[]) => {
-              logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
-            };
-
-          const orig = {
-            log: console.log,
-            warn: console.warn,
-            error: console.error,
-            info: console.info,
-          };
-
-          console.log = wrap('log');
-          console.warn = wrap('warn');
-          console.error = wrap('error');
-          console.info = wrap('info');
-          return body()
-            .then(value => ({ ok: true as const, value, logs }))
-            .catch(err => ({
-              ok: false as const,
-              error: String((err && (err.stack || err.message)) || err).slice(
-                0,
-                2000
-              ),
-              logs,
-            }))
-            .finally(() => {
-              console.log = orig.log;
-              console.warn = orig.warn;
-              console.error = orig.error;
-              console.info = orig.info;
-            });
-        }
-      },
-      {
-        s: script,
-        a: {
-          locations: shape.locations,
-          divisions: shape.divisions,
-          keywords: [],
-        },
-      }
-    );
-
-    lastLogs = run.logs;
-
-    if (!run.ok) {
-      return {
-        ok: false,
-        feedback:
-          `searchJobs(${argsForLog}) threw an error: ${run.error}. ` +
-          'Inspect the DOM and fix the selectors / event handling.' +
-          formatLogs(run.logs),
-      };
-    }
-
-    const jobs = run.value;
-    if (!Array.isArray(jobs)) {
-      return {
-        ok: false,
-        feedback:
-          `searchJobs(${argsForLog}) must return an array of { jobTitle, url } objects; got: ${JSON.stringify(jobs).slice(0, 200)}` +
-          formatLogs(run.logs),
-      };
-    }
-
-    if (jobs.length === 0) continue;
-
-    for (const j of jobs) {
-      if (!j || typeof j !== 'object') {
-        return {
-          ok: false,
-          feedback:
-            `searchJobs returned non-object item: ${JSON.stringify(j)}. Each item must be { jobTitle: string, url: string }.` +
-            formatLogs(run.logs),
-        };
-      }
-
-      const obj = j as Record<string, unknown>;
-      if (typeof obj.jobTitle !== 'string' || typeof obj.url !== 'string') {
-        return {
-          ok: false,
-          feedback:
-            `searchJobs item missing required keys jobTitle/url (got: ${JSON.stringify(obj).slice(0, 200)}). Both must be strings; "url" must be absolute.` +
-            formatLogs(run.logs),
-        };
-      }
-    }
-
+  if (baseline.jobs.length === 0) {
     return {
-      ok: true,
-      jobs: jobs as { jobTitle: string; url: string }[],
-      probed: shape,
-      locations,
-      divisions,
-      logs: run.logs,
+      ok: false,
+      feedback:
+        `searchJobs(${JSON.stringify({ ...baselineShape, keywords: [] })}) returned an empty array. Available locations: ${JSON.stringify(locations)}. Available divisions: ${JSON.stringify(divisions)}. Either widen the result selectors or wait longer for results to render.` +
+        formatLogs(baseline.logs),
     };
   }
 
   return {
-    ok: false,
-    feedback:
-      `searchJobs returned an empty array for every probed input (tried ${JSON.stringify(probeShapes)}). Available locations: ${JSON.stringify(locations)}. Available divisions: ${JSON.stringify(divisions)}. Either widen the result selectors, fix how filters are applied, or wait longer for results to render.` +
-      formatLogs(lastLogs),
+    ok: true,
+    jobs: baseline.jobs,
+    probed: baselineShape,
+    locations,
+    divisions,
+    logs: baseline.logs,
   };
+}
+
+type SearchJobsResult =
+  | {
+      ok: true;
+      jobs: { jobTitle: string; url: string }[];
+      logs: string[];
+    }
+  | { ok: false; feedback: string };
+
+async function runSearchJobs(
+  page: Page,
+  script: string,
+  shape: ProbeShape
+): Promise<SearchJobsResult> {
+  const argsForLog = JSON.stringify({
+    locations: shape.locations,
+    divisions: shape.divisions,
+    keywords: [],
+  });
+
+  const run = await pageEval(
+    page,
+    async ({
+      s,
+      a,
+    }: {
+      s: string;
+      a: { locations: string[]; divisions: string[]; keywords: string[] };
+    }) => {
+      return await runWithConsoleCapture(async () => {
+        const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
+        return await fn(a);
+      });
+
+      function runWithConsoleCapture<R>(
+        body: () => Promise<R>
+      ): Promise<
+        | { ok: true; value: R; logs: string[] }
+        | { ok: false; error: string; logs: string[] }
+      > {
+        const logs: string[] = [];
+        const fmt = (v: unknown): string => {
+          if (typeof v === 'string') return v;
+          try {
+            return JSON.stringify(v);
+          } catch {
+            return String(v);
+          }
+        };
+
+        const wrap =
+          (level: string) =>
+          (...xs: unknown[]) => {
+            logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
+          };
+
+        const orig = {
+          log: console.log,
+          warn: console.warn,
+          error: console.error,
+          info: console.info,
+        };
+
+        console.log = wrap('log');
+        console.warn = wrap('warn');
+        console.error = wrap('error');
+        console.info = wrap('info');
+        return body()
+          .then(value => ({ ok: true as const, value, logs }))
+          .catch(err => ({
+            ok: false as const,
+            error: String((err && (err.stack || err.message)) || err),
+            logs,
+          }))
+          .finally(() => {
+            console.log = orig.log;
+            console.warn = orig.warn;
+            console.error = orig.error;
+            console.info = orig.info;
+          });
+      }
+    },
+    {
+      s: script,
+      a: {
+        locations: shape.locations,
+        divisions: shape.divisions,
+        keywords: [],
+      },
+    }
+  );
+
+  if (!run.ok) {
+    return {
+      ok: false,
+      feedback:
+        `searchJobs(${argsForLog}) threw an error: ${run.error}. ` +
+        'Inspect the DOM and fix the selectors / event handling.' +
+        formatLogs(run.logs),
+    };
+  }
+
+  const jobs = run.value;
+  if (!Array.isArray(jobs)) {
+    return {
+      ok: false,
+      feedback:
+        `searchJobs(${argsForLog}) must return an array of { jobTitle, url } objects; got: ${JSON.stringify(jobs).slice(0, 200)}` +
+        formatLogs(run.logs),
+    };
+  }
+
+  for (const j of jobs) {
+    if (!j || typeof j !== 'object') {
+      return {
+        ok: false,
+        feedback:
+          `searchJobs returned non-object item: ${JSON.stringify(j)}. Each item must be { jobTitle: string, url: string }.` +
+          formatLogs(run.logs),
+      };
+    }
+
+    const obj = j as Record<string, unknown>;
+    if (typeof obj.jobTitle !== 'string' || typeof obj.url !== 'string') {
+      return {
+        ok: false,
+        feedback:
+          `searchJobs item missing required keys jobTitle/url (got: ${JSON.stringify(obj).slice(0, 200)}). Both must be strings; "url" must be absolute.` +
+          formatLogs(run.logs),
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    jobs: jobs as { jobTitle: string; url: string }[],
+    logs: run.logs,
+  };
+}
+
+/** True iff two job lists describe the same set of postings by URL. Used to
+ * detect the "filter is a no-op" failure mode: identical URL set across an
+ * unfiltered call and a filtered call means searchJobs is ignoring its args. */
+function sameJobSet(a: { url: string }[], b: { url: string }[]): boolean {
+  if (a.length !== b.length) return false;
+  const aSet = new Set(a.map(j => j.url));
+  for (const j of b) if (!aSet.has(j.url)) return false;
+  return true;
 }
 
 /**
@@ -455,7 +573,7 @@ async function exploreScript(args: {
         const wrap =
           (level: string) =>
           (...xs: unknown[]) => {
-            logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
+            logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
           };
 
         const orig = {
@@ -477,7 +595,7 @@ async function exploreScript(args: {
           const e = err as { stack?: string; message?: string } | undefined;
           return {
             logs,
-            error: String(e?.stack ?? e?.message ?? err).slice(0, 2000),
+            error: String(e?.stack ?? e?.message ?? err),
           };
         } finally {
           console.log = orig.log;
@@ -494,7 +612,7 @@ async function exploreScript(args: {
     // LLM as feedback rather than crashing the loop.
     return {
       logs: [],
-      error: `page.evaluate failed: ${String(err).slice(0, 2000)}`,
+      error: `page.evaluate failed: ${String(err)}`,
     };
   }
 }
@@ -504,12 +622,7 @@ function formatLogs(logs: string[]): string {
     return "\n\n(No console output captured. You can add console.log/info/warn/error to the script to inspect the DOM, see the next attempt's feedback.)";
   }
 
-  const MAX = 50;
-  const shown = logs.slice(0, MAX);
-  const more =
-    logs.length > MAX ? `\n… and ${logs.length - MAX} more line(s)` : '';
-
-  return `\n\nCaptured console output from your script (${logs.length} line(s)):\n${shown.join('\n')}${more}`;
+  return `\n\nCaptured console output from your script (${logs.length} line(s)):\n${logs.join('\n')}`;
 }
 
 type ListFnProbe =
@@ -537,7 +650,7 @@ async function probeListFn(
       const wrap =
         (level: string) =>
         (...xs: unknown[]) => {
-          logs.push(`${level}: ${xs.map(fmt).join(' ')}`.slice(0, 1000));
+          logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
         };
 
       const orig = {
@@ -562,7 +675,7 @@ async function probeListFn(
         const e = err as { stack?: string; message?: string } | undefined;
         return {
           ok: false as const,
-          error: String(e?.stack ?? e?.message ?? err).slice(0, 2000),
+          error: String(e?.stack ?? e?.message ?? err),
           logs,
         };
       } finally {
