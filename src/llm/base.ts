@@ -144,8 +144,50 @@ async function llmSend<S extends v.GenericSchema>(args: {
   });
 
   if (!content) throw new Error('LLM returned empty response');
-  const result = v.parse(schema, JSON.parse(extractJson(content)));
+  const extracted = extractJson(content);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extracted);
+  } catch (err) {
+    // Annotate JSON.parse failures with the raw payload (and a window around
+    // the reported position) so the retry log shows what came back, not just
+    // "Unterminated string at position N". The SyntaxError keeps its name +
+    // message so the upstream `isSchemaError` retry path still fires.
+    if (err instanceof SyntaxError) {
+      const e = err as SyntaxError & {
+        rawContent?: string;
+        extractedContent?: string;
+        window?: string;
+      };
+
+      e.rawContent = content;
+      e.extractedContent = extracted;
+      e.window = windowAroundPosition(extracted, err.message);
+    }
+
+    throw err;
+  }
+
+  const result = v.parse(schema, parsed);
   return { result, totalTokens };
+}
+
+/** Pull "position N" out of a JSON.parse error message and return a slice of
+ * `text` around N (± 120 chars). Returns the full text when no position can
+ * be extracted, or when the text is already short. */
+function windowAroundPosition(text: string, message: string): string {
+  const RADIUS = 120;
+  const match = /position\s+(\d+)/i.exec(message);
+  if (!match || text.length <= RADIUS * 2) return text;
+  const pos = Number(match[1]!);
+  const start = Math.max(0, pos - RADIUS);
+  const end = Math.min(text.length, pos + RADIUS);
+  const prefix = start > 0 ? '…' : '';
+  const suffix = end < text.length ? '…' : '';
+  // Mark the exact offset with ◆ so the eye lands on it.
+  const before = text.slice(start, pos);
+  const after = text.slice(pos, end);
+  return `${prefix}${before}◆${after}${suffix}`;
 }
 
 /** Pull the JSON object out of an LLM response that may also contain prose
@@ -272,7 +314,16 @@ function formatLlmError(error: unknown): string {
     if (e && e[key] !== undefined) parts.push(`${key}=${String(e[key])}`);
   }
 
-  for (const key of ['body', 'response', 'data', 'error', 'cause']) {
+  for (const key of [
+    'body',
+    'response',
+    'data',
+    'error',
+    'cause',
+    'window',
+    'extractedContent',
+    'rawContent',
+  ]) {
     if (e && e[key] !== undefined) {
       const value = e[key];
       const serialized =

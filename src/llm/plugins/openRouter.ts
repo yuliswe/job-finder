@@ -3,6 +3,8 @@ import { OpenRouter } from '@openrouter/sdk';
 import type { LlmRawResponse, LlmSendArgs } from 'src/llm/plugins/interface.js';
 import { Env } from 'src/utils/env.js';
 
+const DEFAULT_MAX_COMPLETION_TOKENS = 200_000;
+
 export class OpenRouterPlugin {
   private readonly apiKeyOverride: string | undefined;
   private client: OpenRouter | null = null;
@@ -47,6 +49,7 @@ export class OpenRouterPlugin {
         // DeepInfra → stepfun-ai/Step-3.5-Flash returns HTTP 405).
         provider: { requireParameters: true },
         messages,
+        maxCompletionTokens: DEFAULT_MAX_COMPLETION_TOKENS,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...(metadata ? { metadata } : {}),
       },
