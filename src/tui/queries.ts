@@ -62,6 +62,10 @@ export type JobPostRow = {
   location: string | null;
   isRemote: number | null;
   postedAt: string | null;
+  /** Where `postedAt` came from. `'job_post'` = LLM read it from the page
+   * itself (exact). `'twbm'` = filled from the Wayback Machine's earliest
+   * snapshot (lower bound only). null when no postedAt exists. */
+  postedAtSource: 'job_post' | 'twbm' | null;
   salaryMin: number | null;
   salaryMax: number | null;
   salaryCurrency: string | null;
@@ -310,6 +314,7 @@ export async function listJobPosts(args: {
     'JobPost.location as location',
     'JobPost.isRemote as isRemote',
     'JobPost.postedAt as postedAt',
+    'JobPost.postedAtSource as postedAtSource',
     'JobPost.salaryMin as salaryMin',
     'JobPost.salaryMax as salaryMax',
     'JobPost.salaryCurrency as salaryCurrency',
@@ -345,6 +350,7 @@ export async function listJobPosts(args: {
     const { skillScoreBreakdownJson, skillRequirementsJson, ...rest } = r;
     return {
       ...rest,
+      postedAtSource: narrowPostedAtSource(r.postedAtSource),
       skillScoreBreakdown: parseJsonArray<SkillBreakdownEntry>(
         skillScoreBreakdownJson
       ),
@@ -357,6 +363,15 @@ export async function listJobPosts(args: {
           : null,
     };
   });
+}
+
+/** The DB stores `postedAtSource` as plain text, but we constrain it to the
+ * documented set of values. Unknown / unexpected strings degrade to `null`. */
+function narrowPostedAtSource(
+  raw: string | null
+): JobPostRow['postedAtSource'] {
+  if (raw === 'job_post' || raw === 'twbm') return raw;
+  return null;
 }
 
 function parseJsonArray<T>(json: string | null): T[] | null {

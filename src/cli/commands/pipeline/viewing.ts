@@ -177,6 +177,7 @@ async function viewOneTarget(args: {
         jobType: parsed.jobType,
         location: parsed.location,
         postedAt: parsed.postedAt,
+        postedAtSource: parsed.postedAtSource,
         salaryCurrency: parsed.salaryCurrency,
         salaryInterval: parsed.salaryInterval,
         salaryMax: parsed.salaryMax,

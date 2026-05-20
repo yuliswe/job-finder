@@ -10,6 +10,7 @@ import { VIEW_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/viewJobPost.js';
 import { withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { terminal } from 'src/utils/terminal';
+import { earliestWaybackSnapshot } from 'src/utils/waybackMachine.js';
 
 export type SkillRequirement = {
   skill: string;
@@ -18,6 +19,12 @@ export type SkillRequirement = {
 };
 
 export type SkillRequirements = SkillRequirement[];
+
+/** How `postedAt` was derived. `'job_post'` when the LLM read it off the
+ * page itself (exact). `'twbm'` when we fell back to the Wayback Machine's
+ * earliest snapshot (a *lower bound* — the post existed at least by that
+ * date). null when no `postedAt` is available. */
+export type PostedAtSource = 'job_post' | 'twbm' | null;
 
 export type ViewedJobPost = {
   isJobPosting: boolean;
@@ -28,6 +35,7 @@ export type ViewedJobPost = {
   jobType: string | null;
   location: string | null;
   postedAt: string | null;
+  postedAtSource: PostedAtSource;
   salaryCurrency: string | null;
   salaryInterval: string | null;
   salaryMax: number | null;
@@ -204,7 +212,32 @@ Extract the fields. Return null for anything the page does not actually state.`,
         },
       });
 
-      return result;
+      // If the LLM extracted a postedAt, trust it (`'job_post'`). Otherwise,
+      // for confirmed job postings, fall back to the Wayback Machine's
+      // earliest snapshot as a lower-bound (`'twbm'`). Skip the fallback
+      // when `isJobPosting` is false — we don't want to spend a network
+      // round-trip on pages we've already decided to discard.
+      if (result.postedAt) {
+        return { ...result, postedAtSource: 'job_post' as const };
+      }
+
+      if (!result.isJobPosting) {
+        return { ...result, postedAtSource: null };
+      }
+
+      const twbmIso = await earliestWaybackSnapshot(url);
+      if (twbmIso) {
+        terminal.log(
+          `Wayback Machine: ${url} earliest snapshot ${twbmIso} — using as postedAt lower bound`
+        );
+        return {
+          ...result,
+          postedAt: twbmIso,
+          postedAtSource: 'twbm' as const,
+        };
+      }
+
+      return { ...result, postedAtSource: null };
     } catch (err) {
       terminal.error(`viewJobPost LLM call failed for ${url}: ${String(err)}`);
       return null;

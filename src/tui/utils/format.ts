@@ -106,13 +106,20 @@ export function fmtScore(n: number | null): string {
   return n.toFixed(2);
 }
 
-export function fmtDaysAgo(postedAt: string | null, now = Date.now()): string {
+export function fmtDaysAgo(
+  postedAt: string | null,
+  postedAtSource: 'job_post' | 'twbm' | null = null,
+  now = Date.now()
+): string {
   if (postedAt == null) return '—';
   const t = Date.parse(postedAt);
   if (Number.isNaN(t)) return '—';
   const days = Math.floor((now - t) / 86_400_000);
-  if (days < 0) return '0';
-  return String(days);
+  const clamped = days < 0 ? 0 : days;
+  // Wayback Machine gives us a LOWER bound (earliest indexed date), so the
+  // posting is at least this old — render as `>N` to convey "older than".
+  if (postedAtSource === 'twbm') return `>${clamped}`;
+  return String(clamped);
 }
 
 export function fmtSalary(
