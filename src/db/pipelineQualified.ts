@@ -1,4 +1,4 @@
-import type { ExpressionBuilder } from 'kysely';
+import { sql, type ExpressionBuilder, type SqlBool } from 'kysely';
 
 import type { DB } from '__generated__/db/types.js';
 import { PIPELINE_VIEWING_MIN_TITLE_RELEVANCY } from 'jobfinder.config.js';
@@ -8,129 +8,163 @@ import {
 } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 
-// Per-task "qualified" predicates: the conditions an entity must satisfy to
-// even be considered for this pipeline task. Eligibility (queued/started) is
-// orthogonal and applied via `eligibleForPipelineTask`. The CLI work-picker
-// uses these.
+// ─────────────────────────────────────────────────────────────────────────
+// `qualifiedForX` vs `inScopeForX` — read this before touching either.
+// ─────────────────────────────────────────────────────────────────────────
 //
-// The TUI bar uses `inScopeForX` predicates below — pure scope filters with
-// no work-status clauses. A bar denominator is the parent table's row count;
-// rows that fail `inScopeForX` count as "out of scope" (rows we deliberately
-// skip), while rows that pass partition into done/noResult/failed/queued by
-// their latest pipeline state.
+// Both are SQL predicates over the task's parent table (e.g. JobListSource
+// for scripting). They answer related but distinct questions:
+//
+//   `qualifiedForX(row)`   — Does this row have the DATA the task needs to
+//                            run? Only checks upstream-prereq columns. Does
+//                            NOT check active-tree, design-time skip rules,
+//                            or pipeline state. For tasks with no row-level
+//                            prereq (most of them), this is trivially true.
+//
+//   `inScopeForX(row)`     — SHOULD the pipeline ever touch this row?
+//                            Active-tree membership + design-time skip rules
+//                            (e.g. relevancy threshold). Independent of
+//                            qualified/state.
+//
+// The two are orthogonal. A row that's `qualified` may be out-of-scope (e.g.
+// a JobListSource with `parserScript` set but its tree was toggled off — run-
+// scripts won't process it). A row that's `inScope` may not be `qualified`
+// (e.g. a JobListSource in an active tree but `parserScript IS NULL` — run-
+// scripts can't process it until scripting fills the column in).
+//
+// The "universe of work" for a task is `qualifiedForX(row) AND
+// inScopeForX(row)`. The CLI's three modes layer different pipeline-state
+// filters on top:
+//
+//   no flag           → `needs ∩ {state ∈ queued / user_interrupted}`
+//   --include-failed  → `needs ∩ {state ≠ done}`
+//   --all             → `needs` (any state — re-process done rows too)
+//
+// where `needs = qualifiedForX ∩ inScopeForX`. These nest:
+// no-flag ⊆ --include-failed ⊆ --all.
+//
+// ── Worked example (scripting) ──────────────────────────────────────────
+// Scripting has no row-level prereq, so `qualifiedForScripting` is
+// trivially true. Suppose JobListSource has 5 rows in an active tree:
+//
+//   id  parserScript  latest scripting state
+//   ──  ────────────  ──────────────────────
+//   A   "function…"   done
+//   B   "function…"   done
+//   C   NULL          queued
+//   D   NULL          aborted
+//   E   NULL          (no row yet)
+//
+// All 5 are `qualified` (no prereq) and `inScope` (active tree). So `needs`
+// = {A, B, C, D, E}. The CLI modes pick subsets via pipeline state:
+//   no flag           → {C}              (only queued)
+//   --include-failed  → {C, D, E}        (queued/aborted/no-row → not done)
+//   --all             → {A, B, C, D, E}  (re-script A and B too,
+//                                         overwriting their parserScript)
+//
+// The TUI bar reads `inScopeForX` as its denominator: 5 rows, 2 done
+// (green) + 3 pending (empty).
+//
+// ── Worked example (evaluate) ───────────────────────────────────────────
+// Evaluate's prereq is upstream's output: viewing must have populated
+// `description` and `skillRequirements`. Suppose JobPost has 4 rows:
+//
+//   id  titleRelevancy  description    skillReq    evaluate state
+//   ──  ──────────────  ────────────   ─────────   ──────────────
+//   P   0.9             "Senior eng…"  non-null    done
+//   Q   0.9             "Backend…"     non-null    queued
+//   R   0.9             NULL           NULL        (no row yet)
+//   S   0.1             NULL           NULL        (no row yet)
+//
+// `qualifiedForEvaluate`  → {P, Q}  (R, S fail description+skillReq prereq)
+// `inScopeForEvaluate`    → {P, Q}  (S out-of-scope by titleRelevancy)
+//                                    (R out-of-scope because the bar's scope
+//                                    treats unviewed posts as out-of-scope
+//                                    until they make it past viewing)
+// `needs`                 → {P, Q}
+//
+// Mode behavior:
+//   no flag           → {Q}        (only queued)
+//   --include-failed  → {Q}        (P is done — skipped)
+//   --all             → {P, Q}     (re-evaluate P too)
+//
+// ── Rule of thumb ───────────────────────────────────────────────────────
+// Adding a "is this row already done?" check to `qualifiedForX` is a smell.
+// That's a pipeline-state concern, applied by the CLI mode filter, not by
+// the row predicate.
 
-/** A SourceSeed counts for sourcing unless every JobSource matched by name is
- * inactive. Seeds with no produced source yet (or at least one active source)
- * remain qualified. */
-export function qualifiedForSourcing(eb: ExpressionBuilder<DB, 'SourceSeed'>) {
-  return eb.or([
-    eb.not(
-      eb.exists(
-        eb
-          .selectFrom('JobSource')
-          .select('JobSource.id')
-          .whereRef('JobSource.name', '=', 'SourceSeed.name')
-      )
-    ),
-    eb.exists(
-      eb
-        .selectFrom('JobSource')
-        .select('JobSource.id')
-        .whereRef('JobSource.name', '=', 'SourceSeed.name')
-        .where('JobSource.isActive', '=', Bool.True)
-    ),
-  ]);
+/** `1` rendered as a SqlBool so the trivial qualifiedForX predicates can be
+ * used wherever a boolean expression is expected. */
+const ALWAYS_TRUE = sql<SqlBool>`1`;
+
+/** Seeding has no row-level data prereq — every SourceSeed is qualified. */
+export function qualifiedForSeeding(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
+  return ALWAYS_TRUE;
 }
 
-/** A JobSource counts for listing when it's active AND either has no listing
- * yet (listing pending) or at least one of its listings is active. */
-export function qualifiedForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
-  return eb.and([
-    eb('JobSource.isActive', '=', Bool.True),
-    eb.or([
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('JobListSource')
-            .select('JobListSource.id')
-            .whereRef('JobListSource.ofJobSourceId', '=', 'JobSource.id')
-        )
-      ),
-      eb.exists(
-        eb
-          .selectFrom('JobListSource')
-          .select('JobListSource.id')
-          .whereRef('JobListSource.ofJobSourceId', '=', 'JobSource.id')
-          .where('JobListSource.isActive', '=', Bool.True)
-      ),
-    ]),
-  ]);
+/** Sourcing has no row-level data prereq — every SourceSeed is qualified. */
+export function qualifiedForSourcing(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
+  return ALWAYS_TRUE;
 }
 
-/** A JobListSource is qualified for scripting when it's in an active source
- * tree AND its parser script hasn't been generated yet. */
+/** Listing has no row-level data prereq — every JobSource is qualified. */
+export function qualifiedForListing(_eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return ALWAYS_TRUE;
+}
+
+/** Scripting has no row-level data prereq — every JobListSource is
+ * qualified. (Active-tree membership is a scope concern, not qualification.) */
 export function qualifiedForScripting(
-  eb: ExpressionBuilder<DB, 'JobListSource'>
+  _eb: ExpressionBuilder<DB, 'JobListSource'>
 ) {
-  return eb.and([
-    jobListSourceInActiveSource(eb),
-    eb('JobListSource.parserScript', 'is', null),
-  ]);
+  return ALWAYS_TRUE;
 }
 
-/** A JobListSource is qualified for run-scripts when it's in an active source
- * tree AND has a parser script. */
+/** Run-scripts needs a parser script to execute — that's its row-level data
+ * prereq, written upstream by scripting. */
 export function qualifiedForRunScripts(
   eb: ExpressionBuilder<DB, 'JobListSource'>
 ) {
-  return eb.and([
-    jobListSourceInActiveSource(eb),
-    eb('JobListSource.parserScript', 'is not', null),
-  ]);
+  return eb('JobListSource.parserScript', 'is not', null);
 }
 
-/** A JobPost is qualified for viewing when its source tree is active AND its
- * title cleared the relevancy threshold. */
-export function qualifiedForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
-  return eb.and([
-    jobPostInActiveSource(eb),
-    eb.exists(
-      eb
-        .selectFrom('JobPostEval')
-        .select('JobPostEval.id')
-        .whereRef('JobPostEval.ofJobPostId', '=', 'JobPost.id')
-        .where(
-          'JobPostEval.titleRelavency',
-          '>=',
-          PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
-        )
-    ),
-  ]);
+/** Viewing has no row-level data prereq — every JobPost can be fetched. The
+ * relevancy threshold is a design-time scope decision, not qualification. */
+export function qualifiedForViewing(_eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return ALWAYS_TRUE;
 }
 
-/** A JobPost is qualified for evaluate when its source tree is active AND its
- * description + skillRequirements have been populated by `viewing`. */
+/** Evaluate needs the post to have been viewed — description and
+ * skillRequirements must be populated. */
 export function qualifiedForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
   return eb.and([
-    jobPostInActiveSource(eb),
     eb('JobPost.description', 'is not', null),
     eb('JobPost.skillRequirements', 'is not', null),
   ]);
 }
 
-// `inScopeForX` — pure scope predicates used by the TUI bar. Out-of-scope =
-// parent-table rows the CLI would skip for this task: inactive tree,
-// deliberately filtered (below relevancy threshold), or upstream prerequisite
-// not yet ready (no parser script for run-scripts; not yet viewed for
-// evaluate).
+// ─────────────────────────────────────────────────────────────────────────
+// `inScopeForX` — pure-scope predicates. See the header comment at the top
+// of this file for the qualified-vs-inscope distinction and worked examples.
+// ─────────────────────────────────────────────────────────────────────────
 //
-// The one case where "not done" is NOT scope is the task's own work-status:
-// scripting's `parserScript IS NULL` describes "this task isn't done yet,"
-// which belongs in the queued/pending bucket, not out-of-scope — otherwise
-// done scripting rows would vanish.
+// Out-of-scope = parent-table rows we deliberately skip: inactive tree,
+// design-time filters (e.g. below relevancy threshold). Status conditions
+// (no upstream output yet, self not done) do NOT belong here — they're
+// orthogonal pipeline-state concerns applied by the CLI mode filter.
 //
 // Seeding and sourcing have no skip rule (every SourceSeed is in scope), so
-// they have no predicate here — the TUI bar just omits the scope filter.
+// their `inScopeForX` is trivially true.
+
+/** Every SourceSeed is in scope for seeding. */
+export function inScopeForSeeding(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
+  return ALWAYS_TRUE;
+}
+
+/** Every SourceSeed is in scope for sourcing. */
+export function inScopeForSourcing(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
+  return ALWAYS_TRUE;
+}
 
 /** A JobSource is in scope for listing iff it's active. */
 export function inScopeForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
@@ -138,8 +172,8 @@ export function inScopeForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
 }
 
 /** A JobListSource is in scope for scripting iff it's in an active source
- * tree. The `parserScript` column is THIS task's own work output, so it's
- * deliberately not part of scope. */
+ * tree. The `parserScript` column is THIS task's own work output — its
+ * absence is a pipeline-state concern, not a scope concern. */
 export function inScopeForScripting(
   eb: ExpressionBuilder<DB, 'JobListSource'>
 ) {

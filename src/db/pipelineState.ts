@@ -4,12 +4,11 @@ import type { DB } from '__generated__/db/types.js';
 import { db, sqlite } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  qualifiedForEvaluate,
-  qualifiedForListing,
-  qualifiedForRunScripts,
-  qualifiedForScripting,
-  qualifiedForSourcing,
-  qualifiedForViewing,
+  inScopeForEvaluate,
+  inScopeForListing,
+  inScopeForRunScripts,
+  inScopeForScripting,
+  inScopeForViewing,
 } from 'src/db/pipelineQualified.js';
 import { terminal } from 'src/utils/terminal.js';
 
@@ -148,37 +147,30 @@ export async function enqueuePipelineTask(args: {
  * from interests/CV rather than picking up existing ones. */
 export type RequeueableTask = Exclude<PipelineTask, 'seeding'>;
 
-/** For `task`, insert a fresh 'queued' state for every qualifying parent
- * entity whose latest state is terminal (not in {queued, started,
- * user_interrupted} — skipping those avoids racing with in-flight work and
- * duplicating already-pending rows). Returns the number of entities requeued.
+/** For `task`, insert a fresh 'queued' state for every parent entity that
+ * passes `inScopeForX` (i.e. every row the pipeline considers in-scope,
+ * including ones already done). For sourcing, every SourceSeed counts — see
+ * `src/db/pipelineQualified.ts` for the qualified-vs-inscope distinction
+ * with worked examples.
  *
- * "Qualifying" uses the same `qualifiedForX` predicate the pipeline runner
- * uses to pick work, so we never requeue rows that the next run wouldn't pick
- * up anyway (e.g. from inactive sources). */
-export async function requeueAllTerminal(
+ * This is the `--all` knob: explicit, force-everything-onto-the-queue. Rows
+ * already `queued`/`started`/`user_interrupted` are requeued anyway (the
+ * LatestPipelineState view keys off createdAt, so the new queued row wins).
+ * The paired runner switch (picker uses inScopeForX under --all) ensures the
+ * runner actually processes the requeued rows even if they're past their
+ * task's "qualified" gate.
+ *
+ * Returns the number of entities requeued. */
+export async function requeueAllInScope(
   task: RequeueableTask
 ): Promise<number> {
-  const skipStates = [
-    PIPELINE_STATE.QUEUED,
-    PIPELINE_STATE.STARTED,
-    PIPELINE_STATE.USER_INTERRUPTED,
-  ];
-
   const ids = await (async (): Promise<string[]> => {
     switch (task) {
       case 'sourcing': {
+        // No skip rule — every SourceSeed is in scope.
         const rows = await db
           .selectFrom('SourceSeed')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofSourceSeedId',
-            'SourceSeed.id'
-          )
           .select('SourceSeed.id as id')
-          .where(qualifiedForSourcing)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
           .execute();
 
         return rows.map(r => r.id);
@@ -187,15 +179,8 @@ export async function requeueAllTerminal(
       case 'listing': {
         const rows = await db
           .selectFrom('JobSource')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofJobSourceId',
-            'JobSource.id'
-          )
           .select('JobSource.id as id')
-          .where(qualifiedForListing)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
+          .where(inScopeForListing)
           .execute();
 
         return rows.map(r => r.id);
@@ -204,15 +189,8 @@ export async function requeueAllTerminal(
       case 'scripting': {
         const rows = await db
           .selectFrom('JobListSource')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofJobListSourceId',
-            'JobListSource.id'
-          )
           .select('JobListSource.id as id')
-          .where(qualifiedForScripting)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
+          .where(inScopeForScripting)
           .execute();
 
         return rows.map(r => r.id);
@@ -221,15 +199,8 @@ export async function requeueAllTerminal(
       case 'run-scripts': {
         const rows = await db
           .selectFrom('JobListSource')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofJobListSourceId',
-            'JobListSource.id'
-          )
           .select('JobListSource.id as id')
-          .where(qualifiedForRunScripts)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
+          .where(inScopeForRunScripts)
           .execute();
 
         return rows.map(r => r.id);
@@ -238,15 +209,8 @@ export async function requeueAllTerminal(
       case 'viewing': {
         const rows = await db
           .selectFrom('JobPost')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofJobPostId',
-            'JobPost.id'
-          )
           .select('JobPost.id as id')
-          .where(qualifiedForViewing)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
+          .where(inScopeForViewing)
           .execute();
 
         return rows.map(r => r.id);
@@ -255,15 +219,8 @@ export async function requeueAllTerminal(
       case 'evaluate': {
         const rows = await db
           .selectFrom('JobPost')
-          .innerJoin(
-            'LatestPipelineState',
-            'LatestPipelineState.ofJobPostId',
-            'JobPost.id'
-          )
           .select('JobPost.id as id')
-          .where(qualifiedForEvaluate)
-          .where('LatestPipelineState.task', '=', task)
-          .where('LatestPipelineState.state', 'not in', skipStates)
+          .where(inScopeForEvaluate)
           .execute();
 
         return rows.map(r => r.id);
@@ -280,9 +237,9 @@ export async function requeueAllTerminal(
   }
 
   if (ids.length === 0) {
-    terminal.log(`--all: nothing to requeue for ${task} (no terminal rows).`);
+    terminal.log(`--all: nothing to requeue for ${task} (no in-scope rows).`);
   } else {
-    terminal.log(`--all: requeued ${ids.length} rows for ${task}.`);
+    terminal.log(`--all: requeued ${ids.length} in-scope rows for ${task}.`);
   }
 
   return ids.length;
@@ -357,6 +314,91 @@ export function eligibleForPipelineTask<
         ])
     );
   };
+}
+
+/** Predicate for use in `WHERE` clauses to filter to parent-entity rows
+ * whose latest pipeline state for `args.task` is NOT a terminal-success
+ * state. Used by `--include-failed`: pulls in queued, started,
+ * user_interrupted, no_result, failed, aborted, script_error — anything
+ * that isn't `done`. Rows with no `LatestPipelineState` row for the task
+ * are also counted as "not done". */
+export function notDoneForPipelineTask<
+  P extends 'SourceSeed' | 'JobSource' | 'JobListSource' | 'JobPost',
+>(args: { task: PipelineTask; parentIdRef: `${P}.id` }) {
+  const fk = FK_BY_TASK[args.task];
+  return (eb: ExpressionBuilder<DB, P>) => {
+    // Same TS narrowing escape hatch as `eligibleForPipelineTask`.
+    const ebConcrete = eb as unknown as ExpressionBuilder<DB, 'JobSource'>;
+    return ebConcrete.not(
+      ebConcrete.exists(
+        ebConcrete
+          .selectFrom('LatestPipelineState')
+          .select('LatestPipelineState.id')
+          .whereRef(
+            `LatestPipelineState.${fk}` as 'LatestPipelineState.ofJobSourceId',
+            '=',
+            args.parentIdRef as 'JobSource.id'
+          )
+          .where('LatestPipelineState.task', '=', args.task)
+          .where('LatestPipelineState.state', 'in', [
+            ...TERMINAL_SUCCESS_STATES,
+          ])
+      )
+    );
+  };
+}
+
+/** The three CLI modes each pipeline command supports. The mode picks the
+ * state filter layered on top of `qualifiedForX ∩ inScopeForX`.
+ *
+ * - `queued-only` (default, no flag): pick rows whose latest state is in
+ *   `ELIGIBLE_FOR_PICKUP_STATES` (queued / user_interrupted). Bar can reach
+ *   100% if upstream enqueues correctly.
+ * - `include-failed` (--include-failed): pick anything not done — relaxes
+ *   the queued filter to also retry failed/aborted/no_result/etc.
+ * - `all` (--all): no state filter. Re-process every qualifying in-scope
+ *   row, including done ones. Call `requeueAllInScope(task)` first so the
+ *   requeued rows show as pending in the TUI while they're being re-run. */
+export type PipelineMode = 'queued-only' | 'include-failed' | 'all';
+
+export function pipelineModeFromOptions(opts: {
+  all?: boolean;
+  includeFailed?: boolean;
+}): PipelineMode {
+  if (opts.all && opts.includeFailed) {
+    throw new Error(
+      'Cannot combine --all and --include-failed; pick one (--all is the superset).'
+    );
+  }
+
+  if (opts.all) return 'all';
+  if (opts.includeFailed) return 'include-failed';
+  return 'queued-only';
+}
+
+/** Picker state filter for a given mode. Returns `null` for `all` — caller
+ * should omit the `.where()` (i.e., no state filter). */
+export function pickerStateFilter<
+  P extends 'SourceSeed' | 'JobSource' | 'JobListSource' | 'JobPost',
+>(args: {
+  task: PipelineTask;
+  parentIdRef: `${P}.id`;
+  mode: PipelineMode;
+}): ReturnType<typeof eligibleForPipelineTask<P>> | null {
+  switch (args.mode) {
+    case 'queued-only':
+      return eligibleForPipelineTask({
+        task: args.task,
+        parentIdRef: args.parentIdRef,
+      });
+    case 'include-failed':
+      return notDoneForPipelineTask({
+        task: args.task,
+        parentIdRef: args.parentIdRef,
+      });
+    case 'all':
+      return null;
+  }
 }
 
 function entityIdOf(entity: PipelineEntity): string {

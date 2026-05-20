@@ -6,14 +6,18 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForViewing } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForViewing,
+  qualifiedForViewing,
+} from 'src/db/pipelineQualified.js';
 import { viewJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -22,18 +26,25 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ViewingOptions = {
   all?: boolean;
+  includeFailed?: boolean;
   jobPostId?: string;
 };
 
 export function createViewingCommand(): Command {
   return new Command('viewing')
     .description(
-      'For each unprocessed JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields'
+      'For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields.'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-view every qualifying JobPost regardless of pipeline state — including ones already done / not_a_job_posting / failed. Useful after a prompt change.'
+        'Re-view every qualifying in-scope JobPost regardless of pipeline state — including ones already done / not_a_job_posting / failed. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -49,10 +60,6 @@ async function runAll(
   context: BrowserContext,
   opts: ViewingOptions
 ): Promise<void> {
-  // With --all, requeue every qualifying terminal viewing row first. Going
-  // through 'queued' (instead of just bypassing the eligibility filter) keeps
-  // the TUI pipeline bar honest — the numerator sees them transition through
-  // queued → started → done like any normal pickup.
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -68,9 +75,29 @@ async function runAll(
       task: 'viewing',
       entity: { ofJobPostId: opts.jobPostId },
     });
-  } else if (opts.all) {
-    await requeueAllTerminal('viewing');
   }
+
+  // With --all, requeue every in-scope viewing row first. Going through
+  // 'queued' (instead of just bypassing the eligibility filter) keeps the
+  // TUI pipeline bar honest — the numerator sees them transition through
+  // queued → started → done like any normal pickup.
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('viewing');
+
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  const stateFilter = pickerStateFilter({
+    task: 'viewing',
+    parentIdRef: 'JobPost.id',
+    mode,
+  });
+
+  let query = db
+    .selectFrom('JobPost')
+    .select(['JobPost.id as id', 'JobPost.url as url'])
+    .where(qualifiedForViewing)
+    .where(inScopeForViewing);
+
+  if (stateFilter) query = query.where(stateFilter);
 
   const targets = opts.jobPostId
     ? await db
@@ -78,19 +105,7 @@ async function runAll(
         .select(['JobPost.id as id', 'JobPost.url as url'])
         .where('JobPost.id', '=', opts.jobPostId)
         .execute()
-    : // qualifiedForViewing handles the active-source filter AND the
-      // titleRelavency threshold against PIPELINE_VIEWING_MIN_TITLE_RELEVANCY.
-      await db
-        .selectFrom('JobPost')
-        .select(['JobPost.id as id', 'JobPost.url as url'])
-        .where(qualifiedForViewing)
-        .where(
-          eligibleForPipelineTask({
-            task: 'viewing',
-            parentIdRef: 'JobPost.id',
-          })
-        )
-        .execute();
+    : await query.execute();
 
   if (targets.length === 0) {
     terminal.log('No unprocessed JobPost rows. Nothing to do.');

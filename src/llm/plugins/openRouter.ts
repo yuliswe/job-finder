@@ -41,6 +41,11 @@ export class OpenRouterPlugin {
             schema: responseFormat.schema,
           },
         },
+        // Only route to providers that honor every parameter we sent — in
+        // particular `responseFormat`. Without this, OpenRouter may route to
+        // a provider whose deploy of the model rejects json_schema (e.g.
+        // DeepInfra → stepfun-ai/Step-3.5-Flash returns HTTP 405).
+        provider: { requireParameters: true },
         messages,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...(metadata ? { metadata } : {}),

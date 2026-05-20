@@ -378,6 +378,18 @@ export default [
     },
   },
 
+  // jobfinder.config.ts is the single source of truth for build-time config
+  // (API keys, model IDs, plugin selection). It needs to read process.env
+  // directly and benefits from the longer, self-documenting
+  // `const X = process.env.X` form over destructuring.
+  {
+    files: ['jobfinder.config.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+      'prefer-destructuring': 'off',
+    },
+  },
+
   // Test files configuration
   {
     files: ['**/*.test.ts'],

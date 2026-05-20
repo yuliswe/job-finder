@@ -26,6 +26,7 @@
   "bugs": {},
   "homepage": "",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
     "@inkjs/ui": "^2.0.0",
     "@openrouter/sdk": "^0.12.35",
     "@valibot/to-json-schema": "^1.7.0",

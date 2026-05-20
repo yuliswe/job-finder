@@ -6,14 +6,18 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForRunScripts } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForRunScripts,
+  qualifiedForRunScripts,
+} from 'src/db/pipelineQualified.js';
 import {
   batchEvaluateJobTitlesRelevancy,
   type JobRelevanceScore,
@@ -42,7 +46,13 @@ export function createRunScriptsCommand(): Command {
     .addOption(
       new Option(
         '--all',
-        'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
+        'Re-process every qualifying in-scope JobListSource regardless of pipeline state. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -54,6 +64,7 @@ export function createRunScriptsCommand(): Command {
         division?: string;
         location?: string;
         all?: boolean;
+        includeFailed?: boolean;
         jobListSourceId?: string;
       }) => {
         await withBrowserInstance(context => runAll(context, opts));
@@ -67,6 +78,7 @@ async function runAll(
     division?: string;
     location?: string;
     all?: boolean;
+    includeFailed?: boolean;
     jobListSourceId?: string;
   }
 ): Promise<void> {
@@ -87,9 +99,25 @@ async function runAll(
       task: 'run-scripts',
       entity: { ofJobListSourceId: opts.jobListSourceId },
     });
-  } else if (opts.all) {
-    await requeueAllTerminal('run-scripts');
   }
+
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('run-scripts');
+
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  const stateFilter = pickerStateFilter({
+    task: 'run-scripts',
+    parentIdRef: 'JobListSource.id',
+    mode,
+  });
+
+  let query = db
+    .selectFrom('JobListSource')
+    .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
+    .where(qualifiedForRunScripts)
+    .where(inScopeForRunScripts);
+
+  if (stateFilter) query = query.where(stateFilter);
 
   const targets = opts.jobListSourceId
     ? await db
@@ -97,17 +125,7 @@ async function runAll(
         .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
         .where('JobListSource.id', '=', opts.jobListSourceId)
         .execute()
-    : await db
-        .selectFrom('JobListSource')
-        .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
-        .where(qualifiedForRunScripts)
-        .where(
-          eligibleForPipelineTask({
-            task: 'run-scripts',
-            parentIdRef: 'JobListSource.id',
-          })
-        )
-        .execute();
+    : await query.execute();
 
   if (targets.length === 0) {
     terminal.log(

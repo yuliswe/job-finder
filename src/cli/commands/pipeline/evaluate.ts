@@ -4,14 +4,18 @@ import pLimit from 'p-limit';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForEvaluate } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForEvaluate,
+  qualifiedForEvaluate,
+} from 'src/db/pipelineQualified.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
 import type { SkillRequirements } from 'src/llm/viewJobPost.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -24,18 +28,25 @@ const limit = pLimit(CONCURRENCY);
 
 type EvaluateOptions = {
   all?: boolean;
+  includeFailed?: boolean;
   jobPostId?: string;
 };
 
 export function createEvaluateCommand(): Command {
   return new Command('evaluate')
     .description(
-      'For each viewed JobPost (description populated), score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.'
+      'For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-evaluate every qualifying JobPost regardless of pipeline state. Useful after a prompt change.'
+        'Re-evaluate every qualifying in-scope JobPost regardless of pipeline state. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -61,9 +72,10 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
       task: 'evaluate',
       entity: { ofJobPostId: opts.jobPostId },
     });
-  } else if (opts.all) {
-    await requeueAllTerminal('evaluate');
   }
+
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('evaluate');
 
   const [interests, cv] = await Promise.all([getUserInterests(), getUserCV()]);
 
@@ -79,23 +91,28 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
     );
   }
 
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  const stateFilter = pickerStateFilter({
+    task: 'evaluate',
+    parentIdRef: 'JobPost.id',
+    mode,
+  });
+
+  let query = db
+    .selectFrom('JobPost')
+    .select(['id', 'title', 'description', 'skillRequirements'])
+    .where(qualifiedForEvaluate)
+    .where(inScopeForEvaluate);
+
+  if (stateFilter) query = query.where(stateFilter);
+
   const targets = opts.jobPostId
     ? await db
         .selectFrom('JobPost')
         .select(['id', 'title', 'description', 'skillRequirements'])
         .where('JobPost.id', '=', opts.jobPostId)
         .execute()
-    : await db
-        .selectFrom('JobPost')
-        .select(['id', 'title', 'description', 'skillRequirements'])
-        .where(qualifiedForEvaluate)
-        .where(
-          eligibleForPipelineTask({
-            task: 'evaluate',
-            parentIdRef: 'JobPost.id',
-          })
-        )
-        .execute();
+    : await query.execute();
 
   if (targets.length === 0) {
     terminal.log(

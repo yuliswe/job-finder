@@ -6,7 +6,13 @@ export const plugin = new OpenRouterPlugin();
  * The OpenRouter API key to use for the LLM calls. If not set, will fall back
  * to env var.
  */
-export const { OPENROUTER_API_KEY } = process.env;
+export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+
+/**
+ * The Anthropic API key to use for the LLM calls. If not set, will fall back
+ * to env var.
+ */
+export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 /**
  * The model used by the seeding process.
@@ -37,7 +43,8 @@ export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
  * The model used by the coding process (writing custom parser scripts for
  * sources). This should be a code-specialized model.
  */
-export const LLM_CODING_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
+export const LLM_CODING_MODEL_SMARTER = 'xiaomi/mimo-v2.5-pro';
 
 /**
  * Whether to use a headless browser when scraping websites.
@@ -49,14 +56,14 @@ export const USE_HEADLESS_BROWSER = true;
  * websites. Set this to a larger number to speed up scraping, at the cost of
  * higher CPU and memory.
  */
-export const MAX_CONCURRENT_BROWSER_TABS = 10;
+export const MAX_CONCURRENT_BROWSER_TABS = 30;
 
 /**
  * The maximum time to wait for a page to load in the browser when scraping
  * websites before considering the page is loaded enough to scrape data from it,
  * in milliseconds. Set this to a larger number if your internet is slow.
  */
-export const BROWSER_NAVIGATION_TIMEOUT_MS = 5_000;
+export const BROWSER_NAVIGATION_TIMEOUT_MS = 10_000;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum depth
@@ -82,3 +89,10 @@ export const PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE = 50;
  * file..
  */
 export const PIPELINE_VIEWING_MIN_TITLE_RELEVANCY = 0.5;
+
+/**
+ * If a single job listing page shows more jobs than this amount, ask the LLM to
+ * restrict the filters to narrow it down, to avoid overwhelming the user with
+ * too many listings at once.
+ */
+export const PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS = 50;

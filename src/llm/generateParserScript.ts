@@ -1,10 +1,7 @@
 import { type BrowserContext, type Page } from 'patchright';
 import * as v from 'valibot';
 
-import {
-  BROWSER_NAVIGATION_TIMEOUT_MS,
-  LLM_CODING_MODEL,
-} from 'jobfinder.config.js';
+import { BROWSER_NAVIGATION_TIMEOUT_MS } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
 import { GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT } from 'src/prompts/generateParserScript.js';
@@ -30,12 +27,17 @@ export type GeneratedParserScript = {
  * and run it inside the page in a feedback loop until it returns a non-empty
  * job list. Returns the validated script + the captured location/division
  * options, or null if all attempts fail.
+ *
+ * `model` is the LLM model ID (e.g. `LLM_CODING_MODEL_BASE` or
+ * `LLM_CODING_MODEL_SMARTER`). Callers can retry with a smarter model when
+ * the base one returns null.
  */
 export async function generateParserScript(args: {
   context: BrowserContext;
   listingUrl: string;
+  model: string;
 }): Promise<GeneratedParserScript | null> {
-  const { context, listingUrl } = args;
+  const { context, listingUrl, model } = args;
 
   return withBrowserTab(context, async page => {
     let snapshot: { title: string; html: string };
@@ -117,7 +119,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
           ),
         }),
         maxAttempts: MAX_SCRIPT_ATTEMPTS,
-        model: LLM_CODING_MODEL,
+        model,
         metadata: { configKey: 'LLM_CODING_MODEL' },
         logger: terminal,
         reasoningEffort: LlmReasoningEffort.High,

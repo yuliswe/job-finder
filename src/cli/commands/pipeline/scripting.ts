@@ -2,17 +2,25 @@ import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
-import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import {
+  LLM_CODING_MODEL_CHEAPER,
+  LLM_CODING_MODEL_SMARTER,
+  MAX_CONCURRENT_BROWSER_TABS,
+} from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForScripting } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForScripting,
+  qualifiedForScripting,
+} from 'src/db/pipelineQualified.js';
 import { generateParserScript } from 'src/llm/generateParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -21,18 +29,25 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ScriptingOptions = {
   all?: boolean;
+  includeFailed?: boolean;
   jobListSourceId?: string;
 };
 
 export function createScriptingCommand(): Command {
   return new Command('scripting')
     .description(
-      'For each unprocessed JobListSource, generate and validate a parser script (listLocations + searchJobs) and store it in JobListSource.parserScript'
+      'Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript.'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-process every qualifying JobListSource regardless of pipeline state. Useful after a prompt change.'
+        'Re-process every qualifying in-scope JobListSource regardless of pipeline state. Re-scripts done rows and overwrites their parserScript on success. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -65,9 +80,25 @@ async function runScripting(
       task: 'scripting',
       entity: { ofJobListSourceId: opts.jobListSourceId },
     });
-  } else if (opts.all) {
-    await requeueAllTerminal('scripting');
   }
+
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('scripting');
+
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  const stateFilter = pickerStateFilter({
+    task: 'scripting',
+    parentIdRef: 'JobListSource.id',
+    mode,
+  });
+
+  let query = db
+    .selectFrom('JobListSource')
+    .select(['id', 'url'])
+    .where(qualifiedForScripting)
+    .where(inScopeForScripting);
+
+  if (stateFilter) query = query.where(stateFilter);
 
   const targets = opts.jobListSourceId
     ? await db
@@ -75,17 +106,7 @@ async function runScripting(
         .select(['id', 'url'])
         .where('JobListSource.id', '=', opts.jobListSourceId)
         .execute()
-    : await db
-        .selectFrom('JobListSource')
-        .select(['id', 'url'])
-        .where(qualifiedForScripting)
-        .where(
-          eligibleForPipelineTask({
-            task: 'scripting',
-            parentIdRef: 'JobListSource.id',
-          })
-        )
-        .execute();
+    : await query.execute();
 
   const results = await Promise.all(
     targets.map(target => tabLimit(() => scriptOneTarget({ context, target })))
@@ -111,23 +132,38 @@ async function scriptOneTarget(args: {
     entity: { ofJobListSourceId: target.id },
     label: target.url,
     work: async (): Promise<{ jobListSourceUpdated: number }> => {
-      terminal.log(`Scripting JobListSource ${target.url}`);
+      terminal.log(
+        `Scripting JobListSource ${target.url} (model=${LLM_CODING_MODEL_CHEAPER})`
+      );
 
-      const generated = await generateParserScript({
+      let generated = await generateParserScript({
         context,
         listingUrl: target.url,
+        model: LLM_CODING_MODEL_CHEAPER,
       });
 
       if (!generated) {
         terminal.warn(
-          `Could not produce a validated script for ${target.url} — leaving unprocessed for retry`
+          `Base model (${LLM_CODING_MODEL_CHEAPER}) could not produce a validated script for ${target.url}. Retrying with smarter model (${LLM_CODING_MODEL_SMARTER}).`
+        );
+
+        generated = await generateParserScript({
+          context,
+          listingUrl: target.url,
+          model: LLM_CODING_MODEL_SMARTER,
+        });
+      }
+
+      if (!generated) {
+        terminal.warn(
+          `Neither base nor smarter model produced a validated script for ${target.url} — leaving unprocessed for retry`
         );
 
         await recordPipelineState({
           task: 'scripting',
           state: PIPELINE_STATE.ABORTED,
           reason:
-            'generateParserScript returned null (LLM aborted or exhausted attempts)',
+            'generateParserScript returned null with both LLM_CODING_MODEL_BASE and LLM_CODING_MODEL_SMARTER (LLM aborted or exhausted attempts)',
           entity: { ofJobListSourceId: target.id },
         });
         return { jobListSourceUpdated: 0 };

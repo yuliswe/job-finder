@@ -6,14 +6,19 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
+  type PipelineMode,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForSourcing } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForSourcing,
+  qualifiedForSourcing,
+} from 'src/db/pipelineQualified.js';
 import { discoverJobSource } from 'src/llm/discoverJobSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -23,18 +28,25 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type SourcingOptions = {
   all?: boolean;
+  includeFailed?: boolean;
   sourceSeedId?: string;
 };
 
 export function createSourcingCommand(): Command {
   return new Command('sourcing')
     .description(
-      'Discover JobSource rows from recent SourceSeed URLs via headless browse + LLM'
+      'Discover JobSource rows from currently-queued SourceSeed URLs via headless browse + LLM.'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-process every qualifying SourceSeed regardless of pipeline state. Useful after a prompt change.'
+        'Re-process every qualifying in-scope SourceSeed regardless of pipeline state. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -55,20 +67,26 @@ async function runSourcing(
     return;
   }
 
-  if (opts.all) await requeueAllTerminal('sourcing');
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('sourcing');
 
-  const names = await db
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  // For sourcing, both qualified and inScope are trivially true — the
+  // state filter does all the work.
+  const stateFilter = pickerStateFilter({
+    task: 'sourcing',
+    parentIdRef: 'SourceSeed.id',
+    mode,
+  });
+
+  let namesQuery = db
     .selectFrom('SourceSeed')
     .select('name')
     .where(qualifiedForSourcing)
-    .where(
-      eligibleForPipelineTask({
-        task: 'sourcing',
-        parentIdRef: 'SourceSeed.id',
-      })
-    )
-    .distinct()
-    .execute();
+    .where(inScopeForSourcing);
+
+  if (stateFilter) namesQuery = namesQuery.where(stateFilter);
+  const names = await namesQuery.distinct().execute();
 
   if (names.length === 0) {
     terminal.log('All seeds have been processed already. Nothing to do.');
@@ -76,7 +94,9 @@ async function runSourcing(
   }
 
   const results = await Promise.all(
-    names.map(({ name }) => tabLimit(() => sourceOneGroup({ context, name })))
+    names.map(({ name }) =>
+      tabLimit(() => sourceOneGroup({ context, name, mode }))
+    )
   );
 
   const jobSourceInserted = results.reduce(
@@ -114,21 +134,28 @@ async function runSourcingForOneSeed(
 async function sourceOneGroup(args: {
   context: BrowserContext;
   name: string;
+  mode: PipelineMode;
 }): Promise<{ jobSourceInserted: number }> {
-  const { context, name } = args;
+  const { context, name, mode } = args;
   terminal.log(`Processing for "${name}"...`);
 
-  const seeds = await db
+  // Same state-filter mode as the names query above.
+  const stateFilter = pickerStateFilter({
+    task: 'sourcing',
+    parentIdRef: 'SourceSeed.id',
+    mode,
+  });
+
+  let seedsQuery = db
     .selectFrom('SourceSeed')
     .select(['id', 'url'])
     .where('name', '=', name)
     .where(qualifiedForSourcing)
-    .where(
-      eligibleForPipelineTask({
-        task: 'sourcing',
-        parentIdRef: 'SourceSeed.id',
-      })
-    )
+    .where(inScopeForSourcing);
+
+  if (stateFilter) seedsQuery = seedsQuery.where(stateFilter);
+
+  const seeds = await seedsQuery
     .orderBy('createdAt', 'desc')
     .limit(PER_NAME_RETRY_LIMIT)
     .execute();

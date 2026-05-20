@@ -6,14 +6,18 @@ import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  eligibleForPipelineTask,
   enqueuePipelineTask,
   PIPELINE_STATE,
+  pickerStateFilter,
+  pipelineModeFromOptions,
   processOne,
   recordPipelineState,
-  requeueAllTerminal,
+  requeueAllInScope,
 } from 'src/db/pipelineState.js';
-import { qualifiedForListing } from 'src/db/pipelineQualified.js';
+import {
+  inScopeForListing,
+  qualifiedForListing,
+} from 'src/db/pipelineQualified.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -22,18 +26,25 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
 type ListingOptions = {
   all?: boolean;
+  includeFailed?: boolean;
   jobSourceId?: string;
 };
 
 export function createListingCommand(): Command {
   return new Command('listing')
     .description(
-      'For each unprocessed JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in)'
+      'For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in).'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-process every qualifying JobSource regardless of pipeline state. Useful after a prompt change.'
+        'Re-process every qualifying in-scope JobSource regardless of pipeline state. Use after a prompt change.'
+      )
+    )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all.'
       )
     )
     .option(
@@ -64,9 +75,25 @@ async function runListing(
       task: 'listing',
       entity: { ofJobSourceId: opts.jobSourceId },
     });
-  } else if (opts.all) {
-    await requeueAllTerminal('listing');
   }
+
+  const mode = pipelineModeFromOptions(opts);
+  if (mode === 'all') await requeueAllInScope('listing');
+
+  // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
+  const stateFilter = pickerStateFilter({
+    task: 'listing',
+    parentIdRef: 'JobSource.id',
+    mode,
+  });
+
+  let query = db
+    .selectFrom('JobSource')
+    .select(['id', 'name', 'url'])
+    .where(qualifiedForListing)
+    .where(inScopeForListing);
+
+  if (stateFilter) query = query.where(stateFilter);
 
   const sources = opts.jobSourceId
     ? await db
@@ -74,17 +101,7 @@ async function runListing(
         .select(['id', 'name', 'url'])
         .where('JobSource.id', '=', opts.jobSourceId)
         .execute()
-    : await db
-        .selectFrom('JobSource')
-        .select(['id', 'name', 'url'])
-        .where(qualifiedForListing)
-        .where(
-          eligibleForPipelineTask({
-            task: 'listing',
-            parentIdRef: 'JobSource.id',
-          })
-        )
-        .execute();
+    : await query.execute();
 
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))
