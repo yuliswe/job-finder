@@ -115,8 +115,35 @@ async function llmSend<S extends v.GenericSchema>(args: {
   });
 
   if (!content) throw new Error('LLM returned empty response');
-  const result = v.parse(schema, JSON.parse(content));
+  const result = v.parse(schema, JSON.parse(extractJson(content)));
   return { result, totalTokens };
+}
+
+/** Pull the JSON object out of an LLM response that may also contain prose
+ * preamble or markdown fences. Tries three things in order:
+ *   1. Strip a wrapping ```json … ``` (or bare ``` … ```) fence.
+ *   2. Pull the contents of the first ```json … ``` fence anywhere in the text.
+ *   3. Fall back to the first `{` through the last `}`.
+ * If none of those match, return the content as-is and let `JSON.parse` throw
+ * with a meaningful error. The schema is an object at the root, so first-`{`
+ * to last-`}` is a safe slice — escaped `}` inside string values still leaves
+ * the very last `}` as the document terminator. */
+function extractJson(content: string): string {
+  const trimmed = content.trim();
+
+  const wrapped = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(trimmed);
+  if (wrapped) return wrapped[1]!.trim();
+
+  const fence = /```(?:json)?\s*([\s\S]*?)\s*```/i.exec(trimmed);
+  if (fence) return fence[1]!.trim();
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  return trimmed;
 }
 
 /**

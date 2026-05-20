@@ -1,7 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs';
 
 import dotenv from 'dotenv';
-import { OPENROUTER_API_KEY } from 'jobfinder.config';
+import { ANTHROPIC_API_KEY, OPENROUTER_API_KEY } from 'jobfinder.config';
 
 const ENV_PATH = '.env.local';
 const REQUIRED_VARS = ['OPENROUTER_API_KEY', 'DB_PATH'] as const;
@@ -27,6 +27,10 @@ function requiredEnvVar(name: string, defaultValue?: string): string {
 export const Env = {
   get OPENROUTER_API_KEY() {
     return requiredEnvVar('OPENROUTER_API_KEY', OPENROUTER_API_KEY);
+  },
+
+  get ANTHROPIC_API_KEY() {
+    return requiredEnvVar('ANTHROPIC_API_KEY', ANTHROPIC_API_KEY);
   },
 
   get DB_PATH() {
