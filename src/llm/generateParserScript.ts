@@ -9,7 +9,7 @@ import { pageEval, withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { COLOURS, terminal } from 'src/utils/terminal';
 
-const MAX_SCRIPT_ATTEMPTS = 50;
+const MAX_SCRIPT_ATTEMPTS = 15;
 
 class ParserScriptAbort extends Error {
   override name = 'ParserScriptAbort';
@@ -66,11 +66,11 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
 `,
         schema: v.object({
           state: v.pipe(
-            v.union([
-              v.literal('validate'),
-              v.literal('still_exploring'),
-              v.literal('abort'),
-            ]),
+            // Use picklist rather than union-of-literals so the JSON schema
+            // serializes as `{type:'string', enum:[...]}` instead of
+            // `{anyOf:[{const:...},...]}`. OpenAI's strict mode rejects the
+            // anyOf-without-type form with `invalid_json_schema`.
+            v.picklist(['validate', 'still_exploring', 'abort']),
             v.description(
               "Set to 'still_exploring' to have your script executed only for its console.log output (returned as feedback). Set to 'validate' when listLocations / listDivisions / searchJobs are ready for the full probe. Set to 'abort' ONLY if you have concluded the task cannot be completed — either the current URL is not actually a job listing page (e.g. it's a marketing page, a single job-detail page, a sign-in wall, or contains no enumerable list of postings) OR the task is logically impossible (e.g. content is behind authentication we don't have, an anti-bot block, a captcha, a deprecated/empty page, or the listing requires interactions Playwright can't perform from a parser script). Use the `reason` field to explain specifically why."
             )

@@ -43,8 +43,8 @@ export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
  * The model used by the coding process (writing custom parser scripts for
  * sources). This should be a code-specialized model.
  */
-export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
-export const LLM_CODING_MODEL_SMARTER = 'xiaomi/mimo-v2.5-pro';
+export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
+export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
 
 /**
  * Whether to use a headless browser when scraping websites.

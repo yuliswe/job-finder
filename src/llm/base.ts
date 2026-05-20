@@ -23,7 +23,8 @@ function getSchemaName(schema: v.GenericSchema): string {
   return name;
 }
 
-/** Add additionalProperties: false and require every key — needed for OpenAI strict mode. */
+/** Add additionalProperties: false, require every key, and inject `type` into
+ * anyOf branches that lack it — all needed for OpenAI strict mode. */
 function strictifyJsonSchema(
   obj: Record<string, unknown>
 ): Record<string, unknown> {
@@ -53,6 +54,34 @@ function strictifyJsonSchema(
     result.items !== null
   ) {
     result.items = strictifyJsonSchema(result.items as Record<string, unknown>);
+  }
+
+  // anyOf branches must each declare `type` for OpenAI strict mode. Recurse
+  // into every branch and infer `type` from a `const` literal when missing
+  // (the most common case — `v.union([v.literal(...), ...])` from valibot).
+  if (Array.isArray(result.anyOf)) {
+    result.anyOf = (result.anyOf as unknown[]).map(branch => {
+      if (typeof branch !== 'object' || branch === null) return branch;
+      const b = branch as Record<string, unknown>;
+      const strictified = strictifyJsonSchema(b);
+      if (strictified.type === undefined && 'const' in strictified) {
+        const constValue = strictified.const;
+        const inferred =
+          typeof constValue === 'string'
+            ? 'string'
+            : typeof constValue === 'number'
+              ? 'number'
+              : typeof constValue === 'boolean'
+                ? 'boolean'
+                : constValue === null
+                  ? 'null'
+                  : undefined;
+
+        if (inferred) strictified.type = inferred;
+      }
+
+      return strictified;
+    });
   }
 
   return result;
@@ -210,7 +239,7 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
 
       if (isRetryable && retry < MAX_SEND_RETRIES - 1) {
         logger.error(
-          `LLM request failed (model=${model}), retrying (${retry + 1}/${MAX_SEND_RETRIES}): ${String(error)}`
+          `LLM request failed (model=${model}), retrying (${retry + 1}/${MAX_SEND_RETRIES}): ${formatLlmError(error)}`
         );
         if (isSchemaError) {
           memory.add(
@@ -221,12 +250,47 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         continue;
       }
 
-      logger.error(`LLM request failed (model=${model}): ${String(error)}`);
+      logger.error(
+        `LLM request failed (model=${model}): ${formatLlmError(error)}`
+      );
       throw error;
     }
   }
 
   throw new Error('Unreachable');
+}
+
+/** Surface as much of the underlying provider's error as we can. SDK errors
+ * like `BadRequestResponseError` stringify to just their name + a generic
+ * message ("Provider returned error"); the actual upstream reason lives on
+ * shape-dependent properties (`body`, `response`, `cause`, etc.). Walk the
+ * common ones and serialize what we find. */
+function formatLlmError(error: unknown): string {
+  const parts: string[] = [String(error)];
+  const e = error as Record<string, unknown>;
+  for (const key of ['status', 'statusCode', 'code']) {
+    if (e && e[key] !== undefined) parts.push(`${key}=${String(e[key])}`);
+  }
+
+  for (const key of ['body', 'response', 'data', 'error', 'cause']) {
+    if (e && e[key] !== undefined) {
+      const value = e[key];
+      const serialized =
+        typeof value === 'string' ? value : safeStringify(value);
+
+      parts.push(`${key}=${serialized}`);
+    }
+  }
+
+  return parts.join(' | ');
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /** Send messages to the LLM, validate the response, feed back errors, retry up to maxAttempts. */
