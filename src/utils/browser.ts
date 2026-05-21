@@ -1,9 +1,12 @@
 import { type BrowserContext, chromium, type Page } from 'patchright';
 
 import {
+  BROWSER_NAVIGATION_MIN_WAIT_MS,
+  BROWSER_NAVIGATION_TIMEOUT_MS,
   MAX_CONCURRENT_BROWSER_TABS,
   USE_HEADLESS_BROWSER,
 } from 'jobfinder.config.js';
+import { terminal } from 'src/utils/terminal.js';
 
 /**
  * Launch a browser with a single shared context (so every tab opened via
@@ -62,6 +65,45 @@ export async function withBrowserTab<T>(
     await page.close();
     releaseTab();
   }
+}
+
+/** Navigate `page` to `url`, honoring the project-wide navigation settings:
+ *
+ * - Up to `BROWSER_NAVIGATION_TIMEOUT_MS` waiting for `'networkidle'`.
+ * - At least `BROWSER_NAVIGATION_MIN_WAIT_MS` extra dwell time after the
+ *   navigation resolves, so JS-heavy pages have a chance to finish their
+ *   post-load rendering before the caller scrapes.
+ *
+ * Network/timeout errors from the initial `page.goto` are caught and logged
+ * (mirroring the "proceed with whatever content loaded" convention every
+ * scraping callsite already uses). The min-wait still runs even on timeout
+ * — partial content is often usable.
+ *
+ * Returns the resolved `Response` from goto, or `null` if it errored. Most
+ * callers don't need it. */
+export async function goToPage(
+  page: Page,
+  url: string
+): Promise<import('patchright').Response | null> {
+  let response: import('patchright').Response | null = null;
+  try {
+    response = await page.goto(url, {
+      waitUntil: 'networkidle',
+      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
+    });
+  } catch (err) {
+    terminal.warn(
+      `Timeout/network error loading ${url}: ${String(err)}; proceeding with whatever content loaded`
+    );
+  }
+
+  if (BROWSER_NAVIGATION_MIN_WAIT_MS > 0) {
+    await new Promise(resolve =>
+      setTimeout(resolve, BROWSER_NAVIGATION_MIN_WAIT_MS)
+    );
+  }
+
+  return response;
 }
 
 /**

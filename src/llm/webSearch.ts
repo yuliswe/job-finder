@@ -1,10 +1,9 @@
 import { type BrowserContext } from 'patchright';
 import type * as v from 'valibot';
 
-import { BROWSER_NAVIGATION_TIMEOUT_MS } from 'jobfinder.config.js';
 import { feedbackLoop, Memory, type ValidateResult } from 'src/llm/base.js';
 import type { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
-import { withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 /**
@@ -48,10 +47,7 @@ export async function webSearch<
 
   terminal.log(`Google search: "${query}"`);
   const { pageText, pageTitle } = await withBrowserTab(context, async page => {
-    await page.goto(url, {
-      waitUntil: 'networkidle',
-      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-    });
+    await goToPage(page, url);
     const title = await page.title();
     const text = await page.evaluate(() => document.body.innerText);
     return { pageText: text, pageTitle: title };

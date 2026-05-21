@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { sqlite } from 'src/db/index.js';
 
-const POLL_MS = 150;
+const POLL_MS = 1000;
 
 /** Read SQLite's `data_version` pragma. Increments on any write across connections. */
 function readDataVersion(): number {

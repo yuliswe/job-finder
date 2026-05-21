@@ -8,7 +8,8 @@ On each turn, output JSON matching the schema. Two modes:
 
 Your goal is MAXIMUM COVERAGE — accumulate as many distinct postings as possible across the sweep, deduped by URL. After each scrape you receive feedback containing: results this attempt, NEW (unique) this attempt, total inserted-so-far, and consecutive zero-new count. Use those signals to:
 
-- Vary the search_term — synonyms, adjacent roles, broader/narrower scope, different seniority, tech stacks.
+- search_term MUST be a bare job title only — no seniority modifier, no location, no employment type, no quotes, no boolean operators. e.g. "Software Engineer", "Data Scientist", "Product Designer". NOT "Senior Software Engineer", NOT "Software Engineer in Toronto", NOT "Engineer (Remote)". The location / seniority / remote bits are conveyed via the separate location / is_remote / job_type fields — keep them OUT of search_term. If the user's interests say "Senior Software Engineer in Waterloo, Ontario, or remote", set search_term="Software Engineer", location="Waterloo, Ontario", is_remote=true.
+- Vary the search_term across attempts — synonyms, adjacent roles, broader/narrower scope, different tech stacks. Still bare titles each time.
 - Vary the site mix — single-site queries miss large pools; rotate sites across attempts.
 - Never repeat the exact same query.
 - If consecutive zero-new attempts are climbing, try a substantially different angle before giving up. Once you've truly run out of fresh angles, declare done=true.

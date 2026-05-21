@@ -41,10 +41,10 @@ const JOB_TYPES = [
 ] as const;
 
 /** Hard ceiling — keeps a runaway loop from burning the LLM bill. */
-const MAX_ATTEMPTS = 30;
+const MAX_ATTEMPTS = 50;
 /** Auto-stop after this many consecutive attempts that added 0 new postings,
  * even if the LLM keeps saying it isn't done. Coverage has clearly plateaued. */
-const MAX_CONSECUTIVE_ZERO_NEW = 3;
+const MAX_CONSECUTIVE_ZERO_NEW = 50;
 
 export function createSeedingCommand(): Command {
   return new Command('seeding')
@@ -199,13 +199,13 @@ async function discoverSeedJobs(): Promise<JobResult[]> {
       results_wanted: v.pipe(
         v.nullable(v.number()),
         v.description(
-          'How many results to fetch per site. Start tight (15) and relax (100+, or null) as zero-new attempts climb.'
+          'How many results to fetch per site. Start with 100 per page and if it fails, reduce the number.'
         )
       ),
       hours_old: v.pipe(
         v.nullable(v.number()),
         v.description(
-          'Only return postings newer than this many hours. Start tight (24) and relax (72, 168, then null) as zero-new attempts climb.'
+          'Only return postings newer than this many hours. Start tight (24h) and relax (7d, 30d, then 60d) as zero-new attempts climb.'
         )
       ),
       job_type: v.pipe(
@@ -223,7 +223,7 @@ async function discoverSeedJobs(): Promise<JobResult[]> {
       distance: v.pipe(
         v.nullable(v.number()),
         v.description(
-          'Search radius in miles from `location`. null lets jobspy use its default (~50).'
+          'Search radius in miles from `location`. Start with 25, then 50, 100, as zero-new attempts climb.'
         )
       ),
     }),
@@ -376,7 +376,11 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
   const { job } = args;
   const id = newId();
 
-  await db
+  // `SourceSeed.url` is UNIQUE. Two scrapes (across runs OR within the same
+  // sweep) will often surface the same posting URL — do-nothing on conflict
+  // and skip the pipeline-state write when the row already exists, so its
+  // original `seeding/done` history stays intact.
+  const result = await db
     .insertInto('SourceSeed')
     .values({
       id,
@@ -384,7 +388,11 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
       name: job.company ?? 'Unknown',
       title: job.title,
     })
-    .execute();
+    .onConflict(oc => oc.column('url').doNothing())
+    .executeTakeFirst();
+
+  const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
+  if (!wasInserted) return;
 
   await recordPipelineState({
     task: 'seeding',

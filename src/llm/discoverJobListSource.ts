@@ -2,7 +2,6 @@ import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
 import {
-  BROWSER_NAVIGATION_TIMEOUT_MS,
   LLM_LISTING_MODEL,
   PIPELINE_LISTING_BFS_MAX_DEPTH,
   PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE,
@@ -10,7 +9,7 @@ import {
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT } from 'src/prompts/classifyAndRankLinks.js';
 import { VERIFY_IS_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/verifyIsJobPost.js';
-import { withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 const MAX_CRAWL_DECISION_ATTEMPTS = 3;
@@ -261,17 +260,7 @@ async function loadPage(
   url: string
 ): Promise<PageSnapshot> {
   return withBrowserTab(context, async page => {
-    try {
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-      });
-    } catch {
-      terminal.warn(
-        `Timeout/network error loading ${url}; proceeding with whatever content loaded`
-      );
-    }
-
+    await goToPage(page, url);
     const title = await page.title();
 
     // Only read text/anchors from the main frame — if listings live in an

@@ -1,11 +1,10 @@
 import { type BrowserContext, type Page } from 'patchright';
 import * as v from 'valibot';
 
-import { BROWSER_NAVIGATION_TIMEOUT_MS } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
 import { GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT } from 'src/prompts/generateParserScript.js';
-import { pageEval, withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { COLOURS, terminal } from 'src/utils/terminal';
 
@@ -219,16 +218,7 @@ async function loadPageSnapshot(
   page: import('patchright').Page,
   url: string
 ): Promise<{ title: string; html: string }> {
-  try {
-    await page.goto(url, {
-      waitUntil: 'networkidle',
-      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-    });
-  } catch {
-    terminal.warn(
-      `Timeout/network error loading ${url}; proceeding with whatever content loaded`
-    );
-  }
+  await goToPage(page, url);
 
   const title = await page.title();
   const html = await cleanHtmlForLlm(page);
@@ -309,14 +299,7 @@ async function validateScript(args: {
   // MAX_CONCURRENT_BROWSER_TABS is small.
   const page = await parentPage.context().newPage();
   try {
-    try {
-      await page.goto(listingUrl, {
-        waitUntil: 'networkidle',
-        timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-      });
-    } catch {
-      // proceed with partial content
-    }
+    await goToPage(page, listingUrl);
 
     return await runProbes(page, script);
   } finally {

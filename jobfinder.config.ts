@@ -17,46 +17,46 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 /**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = 'openai/gpt-5-nano';
+export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the sourcing process.
  */
-export const LLM_SOURCING_MODEL = 'openai/gpt-5-nano';
+export const LLM_SOURCING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the listing process.
  */
-export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
+export const LLM_LISTING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the viewing process.
  */
-export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
+export const LLM_VIEWING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the evaluate process.
  */
-export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
+export const LLM_EVALUATION_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the coding process (writing custom parser scripts for
  * sources). This should be a code-specialized model.
  */
-export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
-export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
+export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
+export const LLM_CODING_MODEL_SMARTER = 'moonshotai/kimi-k2.5';
 
 /**
  * Whether to use a headless browser when scraping websites.
  */
-export const USE_HEADLESS_BROWSER = true;
+export const USE_HEADLESS_BROWSER = false;
 
 /**
  * The maximum number of browser tabs to have open concurrently when scraping
  * websites. Set this to a larger number to speed up scraping, at the cost of
  * higher CPU and memory.
  */
-export const MAX_CONCURRENT_BROWSER_TABS = 30;
+export const MAX_CONCURRENT_BROWSER_TABS = 10;
 
 /**
  * The maximum time to wait for a page to load in the browser when scraping
@@ -64,6 +64,15 @@ export const MAX_CONCURRENT_BROWSER_TABS = 30;
  * in milliseconds. Set this to a larger number if your internet is slow.
  */
 export const BROWSER_NAVIGATION_TIMEOUT_MS = 10_000;
+
+/**
+ * The minimum time to wait after a page load before scraping data from it, in
+ * milliseconds. This is to give the page some time to render its content after
+ * the initial load event, which can help with sites that load content
+ * dynamically with JavaScript. Set this to a larger number if you find that the
+ * scraper is missing content that appears shortly after page load.
+ */
+export const BROWSER_NAVIGATION_MIN_WAIT_MS = 5_000;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum depth

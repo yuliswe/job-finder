@@ -1,13 +1,10 @@
 import { type BrowserContext, type Page } from 'patchright';
 import * as v from 'valibot';
 
-import {
-  BROWSER_NAVIGATION_TIMEOUT_MS,
-  LLM_LISTING_MODEL,
-} from 'jobfinder.config.js';
+import { LLM_LISTING_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { PICK_FILTER_OPTIONS_SYSTEM_PROMPT } from 'src/prompts/pickFilterOptions.js';
-import { pageEval, withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 const MAX_PICK_ATTEMPTS = 3;
@@ -41,14 +38,7 @@ export async function runParserScript(args: {
   const { context, listingUrl, script, userLocation, userDivision } = args;
 
   return withBrowserTab(context, async page => {
-    try {
-      await page.goto(listingUrl, {
-        waitUntil: 'networkidle',
-        timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-      });
-    } catch {
-      // proceed with partial content
-    }
+    await goToPage(page, listingUrl);
 
     let availableLocations: string[];
     let availableDivisions: string[];

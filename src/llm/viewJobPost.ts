@@ -1,13 +1,10 @@
 import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import {
-  BROWSER_NAVIGATION_TIMEOUT_MS,
-  LLM_VIEWING_MODEL,
-} from 'jobfinder.config.js';
+import { LLM_VIEWING_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { VIEW_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/viewJobPost.js';
-import { withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { terminal } from 'src/utils/terminal';
 import { earliestWaybackSnapshot } from 'src/utils/waybackMachine.js';
@@ -59,17 +56,7 @@ export async function viewJobPost(args: {
     let title: string;
     let html: string;
     try {
-      try {
-        await page.goto(url, {
-          waitUntil: 'networkidle',
-          timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-        });
-      } catch {
-        terminal.warn(
-          `Timeout/network error loading ${url}; proceeding with whatever content loaded`
-        );
-      }
-
+      await goToPage(page, url);
       title = await page.title();
       html = await cleanHtmlForLlm(page);
     } catch (err) {

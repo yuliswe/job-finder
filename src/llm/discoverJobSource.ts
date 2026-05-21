@@ -1,15 +1,12 @@
 import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import {
-  BROWSER_NAVIGATION_TIMEOUT_MS,
-  LLM_SOURCING_MODEL,
-} from 'jobfinder.config.js';
+import { LLM_SOURCING_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { webSearch } from 'src/llm/webSearch.js';
 import { DISCOVER_JOB_SOURCE_SYSTEM_PROMPT } from 'src/prompts/discoverJobSource.js';
 import { FIND_COMPANY_WEBSITE_SYSTEM_PROMPT } from 'src/prompts/findCompanyWebsite.js';
-import { withBrowserTab } from 'src/utils/browser.js';
+import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 const MAX_DISCOVER_ATTEMPTS = 3;
@@ -30,17 +27,7 @@ export async function discoverJobSource(args: {
 
   terminal.log(`Opening in browser: ${url}`);
   const { pageText, pageTitle } = await withBrowserTab(context, async page => {
-    try {
-      await page.goto(url, {
-        waitUntil: 'networkidle',
-        timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-      });
-    } catch {
-      terminal.warn(
-        `Failed to load page ${url} within timeout, proceeding with whatever content loaded`
-      );
-    }
-
+    await goToPage(page, url);
     const title = await page.title();
     const text = await page.evaluate(() => document.body.innerText);
     return { pageText: text, pageTitle: title };
