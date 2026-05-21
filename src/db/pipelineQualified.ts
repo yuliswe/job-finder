@@ -102,9 +102,11 @@ export function qualifiedForSeeding(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
   return ALWAYS_TRUE;
 }
 
-/** Sourcing has no row-level data prereq — every SourceSeed is qualified. */
-export function qualifiedForSourcing(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
-  return ALWAYS_TRUE;
+/** Sourcing operates on JobSource rows that approve-seeds promoted from
+ * SourceSeed by name. The row-level data prereq is `url IS NULL` — once
+ * sourcing fills the URL in, there's nothing left for this task to do. */
+export function qualifiedForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return eb('JobSource.url', 'is', null);
 }
 
 /** Listing needs a URL to crawl — that's its row-level data prereq. JobSources
@@ -163,9 +165,9 @@ export function inScopeForSeeding(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
   return ALWAYS_TRUE;
 }
 
-/** Every SourceSeed is in scope for sourcing. */
-export function inScopeForSourcing(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
-  return ALWAYS_TRUE;
+/** A JobSource is in scope for sourcing iff it's active. */
+export function inScopeForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return eb('JobSource.isActive', '=', Bool.True);
 }
 
 /** A JobSource is in scope for listing iff it's active. */

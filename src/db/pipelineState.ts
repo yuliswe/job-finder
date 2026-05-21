@@ -8,6 +8,7 @@ import {
   inScopeForListing,
   inScopeForRunScripts,
   inScopeForScripting,
+  inScopeForSourcing,
   inScopeForViewing,
 } from 'src/db/pipelineQualified.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -35,7 +36,7 @@ type PipelineFk =
 
 export const FK_BY_TASK: Record<PipelineTask, PipelineFk> = {
   seeding: 'ofSourceSeedId',
-  sourcing: 'ofSourceSeedId',
+  sourcing: 'ofJobSourceId',
   listing: 'ofJobSourceId',
   scripting: 'ofJobListSourceId',
   'run-scripts': 'ofJobListSourceId',
@@ -167,10 +168,10 @@ export async function requeueAllInScope(
   const ids = await (async (): Promise<string[]> => {
     switch (task) {
       case 'sourcing': {
-        // No skip rule — every SourceSeed is in scope.
         const rows = await db
-          .selectFrom('SourceSeed')
-          .select('SourceSeed.id as id')
+          .selectFrom('JobSource')
+          .select('JobSource.id as id')
+          .where(inScopeForSourcing)
           .execute();
 
         return rows.map(r => r.id);

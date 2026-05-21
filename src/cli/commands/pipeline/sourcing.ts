@@ -4,10 +4,8 @@ import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
-import { newId } from 'src/db/id.js';
 import {
   enqueuePipelineTask,
-  type PipelineMode,
   PIPELINE_STATE,
   pickerStateFilter,
   pipelineModeFromOptions,
@@ -29,18 +27,18 @@ const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 type SourcingOptions = {
   all?: boolean;
   includeFailed?: boolean;
-  sourceSeedId?: string;
+  jobSourceId?: string;
 };
 
 export function createSourcingCommand(): Command {
   return new Command('sourcing')
     .description(
-      'Discover JobSource rows from currently-queued SourceSeed URLs via headless browse + LLM.'
+      'For each queued URL-less JobSource, BFS the matching SourceSeed URLs to discover the company job-source URL and fill it in.'
     )
     .addOption(
       new Option(
         '--all',
-        'Re-process every qualifying in-scope SourceSeed regardless of pipeline state. Use after a prompt change.'
+        'Re-process every qualifying in-scope JobSource regardless of pipeline state. Use after a prompt change.'
       )
     )
     .addOption(
@@ -50,8 +48,8 @@ export function createSourcingCommand(): Command {
       )
     )
     .option(
-      '--source-seed-id <id>',
-      'Re-process only the SourceSeed with this ID, regardless of pipeline state or qualification. Bypasses the per-company name grouping.'
+      '--job-source-id <id>',
+      'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
     .action((opts: SourcingOptions) =>
       withBrowserInstance(context => runSourcing(context, opts))
@@ -62,187 +60,128 @@ async function runSourcing(
   context: BrowserContext,
   opts: SourcingOptions
 ): Promise<void> {
-  if (opts.sourceSeedId) {
-    await runSourcingForOneSeed(context, opts.sourceSeedId);
-    return;
+  if (opts.jobSourceId) {
+    await enqueuePipelineTask({
+      task: 'sourcing',
+      entity: { ofJobSourceId: opts.jobSourceId },
+    });
   }
 
   const mode = pipelineModeFromOptions(opts);
   if (mode === 'all') await requeueAllInScope('sourcing');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
-  // For sourcing, both qualified and inScope are trivially true — the
-  // state filter does all the work.
   const stateFilter = pickerStateFilter({
     task: 'sourcing',
-    parentIdRef: 'SourceSeed.id',
+    parentIdRef: 'JobSource.id',
     mode,
   });
 
-  let namesQuery = db
-    .selectFrom('SourceSeed')
-    .select('name')
+  let query = db
+    .selectFrom('JobSource')
+    .select(['id', 'name'])
     .where(qualifiedForSourcing)
     .where(inScopeForSourcing);
 
-  if (stateFilter) namesQuery = namesQuery.where(stateFilter);
-  const names = await namesQuery.distinct().execute();
+  if (stateFilter) query = query.where(stateFilter);
 
-  if (names.length === 0) {
-    terminal.log('All seeds have been processed already. Nothing to do.');
+  const sources = opts.jobSourceId
+    ? await db
+        .selectFrom('JobSource')
+        .select(['id', 'name'])
+        .where('JobSource.id', '=', opts.jobSourceId)
+        .execute()
+    : await query.execute();
+
+  if (sources.length === 0) {
+    terminal.log('No JobSource rows need sourcing. Nothing to do.');
     return;
   }
 
   const results = await Promise.all(
-    names.map(({ name }) =>
-      tabLimit(() => sourceOneGroup({ context, name, mode }))
+    sources.map(source =>
+      tabLimit(() => sourceOneJobSource({ context, source }))
     )
   );
 
-  const jobSourceInserted = results.reduce(
-    (sum, r) => sum + r.jobSourceInserted,
-    0
-  );
-
-  terminal.log(`Inserted ${jobSourceInserted} rows into JobSource\n`);
+  const filled = results.reduce((sum, r) => sum + (r?.urlFilled ?? 0), 0);
+  terminal.log(`Filled url on ${filled} JobSource row(s)\n`);
 }
 
-async function runSourcingForOneSeed(
-  context: BrowserContext,
-  sourceSeedId: string
-): Promise<void> {
-  const seed = await db
-    .selectFrom('SourceSeed')
-    .select(['id', 'url'])
-    .where('id', '=', sourceSeedId)
-    .executeTakeFirst();
-
-  if (!seed) {
-    throw new Error(`SourceSeed with id ${sourceSeedId} not found.`);
-  }
-
-  await enqueuePipelineTask({
-    task: 'sourcing',
-    entity: { ofSourceSeedId: sourceSeedId },
-  });
-
-  const result = await sourceOneSeedUrl({ context, seed });
-  const jobSourceInserted = result?.jobSourceInserted ?? 0;
-  terminal.log(`Inserted ${jobSourceInserted} rows into JobSource\n`);
-}
-
-async function sourceOneGroup(args: {
+async function sourceOneJobSource(args: {
   context: BrowserContext;
-  name: string;
-  mode: PipelineMode;
-}): Promise<{ jobSourceInserted: number }> {
-  const { context, name, mode } = args;
-  terminal.log(`Processing for "${name}"...`);
-
-  // Same state-filter mode as the names query above.
-  const stateFilter = pickerStateFilter({
-    task: 'sourcing',
-    parentIdRef: 'SourceSeed.id',
-    mode,
-  });
-
-  let seedsQuery = db
-    .selectFrom('SourceSeed')
-    .select(['id', 'url'])
-    .where('name', '=', name)
-    .where(qualifiedForSourcing)
-    .where(inScopeForSourcing);
-
-  if (stateFilter) seedsQuery = seedsQuery.where(stateFilter);
-
-  const seeds = await seedsQuery
-    .orderBy('createdAt', 'desc')
-    .limit(PER_NAME_RETRY_LIMIT)
-    .execute();
-
-  // Try seeds in order; stop as soon as one yields a JobSource.
-  // sourceOneSeedUrl never throws — processOne catches and records.
-  let jobSourceInserted = 0;
-  for (const seed of seeds) {
-    const result = await sourceOneSeedUrl({ context, seed });
-    if (result && result.jobSourceInserted > 0) {
-      jobSourceInserted += result.jobSourceInserted;
-      break;
-    }
-  }
-
-  if (jobSourceInserted > 0) {
-    // Mark every row in this name group done — one win covers the rest.
-    // sourceOneSeedUrl already recorded 'done' for the winning seed.
-    const groupSeeds = await db
-      .selectFrom('SourceSeed')
-      .select('id')
-      .where('name', '=', name)
-      .execute();
-
-    for (const seed of groupSeeds) {
-      await recordPipelineState({
-        task: 'sourcing',
-        state: PIPELINE_STATE.DONE,
-        reason: 'covered by sibling seed in name group',
-        entity: { ofSourceSeedId: seed.id },
-      });
-    }
-  }
-
-  return { jobSourceInserted };
-}
-
-async function sourceOneSeedUrl(args: {
-  context: BrowserContext;
-  seed: { id: string; url: string };
-}): Promise<{ jobSourceInserted: number } | undefined> {
-  const { context, seed } = args;
+  source: { id: string; name: string };
+}): Promise<{ urlFilled: number } | undefined> {
+  const { context, source } = args;
   return processOne({
     task: 'sourcing',
-    entity: { ofSourceSeedId: seed.id },
-    label: seed.url,
-    work: async (): Promise<{ jobSourceInserted: number }> => {
-      const source = await discoverJobSource({ context, url: seed.url });
-      if (!source) {
-        terminal.warn(`discoverJobSource returned no result for ${seed.url}`);
+    entity: { ofJobSourceId: source.id },
+    label: source.name,
+    work: async (): Promise<{ urlFilled: number }> => {
+      // The SourceSeed table has the candidate URLs to crawl. Try the most
+      // recent ones first; cap retries so a hopeless name doesn't burn the
+      // whole budget.
+      const seeds = await db
+        .selectFrom('SourceSeed')
+        .select(['id', 'url'])
+        .where('name', '=', source.name)
+        .orderBy('createdAt', 'desc')
+        .limit(PER_NAME_RETRY_LIMIT)
+        .execute();
+
+      if (seeds.length === 0) {
+        terminal.warn(
+          `No SourceSeed URLs to try for "${source.name}" — leaving JobSource.url null.`
+        );
 
         await recordPipelineState({
           task: 'sourcing',
           state: PIPELINE_STATE.NO_SOURCE_FOUND,
-          entity: { ofSourceSeedId: seed.id },
+          reason: 'no seed URLs for name',
+          entity: { ofJobSourceId: source.id },
         });
-        return { jobSourceInserted: 0 };
+        return { urlFilled: 0 };
       }
 
-      const newSourceId = newId();
-      const insertResult = await db
-        .insertInto('JobSource')
-        .values({
-          id: newSourceId,
-          name: source.name,
-          url: source.url,
-        })
-        .onConflict(oc => oc.column('url').doNothing())
-        .executeTakeFirst();
+      for (const seed of seeds) {
+        const discovered = await discoverJobSource({
+          context,
+          url: seed.url,
+        });
 
-      const wasInserted = (insertResult.numInsertedOrUpdatedRows ?? 0n) > 0n;
+        if (!discovered) continue;
+
+        await db
+          .updateTable('JobSource')
+          .set({ url: discovered.url })
+          .where('id', '=', source.id)
+          .execute();
+
+        await recordPipelineState({
+          task: 'sourcing',
+          state: PIPELINE_STATE.DONE,
+          reason: `via seed ${seed.url}`,
+          entity: { ofJobSourceId: source.id },
+        });
+
+        await enqueuePipelineTask({
+          task: 'listing',
+          entity: { ofJobSourceId: source.id },
+        });
+
+        return { urlFilled: 1 };
+      }
+
+      terminal.warn(
+        `discoverJobSource returned no result for "${source.name}" across ${seeds.length} seed URL(s).`
+      );
 
       await recordPipelineState({
         task: 'sourcing',
-        state: PIPELINE_STATE.DONE,
-        reason: wasInserted ? 'inserted' : 'updated',
-        entity: { ofSourceSeedId: seed.id },
+        state: PIPELINE_STATE.NO_SOURCE_FOUND,
+        entity: { ofJobSourceId: source.id },
       });
-
-      if (wasInserted) {
-        await enqueuePipelineTask({
-          task: 'listing',
-          entity: { ofJobSourceId: newSourceId },
-        });
-      }
-
-      return { jobSourceInserted: wasInserted ? 1 : 0 };
+      return { urlFilled: 0 };
     },
   });
 }

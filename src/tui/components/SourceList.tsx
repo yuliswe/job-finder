@@ -26,7 +26,7 @@ export function SourceList(props: {
     <Table
       {...props}
       columns={COLS}
-      getKey={r => r.rowKey}
+      getKey={r => r.sourceId}
       emptyMessage='(no Source rows yet — run `jobfinder pipeline sourcing`)'
     />
   );

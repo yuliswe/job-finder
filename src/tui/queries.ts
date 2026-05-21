@@ -16,6 +16,7 @@ import {
   inScopeForListing,
   inScopeForRunScripts,
   inScopeForScripting,
+  inScopeForSourcing,
   inScopeForViewing,
 } from 'src/db/pipelineQualified.js';
 import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
@@ -85,16 +86,9 @@ export type JobPostRow = {
 };
 
 export type SourceRow = {
-  /** Stable React key. JobSource rows use the source id; queued seed rows
-   * use `seed::<seed id>` so they don't collide with sourced rows. */
-  rowKey: string;
-  /** `'source'` for rows backed by a JobSource (the table's main shape).
-   * `'seed'` for queued-but-not-yet-sourced SourceSeed rows that surface
-   * alongside sources to expose the sourcing backlog. Seed rows are
-   * read-only — toggling active does nothing until they produce a JobSource. */
-  kind: 'source' | 'seed';
   sourceId: string;
   sourceName: string;
+  /** `'-'` when the JobSource has no URL yet (approved but not yet sourced). */
   sourceUrl: string;
   sourceIsActive: number;
   listId: string | null;
@@ -105,7 +99,7 @@ export type SourceRow = {
   hasScript: number;
   jobPostCount: number;
   /** Mirrors `listIsActive` — strict JobListSource.isActive, `null` when the
-   * source has no JobListSource yet (including all seed rows). */
+   * source has no JobListSource yet. */
   isActive: number | null;
 };
 
@@ -184,7 +178,6 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
   // we deliberately skip; rows are grouped by (inScope, state) and counted.
   switch (task) {
     case 'seeding':
-    case 'sourcing':
       // Every SourceSeed is in scope — no skip rule.
       return db
         .selectFrom('SourceSeed')
@@ -199,6 +192,27 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
           eb.fn.countAll<number>().as('n'),
         ])
         .groupBy(['LatestPipelineState.state'])
+        .execute();
+    case 'sourcing':
+      return db
+        .selectFrom('JobSource')
+        .leftJoin('LatestPipelineState', join =>
+          join
+            .onRef('LatestPipelineState.ofJobSourceId', '=', 'JobSource.id')
+            .on('LatestPipelineState.task', '=', task)
+        )
+        .select(eb => [
+          eb
+            .case()
+            .when(inScopeForSourcing(eb))
+            .then(1)
+            .else(0)
+            .end()
+            .as('inScope'),
+          eb.ref('LatestPipelineState.state').as('state'),
+          eb.fn.countAll<number>().as('n'),
+        ])
+        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
         .execute();
     case 'listing':
       return db
@@ -385,26 +399,17 @@ function parseJsonArray<T>(json: string | null): T[] | null {
 }
 
 export async function listSources(): Promise<SourceRow[]> {
-  // One row per JobSource, plus one row per queued-but-not-yet-sourced
-  // SourceSeed (deduped against existing JobSources by name). Both shapes
-  // are unioned in SQL so we do a single DB roundtrip and a single sort.
+  // One row per JobSource. approve-seeds promotes SourceSeed names into
+  // JobSource rows (url=null until sourcing fills it in), so there's no
+  // need to surface unsourced seeds separately anymore.
   //
-  // Source branch: LEFT JOIN picks the most recent JobListSource per source
-  // via an inline subquery — most sources have exactly one list, but when
-  // there are several we surface only the latest by createdAt. `jobPostCount`
-  // is a scalar subquery so it counts every relevant post under the source
+  // LEFT JOIN picks the most recent JobListSource per source via an inline
+  // subquery — most sources have exactly one list, but when there are
+  // several we surface only the latest by createdAt. `jobPostCount` is a
+  // scalar subquery so it counts every relevant post under the source
   // regardless of which JobListSource it belongs to. Threshold gates posts
   // the same way the viewing bar / SourceJobsScreen do.
-  //
-  // Seed branch: NOT EXISTS drops seed names that already have a JobSource
-  // (the real sourced row wins). `SourceSeed.name` is UNIQUE so we never see
-  // two seeds for the same company.
-  //
-  // ORDER BY `kind` DESC puts `'source'` rows before `'seed'` rows
-  // ('source' > 'seed' lexicographically); within each branch we sort by
-  // jobPostCount desc then name asc (seeds all share jobPostCount = 0, so
-  // they fall through to the name sort).
-  const sourceQuery = db
+  const rows = await db
     .selectFrom('JobSource')
     .leftJoin(
       eb =>
@@ -437,7 +442,6 @@ export async function listSources(): Promise<SourceRow[]> {
       join => join.onRef('list.ofJobSourceId', '=', 'JobSource.id')
     )
     .select(eb => [
-      sql<'source' | 'seed'>`'source'`.as('kind'),
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
@@ -459,92 +463,31 @@ export async function listSources(): Promise<SourceRow[]> {
         )
         .select(eb2 => eb2.fn.countAll<number>().as('n'))
         .as('jobPostCount'),
-    ]);
-
-  const seedQuery = db
-    .selectFrom('SourceSeed')
-    .innerJoin('LatestPipelineState', join =>
-      join
-        .onRef('LatestPipelineState.ofSourceSeedId', '=', 'SourceSeed.id')
-        .on('LatestPipelineState.task', '=', 'sourcing')
-    )
-    .where('LatestPipelineState.state', '=', PIPELINE_STATE.QUEUED)
-    .where(eb =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom('JobSource')
-            .select('JobSource.id')
-            .whereRef('JobSource.name', '=', 'SourceSeed.name')
-        )
-      )
-    )
-    .select(eb => [
-      sql<'source' | 'seed'>`'seed'`.as('kind'),
-      eb.ref('SourceSeed.id').as('sourceId'),
-      'SourceSeed.name as sourceName',
-      sql<string>`'-'`.as('sourceUrl'),
-      sql<Bool>`0`.as('sourceIsActive'),
-      sql<string | null>`NULL`.as('listId'),
-      sql<string | null>`NULL`.as('listUrl'),
-      sql<Bool | null>`NULL`.as('listIsActive'),
-      sql<string | null>`NULL`.as('listLocations'),
-      sql<string | null>`NULL`.as('listDivisions'),
-      sql<string | null>`NULL`.as('listParserScript'),
-      sql<number>`0`.as('jobPostCount'),
-    ]);
-
-  const rows = await sourceQuery
-    .unionAll(seedQuery)
-    .orderBy('kind', 'desc')
+    ])
     .orderBy(sql`"jobPostCount"`, 'desc')
-    .orderBy('sourceName', 'asc')
+    .orderBy('JobSource.name', 'asc')
     .execute();
 
-  return rows.map(r => {
-    if (r.kind === 'seed') {
-      return {
-        rowKey: `seed::${r.sourceId}`,
-        kind: 'seed',
-        sourceId: r.sourceId,
-        sourceName: r.sourceName,
-        sourceUrl: '-',
-        sourceIsActive: 0,
-        listId: null,
-        listUrl: null,
-        listIsActive: null,
-        listLocations: null,
-        listDivisions: null,
-        hasScript: 0,
-        jobPostCount: 0,
-        isActive: null,
-      };
-    }
-
-    return {
-      rowKey: r.sourceId,
-      kind: 'source',
-      sourceId: r.sourceId,
-      sourceName: r.sourceName,
-      sourceUrl: r.sourceUrl ?? '-',
-      sourceIsActive: r.sourceIsActive ?? 0,
-      listId: r.listId,
-      listUrl: r.listUrl,
-      listIsActive: r.listIsActive ?? null,
-      listLocations: r.listLocations,
-      listDivisions: r.listDivisions,
-      hasScript: r.listParserScript ? 1 : 0,
-      jobPostCount: Number(r.jobPostCount ?? 0),
-      isActive: r.listIsActive ?? null,
-    };
-  });
+  return rows.map(r => ({
+    sourceId: r.sourceId,
+    sourceName: r.sourceName,
+    sourceUrl: r.sourceUrl ?? '-',
+    sourceIsActive: r.sourceIsActive ?? 0,
+    listId: r.listId,
+    listUrl: r.listUrl,
+    listIsActive: r.listIsActive ?? null,
+    listLocations: r.listLocations,
+    listDivisions: r.listDivisions,
+    hasScript: r.listParserScript ? 1 : 0,
+    jobPostCount: Number(r.jobPostCount ?? 0),
+    isActive: r.listIsActive ?? null,
+  }));
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
-  // Seed rows aren't backed by a JobSource yet — nothing to toggle. Same
-  // for sourced rows whose listing hasn't produced a JobListSource yet,
-  // since `active` strictly mirrors JobListSource.isActive.
-  if (row.kind === 'seed' || !row.listId) return;
+  // Rows whose listing hasn't produced a JobListSource yet have nothing to
+  // toggle — `active` strictly mirrors JobListSource.isActive.
+  if (!row.listId) return;
   const next = row.isActive ? Bool.False : Bool.True;
 
   await db
