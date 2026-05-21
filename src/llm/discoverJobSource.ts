@@ -3,14 +3,11 @@ import * as v from 'valibot';
 
 import { LLM_SOURCING_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { webSearch } from 'src/llm/webSearch.js';
 import { DISCOVER_JOB_SOURCE_SYSTEM_PROMPT } from 'src/prompts/discoverJobSource.js';
-import { FIND_COMPANY_WEBSITE_SYSTEM_PROMPT } from 'src/prompts/findCompanyWebsite.js';
 import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal';
 
 const MAX_DISCOVER_ATTEMPTS = 3;
-const MAX_WEB_SEARCH_ATTEMPTS = 2;
 
 export type JobSource = {
   name: string;
@@ -72,6 +69,11 @@ ${pageText}`,
       model: LLM_SOURCING_MODEL,
       metadata: { configKey: 'LLM_SOURCING_MODEL' },
       logger: terminal,
+      // The LLM has the provider's native web_search tool available. Per the
+      // system prompt, it should call web_search itself when the page text
+      // doesn't reveal the company URL — no out-of-band Google scrape
+      // needed any more.
+      enableWebSearch: true,
       validate: async parsed => {
         const name = parsed.name.trim();
         const rawUrl = parsed.url.trim();
@@ -80,32 +82,26 @@ ${pageText}`,
           lastReason = parsed.reason.trim() || '(no reason given)';
           return {
             valid: false,
-            feedback: `You did not identify a company name (name="${parsed.name}", reason="${parsed.reason}"). Re-examine the page text — look for the employer name in the job header, the "About" section, or footer credits.`,
+            feedback: `You did not identify a company name (name="${parsed.name}", reason="${parsed.reason}"). Search the web for the company by job-board posting URL if needed, or re-examine the page text — look for the employer name in the job header, the "About" section, or footer credits.`,
           };
         }
 
-        // Try the URL the LLM extracted from the page first.
         if (rawUrl) {
           const hostname = toHostname(rawUrl);
           if (hostname) return { valid: true, result: { name, url: hostname } };
 
-          terminal.warn(
-            `LLM returned unparseable url "${rawUrl}" for "${name}" — falling back to web search`
-          );
-        } else {
-          terminal.log(
-            `LLM identified "${name}" but no URL on the page — falling back to web search`
-          );
+          return {
+            valid: false,
+            feedback: `You returned url="${rawUrl}" but it doesn't parse as a hostname. Return a clean URL like "https://acme.com" — or call web_search for the company's official site again and pick a parseable result.`,
+          };
         }
 
-        // Fall back: Google for the company's website.
-        const hostname = await findCompanyWebsite({ context, name });
-        if (hostname) return { valid: true, result: { name, url: hostname } };
-
-        lastReason = `Page did not name a usable URL and web search for "${name}" found nothing.`;
+        lastReason =
+          parsed.reason.trim() ||
+          'Page did not name a usable URL and the LLM web search found nothing.';
         return {
           valid: false,
-          feedback: `You returned name="${name}" but no usable url, and a web search for the company turned up nothing either. Re-examine the page text — look for any company-website link, contact page, or apply-on-company-site button.`,
+          feedback: `You returned name="${name}" but no url. Call web_search with a query like \`"${name}" official company website\` and pick the company's own primary domain. If web_search has already turned up nothing, return an empty url and explain why in "reason".`,
         };
       },
     });
@@ -116,45 +112,6 @@ ${pageText}`,
     terminal.warn(
       `Could not identify hiring company for ${url}: ${lastReason}`
     );
-    return null;
-  }
-}
-
-/** Google the company name and have the LLM extract a corporate URL. */
-async function findCompanyWebsite(args: {
-  context: BrowserContext;
-  name: string;
-}): Promise<string | null> {
-  const { context, name } = args;
-  try {
-    const result = await webSearch({
-      context,
-      query: `${name} official company website`,
-      schema: v.object({
-        url: v.pipe(
-          v.string(),
-          v.description(
-            "The company's primary corporate website (e.g. \"https://acme.com\"). Prefer the company's own homepage over Wikipedia, LinkedIn, Crunchbase, or job-board pages. Empty string if you can't find a confident match."
-          )
-        ),
-        reason: v.pipe(
-          v.string(),
-          v.description(
-            'If url is empty, explain why; otherwise an empty string.'
-          )
-        ),
-      }),
-      systemPrompt: FIND_COMPANY_WEBSITE_SYSTEM_PROMPT,
-      model: LLM_SOURCING_MODEL,
-      maxAttempts: MAX_WEB_SEARCH_ATTEMPTS,
-      metadata: { configKey: 'LLM_SOURCING_MODEL' },
-    });
-
-    const raw = result.url.trim();
-    if (!raw) return null;
-    return toHostname(raw);
-  } catch (err) {
-    terminal.warn(`Web search for "${name}" failed: ${String(err)}`);
     return null;
   }
 }

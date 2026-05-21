@@ -29,6 +29,10 @@ export type LlmSendArgs = {
   /** Free-form tags persisted on the request for cost / observability
    * analytics. Forwarded verbatim to OpenRouter's `metadata` field. */
   metadata?: Record<string, string>;
+  /** Enable the provider's native web-search capability for this request.
+   * On OpenRouter this attaches `plugins: [{ id: 'web' }]`. Plugins whose
+   * underlying provider doesn't expose a web-search tool should throw. */
+  enableWebSearch?: boolean;
 };
 
 export type LlmRawResponse = {

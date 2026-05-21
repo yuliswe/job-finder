@@ -50,6 +50,16 @@ export class AnthropicSdkPlugin {
 
   async send(args: LlmSendArgs): Promise<LlmRawResponse> {
     const { model, messages, reasoningEffort, responseFormat } = args;
+    if (args.enableWebSearch) {
+      // Anthropic does support a `web_search` server tool, but wiring it
+      // means appending a tool definition + tool_choice handling, which
+      // this plugin doesn't yet do. Surface the mismatch rather than
+      // silently dropping the request to web-search-enabled behavior.
+      throw new Error(
+        'AnthropicSdkPlugin: enableWebSearch is not yet wired up. Use OpenRouterPlugin for web-search-augmented calls.'
+      );
+    }
+
     const { system, turns } = splitSystem(messages);
 
     // Stream and collect via `.finalMessage()`. The SDK refuses non-streaming

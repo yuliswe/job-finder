@@ -11,8 +11,14 @@ import { terminal } from 'src/utils/terminal';
  * results page text, and pass it to the LLM to extract a typed response that
  * matches `schema`. Wrapped in `feedbackLoop`, so a custom `validate` can ask
  * the LLM to retry with corrective feedback.
+ *
+ * Companion to {@link webSearchByLLM}, which uses the provider's native
+ * web-search tool (OpenRouter `plugins: [{id:'web'}]`) instead of driving a
+ * real browser to google.com. Prefer the LLM variant when available — it
+ * doesn't need a Playwright tab and tends to be both faster and less
+ * blockable by Google's anti-bot heuristics.
  */
-export async function webSearch<
+export async function webSearchByGoogle<
   S extends v.GenericSchema,
   R = v.InferOutput<S>,
 >(args: {

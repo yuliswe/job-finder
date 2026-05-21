@@ -49,7 +49,7 @@ export const LLM_CODING_MODEL_SMARTER = 'moonshotai/kimi-k2.5';
 /**
  * Whether to use a headless browser when scraping websites.
  */
-export const USE_HEADLESS_BROWSER = false;
+export const USE_HEADLESS_BROWSER = true;
 
 /**
  * The maximum number of browser tabs to have open concurrently when scraping

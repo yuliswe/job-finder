@@ -124,8 +124,17 @@ async function llmSend<S extends v.GenericSchema>(args: {
   messages: LlmMessage[];
   reasoningEffort?: LlmReasoningEffort;
   metadata?: Record<string, string>;
+  enableWebSearch?: boolean;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { schema, model, messages, reasoningEffort, metadata } = args;
+  const {
+    schema,
+    model,
+    messages,
+    reasoningEffort,
+    metadata,
+    enableWebSearch,
+  } = args;
+
   const responseFormat = {
     name: getSchemaName(schema),
     schema: strictifyJsonSchema(
@@ -141,6 +150,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
     reasoningEffort,
     responseFormat,
     metadata,
+    enableWebSearch,
   });
 
   if (!content) throw new Error('LLM returned empty response');
@@ -251,8 +261,17 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
   logger: Terminal;
   reasoningEffort?: LlmReasoningEffort;
   metadata?: Record<string, string>;
+  enableWebSearch?: boolean;
 }): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
-  const { memory, schema, model, logger, reasoningEffort, metadata } = args;
+  const {
+    memory,
+    schema,
+    model,
+    logger,
+    reasoningEffort,
+    metadata,
+    enableWebSearch,
+  } = args;
 
   let totalTokens = 0;
   for (let retry = 0; retry < MAX_SEND_RETRIES; retry++) {
@@ -263,6 +282,7 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         messages: memory.toMessages(),
         reasoningEffort,
         metadata,
+        enableWebSearch,
       });
 
       totalTokens += sendResult.totalTokens;
@@ -362,6 +382,9 @@ export async function feedbackLoop<
   /** Free-form tags forwarded to the OpenRouter `metadata` field on every
    * underlying request — used for per-task cost analytics. */
   metadata?: Record<string, string>;
+  /** When true, attach the provider's native web-search tool so the LLM can
+   * search before answering. On OpenRouter this becomes `plugins:[{id:'web'}]`. */
+  enableWebSearch?: boolean;
 }): Promise<{ result: R; totalTokens: number }> {
   const {
     memory,
@@ -373,6 +396,7 @@ export async function feedbackLoop<
     model,
     reasoningEffort,
     metadata,
+    enableWebSearch,
   } = args;
 
   memory.add(initialPrompt);
@@ -386,6 +410,7 @@ export async function feedbackLoop<
       logger,
       reasoningEffort,
       metadata,
+      enableWebSearch,
     });
 
     totalTokens += sendResult.totalTokens;

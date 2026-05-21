@@ -27,7 +27,14 @@ export class OpenRouterPlugin {
   }
 
   async send(args: LlmSendArgs): Promise<LlmRawResponse> {
-    const { model, messages, reasoningEffort, responseFormat, metadata } = args;
+    const {
+      model,
+      messages,
+      reasoningEffort,
+      responseFormat,
+      metadata,
+      enableWebSearch,
+    } = args;
 
     const response = await this.getClient().chat.send({
       chatRequest: {
@@ -50,6 +57,10 @@ export class OpenRouterPlugin {
         // maxCompletionTokens: DEFAULT_MAX_COMPLETION_TOKENS,
         ...(reasoningEffort ? { reasoning: { effort: reasoningEffort } } : {}),
         ...(metadata ? { metadata } : {}),
+        // OpenRouter's server-side web-search plugin. When enabled, the model
+        // gets a `web_search` tool it can call before answering. See:
+        // https://openrouter.ai/docs/guides/features/server-tools/web-search
+        ...(enableWebSearch ? { plugins: [{ id: 'web' as const }] } : {}),
       },
     });
 
