@@ -1,7 +1,10 @@
 import { sql, type ExpressionBuilder, type SqlBool } from 'kysely';
 
 import type { DB } from '__generated__/db/types.js';
-import { PIPELINE_VIEWING_MIN_TITLE_RELEVANCY } from 'jobfinder.config.js';
+import {
+  PIPELINE_LISTING_MIN_INTEREST_SCORE,
+  PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
+} from 'jobfinder.config.js';
 import {
   jobListSourceInActiveSource,
   jobPostInActiveSource,
@@ -135,7 +138,14 @@ export function inScopeForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
 
 /** A JobSource is in scope for listing iff it's active. */
 export function inScopeForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
-  return eb('JobSource.isActive', '=', Bool.True);
+  // Active AND sourcing's interestScore cleared the threshold. Null
+  // interestScore = sourcing hasn't completed yet → out of scope until it
+  // does. Low-interest companies are deliberately skipped so we don't burn
+  // the listing/scripting/viewing/evaluate budget on them.
+  return eb.and([
+    eb('JobSource.isActive', '=', Bool.True),
+    eb('JobSource.interestScore', '>=', PIPELINE_LISTING_MIN_INTEREST_SCORE),
+  ]);
 }
 
 /** A JobListSource is in scope for scripting iff it's in an active source

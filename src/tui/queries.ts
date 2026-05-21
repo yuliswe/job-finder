@@ -1,6 +1,9 @@
 import { sql } from 'kysely';
 
-import { PIPELINE_VIEWING_MIN_TITLE_RELEVANCY } from 'jobfinder.config.js';
+import {
+  PIPELINE_LISTING_MIN_INTEREST_SCORE,
+  PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
+} from 'jobfinder.config.js';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
@@ -446,6 +449,18 @@ export async function listSources(args: {
           )
           .as('list'),
       join => join.onRef('list.ofJobSourceId', '=', 'JobSource.id')
+    )
+    // Hide low-interest companies from the TUI. Null score = not yet
+    // sourced — still surface those so the user can see backlog progress.
+    .where(eb =>
+      eb.or([
+        eb('JobSource.interestScore', 'is', null),
+        eb(
+          'JobSource.interestScore',
+          '>=',
+          PIPELINE_LISTING_MIN_INTEREST_SCORE
+        ),
+      ])
     )
     .select(eb => [
       'JobSource.id as sourceId',

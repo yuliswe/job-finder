@@ -22,9 +22,10 @@ export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
 /**
  * The model used by the sourcing process.
  *
- * Model recommendations:
- * - web-search capabilities
- * - Low input cost
+ * Model requirements:
+ * - web-search capability
+ * - low input cost
+ * - moderate output cost
  *
  * The model is asked to find a company URL from name, write a summary of the
  * company, and assign an interest score to the company based on the interest.md
@@ -33,26 +34,51 @@ export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
 export const LLM_SOURCING_MODEL = 'mistralai/mistral-nemo';
 
 /**
- * The model used by the listing process.
+ * The model used by the listing process, asked to identify career pages on
+ * companies websites.
+ *
+ * Model requirements:
+ * - reasoning capability
+ * - >=200K context window
+ * - low input cost
+ * - output cost doesn't matter much
+ *
  */
-export const LLM_LISTING_MODEL = 'deepseek/deepseek-v4-flash';
-
-/**
- * The model used by the viewing process.
- */
-export const LLM_VIEWING_MODEL = 'deepseek/deepseek-v4-flash';
-
-/**
- * The model used by the evaluate process.
- */
-export const LLM_EVALUATION_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used by the coding process (writing custom parser scripts for
  * sources). This should be a code-specialized model.
+ *
+ * Model requirements:
+ * - >=200K context window
+ * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
-export const LLM_CODING_MODEL_SMARTER = 'moonshotai/kimi-k2.5';
+export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
+export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
+
+/**
+ * The model used by the viewing process for extracting and cleaning text from
+ * HTML.
+ *
+ * Model requirements:
+ * - >=200K context window
+ * - low input cost
+ * - low output cost
+ */
+export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
+
+/**
+ * The model used by the evaluate process, asked to compare your skill set and
+ * the job requirements, and assign a score to how well you match the job.
+ *
+ * Model requirements:
+ * - strong reasoning capability
+ * - >=200K context window
+ * - low input cost
+ * - low input cost
+ */
+export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
 
 /**
  * Whether to use a headless browser when scraping websites.
@@ -81,6 +107,12 @@ export const BROWSER_NAVIGATION_TIMEOUT_MS = 10_000;
  * scraper is missing content that appears shortly after page load.
  */
 export const BROWSER_NAVIGATION_MIN_WAIT_MS = 5_000;
+
+/**
+ * After sourcing, companies less than this interest score are tossed out to
+ * reduce spam.
+ */
+export const PIPELINE_LISTING_MIN_INTEREST_SCORE = 0.75;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum depth
