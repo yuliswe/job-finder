@@ -374,6 +374,11 @@ async function insertSeeds(
 // their interests/CV) and runs `pipeline approve-seeds` to release them.
 async function seedOne(args: { job: JobResult }): Promise<void> {
   const { job } = args;
+  // No company name = no anchor for the downstream approve-seeds/sourcing
+  // flow (which keys off SourceSeed.name to create JobSource rows). Drop
+  // these instead of polluting the table with 'Unknown' aggregations.
+  if (!job.company) return;
+
   const id = newId();
 
   // Both `SourceSeed.url` and `SourceSeed.name` are UNIQUE. Two scrapes
@@ -386,7 +391,7 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
     .values({
       id,
       url: job.job_url,
-      name: job.company ?? 'Unknown',
+      name: job.company,
       title: job.title,
     })
     .onConflict(oc => oc.doNothing())
