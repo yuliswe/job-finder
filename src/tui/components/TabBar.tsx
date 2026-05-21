@@ -1,18 +1,21 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
-import type { JobPostSortKey } from 'src/tui/queries.js';
+import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
 import { TAB_LABELS, type AppTab } from 'src/tui/utils/types.js';
 
 export function TabBar({
   tab,
   sort,
+  sourcesSort,
   counts,
 }: {
   tab: AppTab;
   sort: JobPostSortKey;
+  sourcesSort: SourceSortKey;
   counts: Record<AppTab, number>;
 }) {
+  const activeSort = tab === 'jobs' ? sort : sourcesSort;
   return (
     <Box marginTop={1}>
       {TAB_LABELS.map(t => {
@@ -29,7 +32,7 @@ export function TabBar({
       })}
       <Box marginLeft={2}>
         <Text dimColor>sort: </Text>
-        <Text color='cyan'>{sort}</Text>
+        <Text color='cyan'>{activeSort}</Text>
       </Box>
     </Box>
   );

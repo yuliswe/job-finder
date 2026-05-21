@@ -12,6 +12,7 @@ import {
 import { useLiveData } from 'src/tui/useLiveData.js';
 import { JOB_POST_SORTS } from 'src/tui/utils/types.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
+import { prettyUrl } from 'src/tui/utils/format.js';
 
 /** Full-screen "jobs from this source" view, opened with Enter on a row in
  * the Sources tab. Same list-on-left, detail-on-right layout as the main
@@ -119,7 +120,7 @@ export function SourceJobsScreen({
         {source.sourceName}
       </Text>
       <Text dimColor wrap='truncate-end'>
-        {source.listUrl ?? source.sourceUrl}
+        {prettyUrl(source.listUrl ?? source.sourceUrl)}
       </Text>
       <Text dimColor>
         {rowCount} job{rowCount === 1 ? '' : 's'} · sort{' '}

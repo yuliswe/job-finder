@@ -2,6 +2,7 @@ import { Box, Text } from 'ink';
 import React from 'react';
 
 import type { SourceRow } from 'src/tui/queries.js';
+import { prettyUrl } from 'src/tui/utils/format.js';
 
 export function SourceDetail({ row }: { row: SourceRow | null }) {
   if (!row) return <Text dimColor>(no row selected)</Text>;
@@ -11,15 +12,20 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
         {row.sourceName}
       </Text>
       <Text dimColor wrap='truncate-end'>
-        {row.sourceUrl}
+        {prettyUrl(row.sourceUrl)}
       </Text>
       <Text>source active: {row.sourceIsActive ? 'yes' : 'no'}</Text>
+      {row.sourceSummary && (
+        <Box marginTop={1}>
+          <Text>{row.sourceSummary}</Text>
+        </Box>
+      )}
       <Box marginTop={1} flexDirection='column'>
         {row.listId ? (
           <>
             <Text bold>JobListSource</Text>
             <Text dimColor wrap='truncate-end'>
-              {row.listUrl ?? ''}
+              {prettyUrl(row.listUrl)}
             </Text>
             <Text>script: {row.hasScript ? 'present' : 'missing'}</Text>
             <Text>active: {row.listIsActive ? 'yes' : 'no'}</Text>

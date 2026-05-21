@@ -10,7 +10,11 @@ export function openUrl(url: string): void {
         : 'xdg-open';
 
   try {
-    const p = spawn(cmd, [url], {
+    const normalized = /^[a-z][a-z0-9+.-]*:\/\//i.test(url)
+      ? url
+      : `https://${url}`;
+
+    const p = spawn(cmd, [normalized], {
       stdio: 'ignore',
       detached: true,
     });

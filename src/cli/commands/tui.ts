@@ -1,7 +1,7 @@
 import { Command, Option } from 'commander';
 
 import type { AppTab } from 'src/tui/App.js';
-import type { JobPostSortKey } from 'src/tui/queries.js';
+import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
 
 const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
@@ -9,6 +9,12 @@ const SORTS = [
   'interest',
   'skill',
 ] as const satisfies readonly JobPostSortKey[];
+
+const SOURCE_SORT_CHOICES = [
+  'interest',
+  'posts',
+  'name',
+] as const satisfies readonly SourceSortKey[];
 
 export function createTuiCommand(): Command {
   return new Command('tui')
@@ -25,11 +31,27 @@ export function createTuiCommand(): Command {
         .choices([...SORTS])
         .default('overall' satisfies JobPostSortKey)
     )
-    .action(async (opts: { tab: AppTab; sort: JobPostSortKey }) => {
-      // Lazy-load Ink so spinning up the CLI for unrelated commands stays fast.
-      const { renderApp } = await import('src/tui/index.js');
-      // Await Ink's waitUntilExit so the CLI's trailing `process.exit(0)`
-      // doesn't kill the dashboard before the user can interact with it.
-      await renderApp({ tab: opts.tab, sort: opts.sort });
-    });
+    .addOption(
+      new Option('--sources-sort <key>', 'sort key for the Sources tab')
+        .choices([...SOURCE_SORT_CHOICES])
+        .default('interest' satisfies SourceSortKey)
+    )
+    .action(
+      async (opts: {
+        tab: AppTab;
+        sort: JobPostSortKey;
+        sourcesSort: SourceSortKey;
+      }) => {
+        // Lazy-load Ink so spinning up the CLI for unrelated commands stays fast.
+        const { renderApp } = await import('src/tui/index.js');
+
+        // Await Ink's waitUntilExit so the CLI's trailing `process.exit(0)`
+        // doesn't kill the dashboard before the user can interact with it.
+        await renderApp({
+          tab: opts.tab,
+          sort: opts.sort,
+          sourcesSort: opts.sourcesSort,
+        });
+      }
+    );
 }

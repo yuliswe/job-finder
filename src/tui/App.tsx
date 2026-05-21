@@ -1,16 +1,7 @@
 import { Box, useApp, useInput } from 'ink';
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 
-import {
-  getPipelineStats,
-  getRecentActivity,
-  listJobPosts,
-  listSources,
-  type JobPostSortKey,
-} from 'src/tui/queries.js';
-import { useLiveData } from 'src/tui/useLiveData.js';
 import { ActivityFeed } from 'src/tui/components/ActivityFeed.js';
-import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { Footer } from 'src/tui/components/Footer.js';
 import { JobPostDetailScreen } from 'src/tui/components/JobPostDetailScreen.js';
 import { PipelineHeader } from 'src/tui/components/PipelineHeader.js';
@@ -18,8 +9,19 @@ import { SourceJobsScreen } from 'src/tui/components/SourceJobsScreen.js';
 import { TabBar } from 'src/tui/components/TabBar.js';
 import { TabView } from 'src/tui/components/TabView.js';
 import {
+  getPipelineStats,
+  getRecentActivity,
+  listJobPosts,
+  listSources,
+  type JobPostSortKey,
+  type SourceSortKey,
+} from 'src/tui/queries.js';
+import { useLiveData } from 'src/tui/useLiveData.js';
+import { copyToClipboard } from 'src/tui/utils/clipboard.js';
+import {
   ACTIVITY_ROWS,
   JOB_POST_SORTS,
+  SOURCE_SORTS,
   TAB_LABELS,
   type AppOptions,
   type AppTab,
@@ -31,6 +33,10 @@ export function App({ initial }: { initial: AppOptions }) {
   const { exit } = useApp();
   const [tab, setTab] = useState<AppTab>(initial.tab);
   const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
+  const [sourcesSort, setSourcesSort] = useState<SourceSortKey>(
+    initial.sourcesSort
+  );
+
   const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
   const [pipelineCursor, setPipelineCursor] = useState(0);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
@@ -45,7 +51,9 @@ export function App({ initial }: { initial: AppOptions }) {
     useCallback(() => listJobPosts({ sort, inScopeOnly: true }), [sort])
   );
 
-  const sources = useLiveData(useCallback(() => listSources(), []));
+  const sources = useLiveData(
+    useCallback(() => listSources({ sort: sourcesSort }), [sourcesSort])
+  );
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
   // re-render the chrome on every press. Ink supports multiple useInput hooks.
@@ -104,16 +112,32 @@ export function App({ initial }: { initial: AppOptions }) {
         setTab(next.key);
       }
 
-      if (input === 's' && tab === 'jobs') {
+      if ((input === 's' || input === 'S') && tab === 'jobs') {
+        const delta = input === 'S' ? -1 : 1;
         const idx = JOB_POST_SORTS.indexOf(sort);
         const next =
-          JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
+          JOB_POST_SORTS[
+            (idx + delta + JOB_POST_SORTS.length) % JOB_POST_SORTS.length
+          ] ?? 'overall';
 
         setSort(next);
       }
 
+      if ((input === 's' || input === 'S') && tab === 'sources') {
+        const delta = input === 'S' ? -1 : 1;
+        const idx = SOURCE_SORTS.indexOf(sourcesSort);
+        const next =
+          SOURCE_SORTS[
+            (idx + delta + SOURCE_SORTS.length) % SOURCE_SORTS.length
+          ] ?? 'interest';
+
+        setSourcesSort(next);
+      }
+
       if (input === 'y') {
-        copyToClipboard(`jobfinder tui --tab ${tab} --sort ${sort}`);
+        copyToClipboard(
+          `jobfinder tui --tab ${tab} --sort ${sort} --sources-sort ${sourcesSort}`
+        );
       }
     },
     // App-level keys go silent while a layered screen (JobPost detail or
@@ -148,6 +172,7 @@ export function App({ initial }: { initial: AppOptions }) {
       <TabBar
         tab={tab}
         sort={sort}
+        sourcesSort={sourcesSort}
         counts={{
           jobs: jobPosts?.length ?? 0,
           sources: sources?.length ?? 0,

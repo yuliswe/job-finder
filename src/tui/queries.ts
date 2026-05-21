@@ -90,6 +90,8 @@ export type SourceRow = {
   sourceName: string;
   /** `'-'` when the JobSource has no URL yet (approved but not yet sourced). */
   sourceUrl: string;
+  sourceInterestScore: number | null;
+  sourceSummary: string | null;
   sourceIsActive: number;
   listId: string | null;
   listUrl: string | null;
@@ -112,6 +114,7 @@ export type ActivityRow = {
 };
 
 export type JobPostSortKey = 'overall' | 'interest' | 'skill';
+export type SourceSortKey = 'interest' | 'posts' | 'name';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
   // Each bar's denominator is its parent table's row count (e.g., scripting →
@@ -398,7 +401,9 @@ function parseJsonArray<T>(json: string | null): T[] | null {
   }
 }
 
-export async function listSources(): Promise<SourceRow[]> {
+export async function listSources(args: {
+  sort: SourceSortKey;
+}): Promise<SourceRow[]> {
   // One row per JobSource. approve-seeds promotes SourceSeed names into
   // JobSource rows (url=null until sourcing fills it in), so there's no
   // need to surface unsourced seeds separately anymore.
@@ -409,6 +414,7 @@ export async function listSources(): Promise<SourceRow[]> {
   // scalar subquery so it counts every relevant post under the source
   // regardless of which JobListSource it belongs to. Threshold gates posts
   // the same way the viewing bar / SourceJobsScreen do.
+  const { sort } = args;
   const rows = await db
     .selectFrom('JobSource')
     .leftJoin(
@@ -445,6 +451,8 @@ export async function listSources(): Promise<SourceRow[]> {
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
+      'JobSource.interestScore as sourceInterestScore',
+      'JobSource.summary as sourceSummary',
       eb.ref('JobSource.isActive').as('sourceIsActive'),
       'list.id as listId',
       'list.url as listUrl',
@@ -464,14 +472,29 @@ export async function listSources(): Promise<SourceRow[]> {
         .select(eb2 => eb2.fn.countAll<number>().as('n'))
         .as('jobPostCount'),
     ])
-    .orderBy(sql`"jobPostCount"`, 'desc')
-    .orderBy('JobSource.name', 'asc')
+    .$call(q => {
+      switch (sort) {
+        case 'interest':
+          return q
+            .orderBy('JobSource.interestScore', ob => ob.desc().nullsLast())
+            .orderBy(sql`"jobPostCount"`, 'desc')
+            .orderBy('JobSource.name', 'asc');
+        case 'posts':
+          return q
+            .orderBy(sql`"jobPostCount"`, 'desc')
+            .orderBy('JobSource.name', 'asc');
+        case 'name':
+          return q.orderBy('JobSource.name', 'asc');
+      }
+    })
     .execute();
 
   return rows.map(r => ({
     sourceId: r.sourceId,
     sourceName: r.sourceName,
     sourceUrl: r.sourceUrl ?? '-',
+    sourceInterestScore: r.sourceInterestScore,
+    sourceSummary: r.sourceSummary,
     sourceIsActive: r.sourceIsActive ?? 0,
     listId: r.listId,
     listUrl: r.listUrl,

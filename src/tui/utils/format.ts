@@ -101,6 +101,14 @@ export function allocateContentColumns(
   return out;
 }
 
+/** Strip `https://` / `http://` and a leading `www.` for compact display
+ * (the TUI typically only has 30-ish chars for the url column). Returns the
+ * input unchanged when it doesn't match the prefixes. */
+export function prettyUrl(url: string | null | undefined): string {
+  if (!url) return '';
+  return url.replace(/^https?:\/\//i, '').replace(/^www\./i, '');
+}
+
 export function fmtScore(n: number | null): string {
   if (n == null) return '—';
   return n.toFixed(2);

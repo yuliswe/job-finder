@@ -1,7 +1,9 @@
 import { Table, type Column } from 'src/tui/components/Table.js';
 import type { SourceRow } from 'src/tui/queries.js';
+import { fmtScore, prettyUrl } from 'src/tui/utils/format.js';
 
 const COLS: Column<SourceRow>[] = [
+  { label: 'interest', value: r => fmtScore(r.sourceInterestScore), min: 1 },
   { label: 'source', value: r => r.sourceName, min: 10, max: 24 },
   {
     label: 'active',
@@ -11,7 +13,12 @@ const COLS: Column<SourceRow>[] = [
   },
   { label: 'script', value: r => (r.hasScript ? 'yes' : '—'), min: 6, max: 7 },
   { label: 'posts', value: r => String(r.jobPostCount), min: 5, max: 7 },
-  { label: 'list url', value: r => r.listUrl ?? '—', min: 20, priority: 3 },
+  {
+    label: 'url',
+    value: r => prettyUrl(r.listUrl ?? r.sourceUrl),
+    min: 20,
+    priority: 3,
+  },
 ];
 
 export function SourceList(props: {
