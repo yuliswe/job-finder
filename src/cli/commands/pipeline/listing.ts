@@ -95,13 +95,23 @@ async function runListing(
 
   if (stateFilter) query = query.where(stateFilter);
 
-  const sources = opts.jobSourceId
+  const rawSources = opts.jobSourceId
     ? await db
         .selectFrom('JobSource')
         .select(['id', 'name', 'url'])
         .where('JobSource.id', '=', opts.jobSourceId)
         .execute()
     : await query.execute();
+
+  const sources = rawSources.map(s => {
+    if (s.url == null) {
+      throw new Error(
+        `JobSource ${s.id} (${s.name}) has no url — cannot list.`
+      );
+    }
+
+    return { id: s.id, name: s.name, url: s.url };
+  });
 
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))

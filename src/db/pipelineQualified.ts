@@ -107,9 +107,11 @@ export function qualifiedForSourcing(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
   return ALWAYS_TRUE;
 }
 
-/** Listing has no row-level data prereq — every JobSource is qualified. */
-export function qualifiedForListing(_eb: ExpressionBuilder<DB, 'JobSource'>) {
-  return ALWAYS_TRUE;
+/** Listing needs a URL to crawl — that's its row-level data prereq. JobSources
+ * without a URL (e.g. seeded by name only) wait here until the column is
+ * filled in. */
+export function qualifiedForListing(eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return eb('JobSource.url', 'is not', null);
 }
 
 /** Scripting has no row-level data prereq — every JobListSource is

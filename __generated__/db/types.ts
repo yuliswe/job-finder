@@ -66,7 +66,7 @@ export interface JobSource {
   isActive: Generated<Bool>;
   name: string;
   updatedAt: Generated<Timestamp>;
-  url: string;
+  url: string | null;
 }
 
 export interface LatestPipelineState {

@@ -61,6 +61,7 @@ type JobPost = {
   jobType?: Text;
   location?: Text;
   postedAt?: Timestamp;
+  postedAtSource?: Text;
   salaryCurrency?: Text;
   salaryInterval?: Text;
   salaryMax?: Real;
@@ -110,11 +111,12 @@ type JobSource = {
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
   name: Text;
-  url: Text;
+  url?: Text;
   // ── indexes ──
   _indexes: {
     isActive: [JobSource['isActive']];
     url: [JobSource['url']] | UNIQUE;
+    name: [JobSource['name']] | UNIQUE;
   };
 };
 

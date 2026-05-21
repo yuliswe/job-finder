@@ -385,14 +385,26 @@ function parseJsonArray<T>(json: string | null): T[] | null {
 }
 
 export async function listSources(): Promise<SourceRow[]> {
-  // One row per JobSource. LEFT JOIN picks the most recent JobListSource per
-  // source via an inline subquery — most sources have exactly one list, but
-  // when there are several we surface only the latest by createdAt so the
-  // table stays one-row-per-source. `jobPostCount` is a scalar subquery so
-  // it counts every relevant post under the source regardless of which
-  // JobListSource it belongs to. Threshold gates posts the same way the
-  // viewing bar / SourceJobsScreen do.
-  const rows = await db
+  // One row per JobSource, plus one row per queued-but-not-yet-sourced
+  // SourceSeed (deduped against existing JobSources by name). Both shapes
+  // are unioned in SQL so we do a single DB roundtrip and a single sort.
+  //
+  // Source branch: LEFT JOIN picks the most recent JobListSource per source
+  // via an inline subquery — most sources have exactly one list, but when
+  // there are several we surface only the latest by createdAt. `jobPostCount`
+  // is a scalar subquery so it counts every relevant post under the source
+  // regardless of which JobListSource it belongs to. Threshold gates posts
+  // the same way the viewing bar / SourceJobsScreen do.
+  //
+  // Seed branch: NOT EXISTS drops seed names that already have a JobSource
+  // (the real sourced row wins). GROUP BY name with MIN(id) collapses
+  // multiple queued seeds for the same company name to one row.
+  //
+  // ORDER BY `kind` DESC puts `'source'` rows before `'seed'` rows
+  // ('source' > 'seed' lexicographically); within each branch we sort by
+  // jobPostCount desc then name asc (seeds all share jobPostCount = 0, so
+  // they fall through to the name sort).
+  const sourceQuery = db
     .selectFrom('JobSource')
     .leftJoin(
       eb =>
@@ -425,10 +437,11 @@ export async function listSources(): Promise<SourceRow[]> {
       join => join.onRef('list.ofJobSourceId', '=', 'JobSource.id')
     )
     .select(eb => [
+      sql<'source' | 'seed'>`'source'`.as('kind'),
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
       'JobSource.url as sourceUrl',
-      'JobSource.isActive as sourceIsActive',
+      eb.ref('JobSource.isActive').as('sourceIsActive'),
       'list.id as listId',
       'list.url as listUrl',
       'list.isActive as listIsActive',
@@ -446,45 +459,9 @@ export async function listSources(): Promise<SourceRow[]> {
         )
         .select(eb2 => eb2.fn.countAll<number>().as('n'))
         .as('jobPostCount'),
-    ])
-    .orderBy(sql`"jobPostCount"`, 'desc')
-    .orderBy('JobSource.name', 'asc')
-    .execute();
+    ]);
 
-  const sourceRows: SourceRow[] = rows.map(r => ({
-    rowKey: r.sourceId,
-    kind: 'source',
-    sourceId: r.sourceId,
-    sourceName: r.sourceName,
-    sourceUrl: r.sourceUrl,
-    sourceIsActive: r.sourceIsActive ?? 0,
-    listId: r.listId,
-    listUrl: r.listUrl,
-    listIsActive: r.listIsActive ?? null,
-    listLocations: r.listLocations,
-    listDivisions: r.listDivisions,
-    hasScript: r.listParserScript ? 1 : 0,
-    jobPostCount: Number(r.jobPostCount ?? 0),
-    // `isActive` now strictly tracks JobListSource.isActive — null when the
-    // source has no JobListSource yet.
-    isActive: r.listIsActive ?? null,
-  }));
-
-  const seedRows = await listQueuedSeedRows();
-  return [...sourceRows, ...seedRows];
-}
-
-/** SourceSeeds queued for sourcing but not yet processed. Shown alongside
- * real sources so the user can see what's coming up next.
- *
- * Dedup done in SQL:
- *   - WHERE NOT EXISTS drops seed names that already have a JobSource (the
- *     real sourced row wins).
- *   - GROUP BY name with MIN(id) collapses multiple queued seeds for the
- *     same company name to one row (any one of them is fine — they all
- *     convey the same backlog signal). */
-async function listQueuedSeedRows(): Promise<SourceRow[]> {
-  const rows = await db
+  const seedQuery = db
     .selectFrom('SourceSeed')
     .innerJoin('LatestPipelineState', join =>
       join
@@ -502,30 +479,66 @@ async function listQueuedSeedRows(): Promise<SourceRow[]> {
         )
       )
     )
+    .groupBy('SourceSeed.name')
     .select(eb => [
+      sql<'source' | 'seed'>`'seed'`.as('kind'),
       eb.fn.min<string>('SourceSeed.id').as('sourceId'),
       'SourceSeed.name as sourceName',
-    ])
-    .groupBy('SourceSeed.name')
-    .orderBy('SourceSeed.name', 'asc')
+      sql<string>`'-'`.as('sourceUrl'),
+      sql<Bool>`0`.as('sourceIsActive'),
+      sql<string | null>`NULL`.as('listId'),
+      sql<string | null>`NULL`.as('listUrl'),
+      sql<Bool | null>`NULL`.as('listIsActive'),
+      sql<string | null>`NULL`.as('listLocations'),
+      sql<string | null>`NULL`.as('listDivisions'),
+      sql<string | null>`NULL`.as('listParserScript'),
+      sql<number>`0`.as('jobPostCount'),
+    ]);
+
+  const rows = await sourceQuery
+    .unionAll(seedQuery)
+    .orderBy('kind', 'desc')
+    .orderBy(sql`"jobPostCount"`, 'desc')
+    .orderBy('sourceName', 'asc')
     .execute();
 
-  return rows.map(r => ({
-    rowKey: `seed::${r.sourceId}`,
-    kind: 'seed',
-    sourceId: r.sourceId,
-    sourceName: r.sourceName,
-    sourceUrl: '-',
-    sourceIsActive: 0,
-    listId: null,
-    listUrl: null,
-    listIsActive: null,
-    listLocations: null,
-    listDivisions: null,
-    hasScript: 0,
-    jobPostCount: 0,
-    isActive: null,
-  }));
+  return rows.map(r => {
+    if (r.kind === 'seed') {
+      return {
+        rowKey: `seed::${r.sourceId}`,
+        kind: 'seed',
+        sourceId: r.sourceId,
+        sourceName: r.sourceName,
+        sourceUrl: '-',
+        sourceIsActive: 0,
+        listId: null,
+        listUrl: null,
+        listIsActive: null,
+        listLocations: null,
+        listDivisions: null,
+        hasScript: 0,
+        jobPostCount: 0,
+        isActive: null,
+      };
+    }
+
+    return {
+      rowKey: r.sourceId,
+      kind: 'source',
+      sourceId: r.sourceId,
+      sourceName: r.sourceName,
+      sourceUrl: r.sourceUrl ?? '-',
+      sourceIsActive: r.sourceIsActive ?? 0,
+      listId: r.listId,
+      listUrl: r.listUrl,
+      listIsActive: r.listIsActive ?? null,
+      listLocations: r.listLocations,
+      listDivisions: r.listDivisions,
+      hasScript: r.listParserScript ? 1 : 0,
+      jobPostCount: Number(r.jobPostCount ?? 0),
+      isActive: r.listIsActive ?? null,
+    };
+  });
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
