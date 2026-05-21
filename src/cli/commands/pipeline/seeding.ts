@@ -376,10 +376,11 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
   const { job } = args;
   const id = newId();
 
-  // `SourceSeed.url` is UNIQUE. Two scrapes (across runs OR within the same
-  // sweep) will often surface the same posting URL — do-nothing on conflict
-  // and skip the pipeline-state write when the row already exists, so its
-  // original `seeding/done` history stays intact.
+  // Both `SourceSeed.url` and `SourceSeed.name` are UNIQUE. Two scrapes
+  // (across runs OR within the same sweep) will often surface the same
+  // posting URL, and many postings will share a company name — do-nothing
+  // on any unique conflict and skip the pipeline-state write when the row
+  // already exists, so its original `seeding/done` history stays intact.
   const result = await db
     .insertInto('SourceSeed')
     .values({
@@ -388,7 +389,7 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
       name: job.company ?? 'Unknown',
       title: job.title,
     })
-    .onConflict(oc => oc.column('url').doNothing())
+    .onConflict(oc => oc.doNothing())
     .executeTakeFirst();
 
   const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;

@@ -397,8 +397,8 @@ export async function listSources(): Promise<SourceRow[]> {
   // the same way the viewing bar / SourceJobsScreen do.
   //
   // Seed branch: NOT EXISTS drops seed names that already have a JobSource
-  // (the real sourced row wins). GROUP BY name with MIN(id) collapses
-  // multiple queued seeds for the same company name to one row.
+  // (the real sourced row wins). `SourceSeed.name` is UNIQUE so we never see
+  // two seeds for the same company.
   //
   // ORDER BY `kind` DESC puts `'source'` rows before `'seed'` rows
   // ('source' > 'seed' lexicographically); within each branch we sort by
@@ -479,10 +479,9 @@ export async function listSources(): Promise<SourceRow[]> {
         )
       )
     )
-    .groupBy('SourceSeed.name')
     .select(eb => [
       sql<'source' | 'seed'>`'seed'`.as('kind'),
-      eb.fn.min<string>('SourceSeed.id').as('sourceId'),
+      eb.ref('SourceSeed.id').as('sourceId'),
       'SourceSeed.name as sourceName',
       sql<string>`'-'`.as('sourceUrl'),
       sql<Bool>`0`.as('sourceIsActive'),

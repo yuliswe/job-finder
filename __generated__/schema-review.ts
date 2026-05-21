@@ -176,6 +176,7 @@ type SourceSeed = {
   url: Text;
   // ── indexes ──
   _indexes: {
+    name: [SourceSeed['name']] | UNIQUE;
     url: [SourceSeed['url']] | UNIQUE;
   };
 };
