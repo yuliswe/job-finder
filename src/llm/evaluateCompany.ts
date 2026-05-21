@@ -1,36 +1,33 @@
 import * as v from 'valibot';
 
 import { LLM_SOURCING_MODEL } from 'jobfinder.config.js';
-import { normalizeJobSourceUrl } from 'src/db/normalizeJobSourceUrl.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { FIND_COMPANY_URL_SYSTEM_PROMPT } from 'src/prompts/findCompanyUrl.js';
+import { EVALUATE_COMPANY_SYSTEM_PROMPT } from 'src/prompts/evaluateCompany.js';
 import { terminal } from 'src/utils/terminal.js';
 
 const MAX_ATTEMPTS = 3;
 
-export type CompanyEvaluation = {
-  /** Hostname-only form (e.g. "acme.com"). Null when the LLM couldn't find
-   * a usable URL after `MAX_ATTEMPTS` tries. */
-  url: string | null;
+export type CompanyResearch = {
   /** 2–4 sentence plain-English description of the company's business. */
   summary: string;
-  /** Number in [0, 1] — how likely the user is interested in working at this
-   * company, per the interests text passed in. */
+  /** Number in [0, 1]. */
   interestScore: number;
   /** Short single-sentence justification of `interestScore`. */
   interestScoreReason: string;
 };
 
-/** Ask the LLM (with web search) two things in one call for a given company:
- * (A) the company's primary corporate URL, and (B) a 0..1 user-interest score
- * judged against the supplied interests text. */
-export async function findCompanyUrl(args: {
+/** Ask the LLM (with web search) for a summary + user-interest score for a
+ * company whose URL is already known. Use this when the JobSource already
+ * has a `url` set and only the research fields need filling — sibling of
+ * `findCompanyUrl`, but skips the URL-discovery step so a flaky web search
+ * can't corrupt a previously-correct URL. */
+export async function evaluateCompany(args: {
   name: string;
+  url: string;
   interests: string;
-}): Promise<CompanyEvaluation> {
-  const { name, interests } = args;
-  const memory = new Memory([{ system: FIND_COMPANY_URL_SYSTEM_PROMPT }]);
-  let lastReason = '';
+}): Promise<CompanyResearch> {
+  const { name, url, interests } = args;
+  const memory = new Memory([{ system: EVALUATE_COMPANY_SYSTEM_PROMPT }]);
 
   const { result } = await feedbackLoop({
     memory,
@@ -38,20 +35,9 @@ export async function findCompanyUrl(args: {
 
 ${interests || '(empty — score 0.0 with reason "no user interests provided")'}
 
-Company name: ${name}`,
+Company name: ${name}
+Company URL: ${url}`,
     schema: v.object({
-      url: v.pipe(
-        v.string(),
-        v.description(
-          'Primary corporate website URL of the company (e.g. "https://acme.com"). Empty string ONLY when web_search has been tried and turned up nothing.'
-        )
-      ),
-      reason: v.pipe(
-        v.string(),
-        v.description(
-          'If you returned an empty url, explain why (including search queries tried); otherwise empty string.'
-        )
-      ),
       summary: v.pipe(
         v.string(),
         v.description(
@@ -100,43 +86,19 @@ Company name: ${name}`,
         };
       }
 
-      const baseResult = {
-        summary: parsed.summary.trim(),
-        interestScore: parsed.interestScore,
-        interestScoreReason: parsed.interestScoreReason.trim(),
-      };
-
-      const rawUrl = parsed.url.trim();
-      if (!rawUrl) {
-        lastReason = parsed.reason.trim() || '(no reason given)';
-        return {
-          valid: true,
-          result: { url: null as string | null, ...baseResult },
-        };
-      }
-
-      const hostname = normalizeJobSourceUrl(rawUrl);
-      if (hostname) {
-        return {
-          valid: true,
-          result: { url: hostname as string | null, ...baseResult },
-        };
-      }
-
       return {
-        valid: false,
-        feedback: `You returned url="${rawUrl}" but it doesn't parse as a hostname. Return a clean URL like "https://acme.com".`,
+        valid: true,
+        result: {
+          summary: parsed.summary.trim(),
+          interestScore: parsed.interestScore,
+          interestScoreReason: parsed.interestScoreReason.trim(),
+        },
       };
     },
   });
 
-  if (result.url == null) {
-    terminal.warn(`Could not identify URL for "${name}": ${lastReason}`);
-  } else {
-    terminal.log(
-      `Identified URL for "${name}": ${result.url} (interestScore=${result.interestScore.toFixed(2)})`
-    );
-  }
-
+  terminal.log(
+    `Evaluated "${name}" (${url}): interestScore=${result.interestScore.toFixed(2)}`
+  );
   return result;
 }

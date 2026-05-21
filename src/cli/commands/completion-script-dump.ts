@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,10 +170,8 @@ export function createCompletionScriptDumpCommand(program: Command): Command {
     )
     .action(async () => {
       const content = generateZshCompletion(program);
-      const here = dirname(fileURLToPath(import.meta.url));
       const outputPath = resolve(
-        here,
-        '../../..',
+        findProjectRoot(),
         '__generated__/cli/_completion.zsh'
       );
 
@@ -181,4 +180,26 @@ export function createCompletionScriptDumpCommand(program: Command): Command {
       terminal.log(content, s => s);
       terminal.log(`# wrote ${outputPath}`);
     });
+}
+
+/** Walk up from this module's own location until we find the project's
+ * `package.json`, skipping the compiled-output `dist/package.json` if the
+ * binary was launched from there. This keeps the generated completion file
+ * pinned to the source-tree `__generated__/` regardless of whether the
+ * caller invoked the CLI via `tsx src/cli/cli.ts` or via the compiled
+ * `./bin/jobfinder` (which runs `dist/src/cli/cli.js`). */
+function findProjectRoot(): string {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const pkg = resolve(dir, 'package.json');
+    if (existsSync(pkg) && !dir.endsWith('/dist')) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        `Could not locate project root (no package.json found walking up from ${fileURLToPath(import.meta.url)}).`
+      );
+    }
+
+    dir = parent;
+  }
 }

@@ -63,8 +63,11 @@ export interface JobPostEval {
 export interface JobSource {
   createdAt: Generated<Timestamp>;
   id: string;
+  interestScore: number | null;
+  interestScoreReason: string | null;
   isActive: Generated<Bool>;
   name: string;
+  summary: string | null;
   updatedAt: Generated<Timestamp>;
   url: string | null;
 }

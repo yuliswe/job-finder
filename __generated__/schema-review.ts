@@ -111,6 +111,9 @@ type JobSource = {
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
   name: Text;
+  interestScore?: Real;
+  interestScoreReason?: Text;
+  summary?: Text;
   url?: Text;
   // ── indexes ──
   _indexes: {

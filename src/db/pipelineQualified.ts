@@ -8,102 +8,52 @@ import {
 } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 
-// ─────────────────────────────────────────────────────────────────────────
-// `qualifiedForX` vs `inScopeForX` vs `neededForX` — read this before
-// touching any of them.
-// ─────────────────────────────────────────────────────────────────────────
+// Row predicates over each task's parent table, used by every pipeline
+// command's picker. Three independent axes:
 //
-// All three are SQL predicates over the task's parent table (e.g.
-// JobListSource for scripting). They answer related but distinct questions:
+//   qualifiedForX  Row has the upstream-prereq DATA the task reads (e.g.
+//                  qualifiedForRunScripts = parserScript IS NOT NULL).
+//                  Trivial when there's no prereq.
 //
-//   `qualifiedForX(row)`   — Does this row have the DATA the task needs to
-//                            run? Only checks upstream-prereq columns. Does
-//                            NOT check active-tree, design-time skip rules,
-//                            or pipeline state. For tasks with no row-level
-//                            prereq (most of them), this is trivially true.
+//   inScopeForX    Should the pipeline ever touch this row at all? Active-
+//                  tree membership + design-time skips (e.g. relevancy
+//                  threshold). The TUI bar uses this as the denominator.
 //
-//   `inScopeForX(row)`     — SHOULD the pipeline ever touch this row?
-//                            Active-tree membership + design-time skip rules
-//                            (e.g. relevancy threshold). Independent of
-//                            qualified/state.
+//   neededForX     Is there work left? Defined only when the task's output
+//                  is a column on the parent table (sourcing → url +
+//                  summary + interest*). Null column = work remains.
+//                  Tasks whose output is a child-table row don't have
+//                  this axis.
 //
-//   `neededForX(row)`      — DOES the task still have work to do on this row?
-//                            Defined only for tasks whose output is a column
-//                            on the parent table (sourcing → JobSource.url,
-//                            scripting → JobListSource.parserScript, viewing
-//                            → JobPost.description + skillRequirements). When
-//                            the output column is null, work remains; when
-//                            it's filled, work is done — independent of
-//                            pipeline state. Tasks whose output is a new
-//                            child-table row don't have this axis (use the
-//                            pipeline-state filter to detect "needs work").
+// Each CLI command AND-combines them with a state filter chosen by mode:
 //
-// All three are orthogonal. A row that's `qualified` may be out-of-scope (e.g.
-// a JobListSource with `parserScript` set but its tree was toggled off — run-
-// scripts won't process it). A row that's `inScope` may not be `qualified`
-// (e.g. a JobListSource in an active tree but `parserScript IS NULL` — run-
-// scripts can't process it until scripting fills the column in).
+//   default          qualified ∩ inScope ∩ needed ∩ state∈{queued,user_interrupted}
+//   --include-failed qualified ∩ inScope ∩ needed ∩ state ≠ done
+//   --all            qualified ∩ inScope                                    (drops needed and state filter; also pre-runs requeueAllInScope so the bar shows the row set as pending)
 //
-// The "universe of work" for a task is `qualifiedForX(row) AND
-// inScopeForX(row)` (∩ `neededForX(row)` when defined). The CLI's three
-// modes layer different pipeline-state filters on top:
+// `neededForX` only applies when the task defines it; otherwise treat it
+// as ALWAYS_TRUE. `--all` is the escape hatch when you genuinely want to
+// re-process completed rows (e.g. after a prompt change). Modes nest:
+// default ⊆ --include-failed ⊆ --all (assuming nothing was deactivated
+// between runs).
 //
-//   no flag           → `needs ∩ {state ∈ queued / user_interrupted}`
-//   --include-failed  → `needs ∩ {state ≠ done}`
-//   --all             → `needs` (any state — re-process done rows too)
+// Worked example — sourcing (the only task with `neededForX`):
 //
-// where `needs = qualifiedForX ∩ inScopeForX [∩ neededForX]`. These nest:
-// no-flag ⊆ --include-failed ⊆ --all.
+//   id  url    summary  interest  state    needed?
+//   ──  ─────  ───────  ────────  ──────   ───────
+//   A   acme   filled   filled    done     no
+//   B   beta   filled   filled    queued   no    ← stale queued; needed=false skips it
+//   C   NULL   NULL     NULL      queued   yes
+//   D   delta  NULL     NULL      failed   yes
+//   E   NULL   NULL     NULL      (none)   yes
 //
-// ── Worked example (scripting) ──────────────────────────────────────────
-// Scripting has no row-level prereq, so `qualifiedForScripting` is
-// trivially true. Suppose JobListSource has 5 rows in an active tree:
+//   default          → {C, E}            (B skipped: !needed; D skipped: state=failed)
+//   --include-failed → {C, D, E}         (B still skipped: !needed)
+//   --all            → {A, B, C, D, E}   (re-LLMs everyone, overwrites cols)
 //
-//   id  parserScript  latest scripting state
-//   ──  ────────────  ──────────────────────
-//   A   "function…"   done
-//   B   "function…"   done
-//   C   NULL          queued
-//   D   NULL          aborted
-//   E   NULL          (no row yet)
-//
-// All 5 are `qualified` (no prereq) and `inScope` (active tree). So `needs`
-// = {A, B, C, D, E}. The CLI modes pick subsets via pipeline state:
-//   no flag           → {C}              (only queued)
-//   --include-failed  → {C, D, E}        (queued/aborted/no-row → not done)
-//   --all             → {A, B, C, D, E}  (re-script A and B too,
-//                                         overwriting their parserScript)
-//
-// The TUI bar reads `inScopeForX` as its denominator: 5 rows, 2 done
-// (green) + 3 pending (empty).
-//
-// ── Worked example (evaluate) ───────────────────────────────────────────
-// Evaluate's prereq is upstream's output: viewing must have populated
-// `description` and `skillRequirements`. Suppose JobPost has 4 rows:
-//
-//   id  titleRelevancy  description    skillReq    evaluate state
-//   ──  ──────────────  ────────────   ─────────   ──────────────
-//   P   0.9             "Senior eng…"  non-null    done
-//   Q   0.9             "Backend…"     non-null    queued
-//   R   0.9             NULL           NULL        (no row yet)
-//   S   0.1             NULL           NULL        (no row yet)
-//
-// `qualifiedForEvaluate`  → {P, Q}  (R, S fail description+skillReq prereq)
-// `inScopeForEvaluate`    → {P, Q}  (S out-of-scope by titleRelevancy)
-//                                    (R out-of-scope because the bar's scope
-//                                    treats unviewed posts as out-of-scope
-//                                    until they make it past viewing)
-// `needs`                 → {P, Q}
-//
-// Mode behavior:
-//   no flag           → {Q}        (only queued)
-//   --include-failed  → {Q}        (P is done — skipped)
-//   --all             → {P, Q}     (re-evaluate P too)
-//
-// ── Rule of thumb ───────────────────────────────────────────────────────
-// Adding a "is this row already done?" check to `qualifiedForX` is a smell.
-// That's a pipeline-state concern, applied by the CLI mode filter, not by
-// the row predicate.
+// Rule of thumb: don't put "is this done?" checks into `qualifiedForX` —
+// done-ness is the picker's concern (via needed and state), not the
+// row-data predicate's.
 
 /** `1` rendered as a SqlBool so the trivial qualifiedForX predicates can be
  * used wherever a boolean expression is expected. */
@@ -247,8 +197,15 @@ export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
 // than a pipeline-state check). See the header comment for the axis.
 // ─────────────────────────────────────────────────────────────────────────
 
-/** A JobSource still needs sourcing iff its `url` is null — sourcing's
- * output is exactly that column. */
+/** A JobSource still needs sourcing iff ANY of the columns sourcing writes
+ * is still null — `url`, `summary`, `interestScore`, `interestScoreReason`.
+ * A row missing any one of these hasn't been fully processed by the
+ * current sourcing flow. */
 export function neededForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
-  return eb('JobSource.url', 'is', null);
+  return eb.or([
+    eb('JobSource.url', 'is', null),
+    eb('JobSource.summary', 'is', null),
+    eb('JobSource.interestScore', 'is', null),
+    eb('JobSource.interestScoreReason', 'is', null),
+  ]);
 }

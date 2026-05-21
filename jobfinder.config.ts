@@ -21,8 +21,16 @@ export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the sourcing process.
+ *
+ * Model recommendations:
+ * - web-search capabilities
+ * - Low input cost
+ *
+ * The model is asked to find a company URL from name, write a summary of the
+ * company, and assign an interest score to the company based on the interest.md
+ * file.
  */
-export const LLM_SOURCING_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_SOURCING_MODEL = 'mistralai/mistral-nemo';
 
 /**
  * The model used by the listing process.

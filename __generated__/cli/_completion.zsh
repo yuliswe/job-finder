@@ -35,18 +35,21 @@ _jobfinder_scrape() {
 _jobfinder_pipeline_sourcing() {
   _arguments -s -S \
     '--all[all]' \
-    '--source-seed-id[source-seed-id]:source-seed-id:'
+    '--include-failed[include-failed]' \
+    '--job-source-id[job-source-id]:job-source-id:'
 }
 
 _jobfinder_pipeline_listing() {
   _arguments -s -S \
     '--all[all]' \
+    '--include-failed[include-failed]' \
     '--job-source-id[job-source-id]:job-source-id:'
 }
 
 _jobfinder_pipeline_scripting() {
   _arguments -s -S \
     '--all[all]' \
+    '--include-failed[include-failed]' \
     '--job-list-source-id[job-list-source-id]:job-list-source-id:'
 }
 
@@ -55,18 +58,21 @@ _jobfinder_pipeline_run_scripts() {
     '(-d --division)'{-d,--division}'[division]:division:' \
     '(-l --location)'{-l,--location}'[location]:location:' \
     '--all[all]' \
+    '--include-failed[include-failed]' \
     '--job-list-source-id[job-list-source-id]:job-list-source-id:'
 }
 
 _jobfinder_pipeline_viewing() {
   _arguments -s -S \
     '--all[all]' \
+    '--include-failed[include-failed]' \
     '--job-post-id[job-post-id]:job-post-id:'
 }
 
 _jobfinder_pipeline_evaluate() {
   _arguments -s -S \
     '--all[all]' \
+    '--include-failed[include-failed]' \
     '--job-post-id[job-post-id]:job-post-id:'
 }
 
@@ -97,7 +103,8 @@ _jobfinder_pipeline() {
 _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
-    '--sort[sort]:sort:(overall interest skill)'
+    '--sort[sort]:sort:(overall interest skill)' \
+    '--sources-sort[sources-sort]:sources-sort:(interest posts name)'
 }
 
 _jobfinder_help_menu_dump() {

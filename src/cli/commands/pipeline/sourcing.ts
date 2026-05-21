@@ -1,7 +1,6 @@
 import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 
-import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
 import {
   enqueuePipelineTask,
@@ -17,12 +16,14 @@ import {
   neededForSourcing,
   qualifiedForSourcing,
 } from 'src/db/pipelineQualified.js';
+import { evaluateCompany } from 'src/llm/evaluateCompany.js';
 import { findCompanyUrl } from 'src/llm/findCompanyUrl.js';
 import { terminal } from 'src/utils/terminal.js';
+import { getUserInterests } from 'src/utils/userInterests.js';
 
-// Sourcing is LLM-only — no browser tabs — but we still bound concurrency to
-// avoid hammering the provider with hundreds of simultaneous calls.
-const concurrency = pLimit(MAX_CONCURRENT_BROWSER_TABS);
+/** Soft cap on parallel LLM calls so we don't hammer the provider. */
+const LLM_CONCURRENCY = 10;
+const concurrency = pLimit(LLM_CONCURRENCY);
 
 type SourcingOptions = {
   all?: boolean;
@@ -65,10 +66,12 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
   const mode = pipelineModeFromOptions(opts);
   if (mode === 'all') await requeueAllInScope('sourcing');
 
-  // Picker = qualifiedForX ∩ inScopeForX ∩ neededForX + state filter.
-  // `neededForSourcing` is the "still needs sourcing" data check (url IS
-  // NULL) — rows whose url has already been filled are skipped regardless
-  // of mode.
+  // Picker = qualifiedForX ∩ inScopeForX [∩ neededForX] + state filter.
+  // `--all` deliberately drops `neededForSourcing` so already-complete rows
+  // get re-processed (the documented purpose: "re-process every in-scope
+  // row, e.g. after a prompt change"). Default and `--include-failed`
+  // still apply `neededForSourcing` so rows whose output columns are all
+  // filled are skipped.
   const stateFilter = pickerStateFilter({
     task: 'sourcing',
     parentIdRef: 'JobSource.id',
@@ -77,17 +80,17 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
 
   let query = db
     .selectFrom('JobSource')
-    .select(['id', 'name'])
+    .select(['id', 'name', 'url'])
     .where(qualifiedForSourcing)
-    .where(inScopeForSourcing)
-    .where(neededForSourcing);
+    .where(inScopeForSourcing);
 
+  if (mode !== 'all') query = query.where(neededForSourcing);
   if (stateFilter) query = query.where(stateFilter);
 
   const sources = opts.jobSourceId
     ? await db
         .selectFrom('JobSource')
-        .select(['id', 'name'])
+        .select(['id', 'name', 'url'])
         .where('JobSource.id', '=', opts.jobSourceId)
         .execute()
     : await query.execute();
@@ -97,8 +100,14 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
     return;
   }
 
+  // Read interests once up front. Empty is OK — `findCompanyUrl` scores 0.0
+  // with an explanatory reason in that case.
+  const interests = await getUserInterests();
+
   const results = await Promise.all(
-    sources.map(source => concurrency(() => sourceOneJobSource({ source })))
+    sources.map(source =>
+      concurrency(() => sourceOneJobSource({ source, interests }))
+    )
   );
 
   const filled = results.reduce((sum, r) => sum + (r?.urlFilled ?? 0), 0);
@@ -106,17 +115,60 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
 }
 
 async function sourceOneJobSource(args: {
-  source: { id: string; name: string };
+  source: { id: string; name: string; url: string | null };
+  interests: string;
 }): Promise<{ urlFilled: number } | undefined> {
-  const { source } = args;
+  const { source, interests } = args;
   return processOne({
     task: 'sourcing',
     entity: { ofJobSourceId: source.id },
     label: source.name,
     work: async (): Promise<{ urlFilled: number }> => {
-      const url = await findCompanyUrl({ name: source.name });
+      // URL is already set — only the research fields (summary / interest)
+      // need filling. Skip the URL-discovery question entirely so a flaky
+      // web search can't corrupt a previously-correct URL.
+      if (source.url != null) {
+        const research = await evaluateCompany({
+          name: source.name,
+          url: source.url,
+          interests,
+        });
 
-      if (!url) {
+        await db
+          .updateTable('JobSource')
+          .set({
+            summary: research.summary,
+            interestScore: research.interestScore,
+            interestScoreReason: research.interestScoreReason,
+          })
+          .where('id', '=', source.id)
+          .execute();
+
+        await recordPipelineState({
+          task: 'sourcing',
+          state: PIPELINE_STATE.DONE,
+          entity: { ofJobSourceId: source.id },
+        });
+        return { urlFilled: 0 };
+      }
+
+      const evaluation = await findCompanyUrl({ name: source.name, interests });
+
+      const evalFields = {
+        summary: evaluation.summary,
+        interestScore: evaluation.interestScore,
+        interestScoreReason: evaluation.interestScoreReason,
+      };
+
+      // No URL — still record summary + interest signal on the current
+      // row, then bail out with no_source_found. Nothing to merge against.
+      if (evaluation.url == null) {
+        await db
+          .updateTable('JobSource')
+          .set(evalFields)
+          .where('id', '=', source.id)
+          .execute();
+
         await recordPipelineState({
           task: 'sourcing',
           state: PIPELINE_STATE.NO_SOURCE_FOUND,
@@ -125,9 +177,33 @@ async function sourceOneJobSource(args: {
         return { urlFilled: 0 };
       }
 
+      // URL UNIQUE conflict = the LLM resolved a different name to a URL
+      // that another JobSource already holds (e.g. "Acme" + "Acme Inc." →
+      // "acme.com"). Drop the current row (its children cascade —
+      // listings/posts/state) but DO NOT touch the survivor's columns:
+      // the LLM's reasoning for this call was framed around `source.name`,
+      // not the survivor's name, so its summary/interestScore/reason are
+      // unreliable signal for the survivor. The survivor keeps whatever
+      // values it got from its own (correctly-named) sourcing run.
+      const existing = await db
+        .selectFrom('JobSource')
+        .select('id')
+        .where('url', '=', evaluation.url)
+        .where('id', '!=', source.id)
+        .executeTakeFirst();
+
+      if (existing) {
+        await db.deleteFrom('JobSource').where('id', '=', source.id).execute();
+
+        terminal.log(
+          `Dropped "${source.name}" — its url ${evaluation.url} is already held by JobSource ${existing.id}.`
+        );
+        return { urlFilled: 0 };
+      }
+
       await db
         .updateTable('JobSource')
-        .set({ url })
+        .set({ url: evaluation.url, ...evalFields })
         .where('id', '=', source.id)
         .execute();
 
