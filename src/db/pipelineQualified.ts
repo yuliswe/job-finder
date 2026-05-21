@@ -9,11 +9,12 @@ import {
 import { Bool } from 'src/db/customTypes.js';
 
 // ─────────────────────────────────────────────────────────────────────────
-// `qualifiedForX` vs `inScopeForX` — read this before touching either.
+// `qualifiedForX` vs `inScopeForX` vs `neededForX` — read this before
+// touching any of them.
 // ─────────────────────────────────────────────────────────────────────────
 //
-// Both are SQL predicates over the task's parent table (e.g. JobListSource
-// for scripting). They answer related but distinct questions:
+// All three are SQL predicates over the task's parent table (e.g.
+// JobListSource for scripting). They answer related but distinct questions:
 //
 //   `qualifiedForX(row)`   — Does this row have the DATA the task needs to
 //                            run? Only checks upstream-prereq columns. Does
@@ -26,21 +27,32 @@ import { Bool } from 'src/db/customTypes.js';
 //                            (e.g. relevancy threshold). Independent of
 //                            qualified/state.
 //
-// The two are orthogonal. A row that's `qualified` may be out-of-scope (e.g.
+//   `neededForX(row)`      — DOES the task still have work to do on this row?
+//                            Defined only for tasks whose output is a column
+//                            on the parent table (sourcing → JobSource.url,
+//                            scripting → JobListSource.parserScript, viewing
+//                            → JobPost.description + skillRequirements). When
+//                            the output column is null, work remains; when
+//                            it's filled, work is done — independent of
+//                            pipeline state. Tasks whose output is a new
+//                            child-table row don't have this axis (use the
+//                            pipeline-state filter to detect "needs work").
+//
+// All three are orthogonal. A row that's `qualified` may be out-of-scope (e.g.
 // a JobListSource with `parserScript` set but its tree was toggled off — run-
 // scripts won't process it). A row that's `inScope` may not be `qualified`
 // (e.g. a JobListSource in an active tree but `parserScript IS NULL` — run-
 // scripts can't process it until scripting fills the column in).
 //
 // The "universe of work" for a task is `qualifiedForX(row) AND
-// inScopeForX(row)`. The CLI's three modes layer different pipeline-state
-// filters on top:
+// inScopeForX(row)` (∩ `neededForX(row)` when defined). The CLI's three
+// modes layer different pipeline-state filters on top:
 //
 //   no flag           → `needs ∩ {state ∈ queued / user_interrupted}`
 //   --include-failed  → `needs ∩ {state ≠ done}`
 //   --all             → `needs` (any state — re-process done rows too)
 //
-// where `needs = qualifiedForX ∩ inScopeForX`. These nest:
+// where `needs = qualifiedForX ∩ inScopeForX [∩ neededForX]`. These nest:
 // no-flag ⊆ --include-failed ⊆ --all.
 //
 // ── Worked example (scripting) ──────────────────────────────────────────
@@ -102,11 +114,12 @@ export function qualifiedForSeeding(_eb: ExpressionBuilder<DB, 'SourceSeed'>) {
   return ALWAYS_TRUE;
 }
 
-/** Sourcing operates on JobSource rows that approve-seeds promoted from
- * SourceSeed by name. The row-level data prereq is `url IS NULL` — once
- * sourcing fills the URL in, there's nothing left for this task to do. */
-export function qualifiedForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
-  return eb('JobSource.url', 'is', null);
+/** Every JobSource is qualified for sourcing — `name` is NOT NULL by schema,
+ * which is the only row-level prereq the task reads. Whether a row still
+ * NEEDS sourcing (i.e. `url IS NULL`) is enforced directly by the sourcing
+ * command's picker, not here. */
+export function qualifiedForSourcing(_eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return ALWAYS_TRUE;
 }
 
 /** Listing needs a URL to crawl — that's its row-level data prereq. JobSources
@@ -226,4 +239,16 @@ export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
     eb('JobPost.description', 'is not', null),
     eb('JobPost.skillRequirements', 'is not', null),
   ]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// `neededForX` — defined only where the task's output is a column on the
+// parent table (so "has the row been done?" is a pure data check rather
+// than a pipeline-state check). See the header comment for the axis.
+// ─────────────────────────────────────────────────────────────────────────
+
+/** A JobSource still needs sourcing iff its `url` is null — sourcing's
+ * output is exactly that column. */
+export function neededForSourcing(eb: ExpressionBuilder<DB, 'JobSource'>) {
+  return eb('JobSource.url', 'is', null);
 }
