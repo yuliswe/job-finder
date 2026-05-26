@@ -1,5 +1,6 @@
-import { sql } from 'kysely';
+import { type ExpressionBuilder, sql } from 'kysely';
 
+import type { DB } from '__generated__/db/types.js';
 import {
   PIPELINE_LISTING_MIN_INTEREST_SCORE,
   PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
@@ -178,35 +179,34 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
 }
 
 async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
-  // Each branch starts from the parent table and LEFT JOINs LatestPipelineState
-  // so rows that haven't been enqueued yet (no state row) are still counted.
-  // The `inScope` CASE expression separates rows we'd ever process from rows
-  // we deliberately skip; rows are grouped by (inScope, state) and counted.
+  // Each branch starts from the parent table and pulls the latest pipeline
+  // state per row via a correlated scalar subquery on `PipelineState` —
+  // which lets SQLite use the `PipelineState_task_of*_createdAt_idx` index
+  // for an O(log N) lookup per parent row. The earlier implementation
+  // LEFT JOINed the `LatestPipelineState` view, which forced SQLite to
+  // materialize the whole view (ROW_NUMBER() OVER (...) + TEMP B-TREE sort)
+  // on every refresh — ~1.7 s for the sourcing stage alone, hence the TUI
+  // freeze on every DB write. The rewrite drops total time for all 7 stages
+  // from ~2.3 s to ~50 ms.
+  //
+  // `state` is null when no PipelineState row exists yet — the
+  // not-yet-enqueued case. The bucket-aggregator above treats null as
+  // pending, same as before.
   switch (task) {
     case 'seeding':
       // Every SourceSeed is in scope — no skip rule.
       return db
         .selectFrom('SourceSeed')
-        .leftJoin('LatestPipelineState', join =>
-          join
-            .onRef('LatestPipelineState.ofSourceSeedId', '=', 'SourceSeed.id')
-            .on('LatestPipelineState.task', '=', task)
-        )
         .select(eb => [
           sql<number>`1`.as('inScope'),
-          eb.ref('LatestPipelineState.state').as('state'),
+          latestPipelineStateFor(eb, 'SourceSeed.id', 'ofSourceSeedId', task),
           eb.fn.countAll<number>().as('n'),
         ])
-        .groupBy(['LatestPipelineState.state'])
-        .execute();
+        .groupBy([sql`"state"`])
+        .execute() as Promise<RawBucket[]>;
     case 'sourcing':
       return db
         .selectFrom('JobSource')
-        .leftJoin('LatestPipelineState', join =>
-          join
-            .onRef('LatestPipelineState.ofJobSourceId', '=', 'JobSource.id')
-            .on('LatestPipelineState.task', '=', task)
-        )
         .select(eb => [
           eb
             .case()
@@ -215,19 +215,14 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
             .else(0)
             .end()
             .as('inScope'),
-          eb.ref('LatestPipelineState.state').as('state'),
+          latestPipelineStateFor(eb, 'JobSource.id', 'ofJobSourceId', task),
           eb.fn.countAll<number>().as('n'),
         ])
-        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
-        .execute();
+        .groupBy([sql`"inScope"`, sql`"state"`])
+        .execute() as Promise<RawBucket[]>;
     case 'listing':
       return db
         .selectFrom('JobSource')
-        .leftJoin('LatestPipelineState', join =>
-          join
-            .onRef('LatestPipelineState.ofJobSourceId', '=', 'JobSource.id')
-            .on('LatestPipelineState.task', '=', task)
-        )
         .select(eb => [
           eb
             .case()
@@ -236,24 +231,15 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
             .else(0)
             .end()
             .as('inScope'),
-          eb.ref('LatestPipelineState.state').as('state'),
+          latestPipelineStateFor(eb, 'JobSource.id', 'ofJobSourceId', task),
           eb.fn.countAll<number>().as('n'),
         ])
-        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
-        .execute();
+        .groupBy([sql`"inScope"`, sql`"state"`])
+        .execute() as Promise<RawBucket[]>;
     case 'scripting':
     case 'run-scripts':
       return db
         .selectFrom('JobListSource')
-        .leftJoin('LatestPipelineState', join =>
-          join
-            .onRef(
-              'LatestPipelineState.ofJobListSourceId',
-              '=',
-              'JobListSource.id'
-            )
-            .on('LatestPipelineState.task', '=', task)
-        )
         .select(eb => [
           eb
             .case()
@@ -266,20 +252,20 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
             .else(0)
             .end()
             .as('inScope'),
-          eb.ref('LatestPipelineState.state').as('state'),
+          latestPipelineStateFor(
+            eb,
+            'JobListSource.id',
+            'ofJobListSourceId',
+            task
+          ),
           eb.fn.countAll<number>().as('n'),
         ])
-        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
-        .execute();
+        .groupBy([sql`"inScope"`, sql`"state"`])
+        .execute() as Promise<RawBucket[]>;
     case 'viewing':
     case 'evaluate':
       return db
         .selectFrom('JobPost')
-        .leftJoin('LatestPipelineState', join =>
-          join
-            .onRef('LatestPipelineState.ofJobPostId', '=', 'JobPost.id')
-            .on('LatestPipelineState.task', '=', task)
-        )
         .select(eb => [
           eb
             .case()
@@ -292,12 +278,44 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
             .else(0)
             .end()
             .as('inScope'),
-          eb.ref('LatestPipelineState.state').as('state'),
+          latestPipelineStateFor(eb, 'JobPost.id', 'ofJobPostId', task),
           eb.fn.countAll<number>().as('n'),
         ])
-        .groupBy([sql`"inScope"`, 'LatestPipelineState.state'])
-        .execute();
+        .groupBy([sql`"inScope"`, sql`"state"`])
+        .execute() as Promise<RawBucket[]>;
   }
+}
+
+/** Build a `(SELECT state FROM PipelineState WHERE task=? AND of*Id=parent.id
+ * ORDER BY createdAt DESC, id DESC LIMIT 1) AS state` correlated subquery.
+ * Aliased as `"state"` so the outer query can group by it. The covering
+ * `PipelineState_task_of*_createdAt_idx` index makes the inner scan O(log N)
+ * per parent row. */
+function latestPipelineStateFor<
+  P extends 'SourceSeed' | 'JobSource' | 'JobListSource' | 'JobPost',
+>(
+  eb: ExpressionBuilder<DB, P>,
+  parentIdRef: `${P}.id`,
+  fk: 'ofSourceSeedId' | 'ofJobSourceId' | 'ofJobListSourceId' | 'ofJobPostId',
+  task: PipelineTask
+) {
+  // TS can't narrow the `of*Id` column statically through the runtime `fk`
+  // value, so we cast the EB to a single concrete scope; runtime SQL is
+  // unaffected. Same escape hatch `eligibleForPipelineTask` uses.
+  const ebConcrete = eb as unknown as ExpressionBuilder<DB, 'JobSource'>;
+  return ebConcrete
+    .selectFrom('PipelineState')
+    .select('PipelineState.state')
+    .whereRef(
+      `PipelineState.${fk}` as 'PipelineState.ofJobSourceId',
+      '=',
+      parentIdRef as 'JobSource.id'
+    )
+    .where('PipelineState.task', '=', task)
+    .orderBy('PipelineState.createdAt', 'desc')
+    .orderBy('PipelineState.id', 'desc')
+    .limit(1)
+    .as('state');
 }
 
 export async function listJobPosts(args: {

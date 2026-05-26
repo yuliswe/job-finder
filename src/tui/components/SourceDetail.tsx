@@ -12,6 +12,9 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
         {row.sourceName}
       </Text>
       <Text dimColor wrap='truncate-end'>
+        JobSource id: {row.sourceId}
+      </Text>
+      <Text dimColor wrap='truncate-end'>
         {prettyUrl(row.sourceUrl)}
       </Text>
       <Text>source active: {row.sourceIsActive ? 'yes' : 'no'}</Text>
@@ -24,6 +27,9 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
         {row.listId ? (
           <>
             <Text bold>JobListSource</Text>
+            <Text dimColor wrap='truncate-end'>
+              JobListSource id: {row.listId}
+            </Text>
             <Text dimColor wrap='truncate-end'>
               {prettyUrl(row.listUrl)}
             </Text>

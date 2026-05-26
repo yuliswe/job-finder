@@ -5,14 +5,14 @@ import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
 import { SourceDetail } from 'src/tui/components/SourceDetail.js';
 import { SourceList } from 'src/tui/components/SourceList.js';
-import type { AppTab } from 'src/tui/utils/types.js';
-import { openUrl } from 'src/tui/utils/openUrl.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
   toggleSourceActive,
   type JobPostRow,
   type SourceRow,
 } from 'src/tui/queries.js';
+import { openUrl } from 'src/tui/utils/openUrl.js';
+import type { AppTab } from 'src/tui/utils/types.js';
 
 export function TabView({
   tab,
@@ -103,7 +103,7 @@ export function TabView({
   // Pin the detail pane to a fixed width and let the list expand to fill the
   // rest. Percentage splits caused list rows (padded to ~77 cols) to wrap on
   // narrower terminals, which is the wrap-induced log-update drift class.
-  const DETAIL_WIDTH = 44;
+  const DETAIL_WIDTH = 60;
   // 2 = paddingLeft on the detail box; -1 leaves a column of headroom so we
   // never write a row whose width exactly equals the terminal (which Ink's
   // log-update sometimes counts as overflowing).
