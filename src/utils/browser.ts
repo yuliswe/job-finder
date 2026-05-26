@@ -112,13 +112,43 @@ export async function goToPage(
  * `__name(...)`. We stringify `fn`, drop it in an IIFE that declares `__name`
  * locally, and ship the whole thing as a string so the missing helper resolves
  * at eval-time. `arg` must be JSON-serializable.
+ *
+ * `options.timeoutMs`: cap the eval at `timeoutMs` milliseconds. On timeout
+ * the page is closed (which kills the script context so a runaway page-side
+ * script stops eating CPU) and the call rejects with a clear error. The
+ * surrounding `withBrowserTab` will then try `page.close()` again on its
+ * way out — patchright treats double-close as a no-op so this is safe, but
+ * note that the page is no longer usable after a timeout. Omit `timeoutMs`
+ * (or set it to 0) to keep the original wait-forever behavior.
  */
 export async function pageEval<T, A = undefined>(
   page: Page,
   fn: (arg: A) => T | Promise<T>,
-  arg?: A
+  arg?: A,
+  options?: { timeoutMs?: number }
 ): Promise<T> {
   const argSrc = arg === undefined ? 'undefined' : JSON.stringify(arg);
   const src = `(function () { var __name = function (f) { return f; }; return (${fn.toString()})(${argSrc}); })()`;
-  return page.evaluate(src) as Promise<T>;
+  const evalP = page.evaluate(src) as Promise<T>;
+
+  const timeoutMs = options?.timeoutMs;
+  if (!timeoutMs) return evalP;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutP = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // Close the page to kill the script context. Fire-and-forget — the
+      // rejection happens regardless of whether close succeeds.
+      void page.close().catch(() => {
+        // ignore — page may already be closing
+      });
+      reject(new Error(`pageEval timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([evalP, timeoutP]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }

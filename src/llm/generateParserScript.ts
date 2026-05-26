@@ -470,7 +470,8 @@ async function runSearchJobs(
         divisions: shape.divisions,
         keywords: [],
       },
-    }
+    },
+    { timeoutMs: 60_000 }
   );
 
   if (!run.ok) {
@@ -589,7 +590,8 @@ async function exploreScript(args: {
           console.info = orig.info;
         }
       },
-      { s: script }
+      { s: script },
+      { timeoutMs: 60_000 }
     );
   } catch (err) {
     // page.evaluate itself failed (e.g. before our try/catch could run, such as
@@ -670,7 +672,8 @@ async function probeListFn(
         console.info = orig.info;
       }
     },
-    { s: script, name: fnName }
+    { s: script, name: fnName },
+    { timeoutMs: 60_000 }
   );
 
   if (!run.ok) {

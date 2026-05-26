@@ -25,6 +25,14 @@ lever.co, workday.com, etc.). If web_search yields nothing convincing,
 return an empty string for "url" and explain why in "reason" — that's
 the right answer when truly unknown, not a fabricated URL.
 
+After you return a URL, an automated verifier opens it and checks the
+page body against your summary. If you're told a URL you returned didn't
+match, the company name alone isn't enough to disambiguate — refine your
+next web_search with one or more disambiguating terms: industry /
+business type, city or country, founder or CEO name, flagship product,
+or any distinguishing detail you can infer from context. Don't return
+the same URL again.
+
 ── (B) summary ──────────────────────────────────────────────────────────
 
 Write 2–4 sentences describing what the company does in plain English:

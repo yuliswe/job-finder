@@ -3,12 +3,14 @@ import { createHash } from 'node:crypto';
 import { toJsonSchema } from '@valibot/to-json-schema';
 import * as v from 'valibot';
 
-import { plugin } from 'jobfinder.config.js';
 import type {
   LlmMessage,
   LlmReasoningEffort,
 } from 'src/llm/plugins/interface.js';
+import { OpenRouterPlugin } from 'src/llm/plugins/openRouter.js';
 import { COLOURS, type Terminal } from 'src/utils/terminal';
+
+const plugin = new OpenRouterPlugin();
 
 const schemaNameCache = new WeakMap<v.GenericSchema, string>();
 

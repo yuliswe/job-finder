@@ -17,7 +17,7 @@ import { terminal } from 'src/utils/terminal.js';
  * Companion to {@link webSearchByGoogle}, which drives a Playwright tab to
  * google.com and feeds the SERP text to the LLM. Prefer this one — fewer
  * moving parts, no anti-bot risk. */
-export async function webSearchByLLM<
+export async function webSearchByOpenRouter<
   S extends v.GenericSchema,
   R = v.InferOutput<S>,
 >(args: {

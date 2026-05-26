@@ -378,12 +378,13 @@ export default [
     },
   },
 
-  // jobfinder.config.ts is the single source of truth for build-time config
-  // (API keys, model IDs, plugin selection). It needs to read process.env
-  // directly and benefits from the longer, self-documenting
-  // `const X = process.env.X` form over destructuring.
+  // jobfinder.config.js is the single source of truth for user-editable
+  // runtime config (API keys, model IDs, thresholds). It stays as plain JS
+  // (not TS) so users can edit it without rebuilding, and it reads
+  // process.env directly — the longer `const X = process.env.X` form is
+  // self-documenting and preferred over destructuring here.
   {
-    files: ['jobfinder.config.ts'],
+    files: ['jobfinder.config.js'],
     rules: {
       'no-restricted-syntax': 'off',
       'prefer-destructuring': 'off',

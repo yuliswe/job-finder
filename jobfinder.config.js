@@ -1,6 +1,10 @@
-import { OpenRouterPlugin } from 'src/llm/plugins/openRouter.js';
-
-export const plugin = new OpenRouterPlugin();
+// This file is intentionally plain JavaScript so users can edit it without
+// running a build. It is symlinked into `dist/` by `npm run build:assets`,
+// so changes here take effect on the very next CLI run.
+//
+// Do NOT add imports that depend on the build-time module-resolver alias
+// (e.g. `'src/foo.js'`) — at runtime this file lives at the repo root and
+// Node ESM has no such alias. Keep this file to plain literals + env reads.
 
 /**
  * The OpenRouter API key to use for the LLM calls. If not set, will fall back
@@ -13,6 +17,12 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
  * to env var.
  */
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+/**
+ * Serper API key (https://serper.dev). Used by `webSearchBySerper` to fetch
+ * Google search results as structured JSON without driving a browser tab.
+ */
+export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 /**
  * The model used by the seeding process.

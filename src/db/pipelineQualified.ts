@@ -75,6 +75,24 @@ export function qualifiedForSourcing(_eb: ExpressionBuilder<DB, 'JobSource'>) {
   return ALWAYS_TRUE;
 }
 
+/** True iff the row's latest sourcing state is `'queued'` — used by the
+ * sourcing picker as an OR-override so anything explicitly enqueued is always
+ * processed, even if it falls outside qualified/scope/needed/state filters.
+ * (Literal `'queued'` to avoid a cycle with `src/db/pipelineState.ts`; matches
+ * `PIPELINE_STATE.QUEUED`.) */
+export function previouslyQueuedForSourcing(
+  eb: ExpressionBuilder<DB, 'JobSource'>
+) {
+  return eb.exists(
+    eb
+      .selectFrom('LatestPipelineState')
+      .select('LatestPipelineState.id')
+      .whereRef('LatestPipelineState.ofJobSourceId', '=', 'JobSource.id')
+      .where('LatestPipelineState.task', '=', 'sourcing')
+      .where('LatestPipelineState.state', 'in', ['queued', 'user_interrupted'])
+  );
+}
+
 /** Listing needs a URL to crawl — that's its row-level data prereq. JobSources
  * without a URL (e.g. seeded by name only) wait here until the column is
  * filled in. */

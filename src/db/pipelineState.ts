@@ -478,9 +478,28 @@ let interruptHandlersInstalled = false;
 function installInterruptHandlers(): void {
   if (interruptHandlersInstalled) return;
   interruptHandlersInstalled = true;
-  // Use `process.once` so a second Ctrl+C kills immediately.
+  // Signal-driven exits — flush in-flight rows as `user_interrupted` then
+  // exit. `process.once` so a second Ctrl+C reverts to Node's default kill.
   process.once('SIGINT', () => handleInterrupt(130));
   process.once('SIGTERM', () => handleInterrupt(143));
+
+  // Detached rejections / synchronous throws from outside our await chains
+  // (e.g. the OpenRouter SDK's APIPromise wrapper forks $do() into two
+  // promise chains and only the awaited one is observed — the sibling
+  // chain's rejection surfaces here even though our retry loop already
+  // handled the real error). Log loudly and keep the loop running; rows
+  // are still processed to a definite outcome by their own await chains.
+  process.on('unhandledRejection', err => {
+    const e = err as { stack?: string } | undefined;
+
+    terminal.warn(
+      `unhandledRejection (continuing): ${e?.stack ?? String(err)}`
+    );
+  });
+
+  process.on('uncaughtException', err => {
+    terminal.warn(`uncaughtException (continuing): ${err.stack ?? err}`);
+  });
 }
 
 function handleInterrupt(exitCode: number): void {

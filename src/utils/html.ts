@@ -10,41 +10,46 @@ import { pageEval } from 'src/utils/browser.js';
  * can still write reliable selectors.
  */
 export async function cleanHtmlForLlm(page: Page): Promise<string> {
-  const html = await pageEval(page, () => {
-    const root = document.body.cloneNode(true) as HTMLElement;
+  const html = await pageEval(
+    page,
+    () => {
+      const root = document.body.cloneNode(true) as HTMLElement;
 
-    for (const el of root.querySelectorAll(
-      'script, style, noscript, svg, link, meta, template'
-    )) {
-      el.remove();
-    }
+      for (const el of root.querySelectorAll(
+        'script, style, noscript, svg, link, meta, template'
+      )) {
+        el.remove();
+      }
 
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-    const comments: ChildNode[] = [];
-    let n: Node | null;
-    while ((n = walker.nextNode())) comments.push(n as ChildNode);
-    for (const c of comments) c.remove();
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+      const comments: ChildNode[] = [];
+      let n: Node | null;
+      while ((n = walker.nextNode())) comments.push(n as ChildNode);
+      for (const c of comments) c.remove();
 
-    for (const el of root.querySelectorAll('*')) {
-      for (const attr of [...el.attributes]) {
-        if (attr.name.startsWith('on') || attr.name === 'style') {
-          el.removeAttribute(attr.name);
-          continue;
-        }
+      for (const el of root.querySelectorAll('*')) {
+        for (const attr of [...el.attributes]) {
+          if (attr.name.startsWith('on') || attr.name === 'style') {
+            el.removeAttribute(attr.name);
+            continue;
+          }
 
-        if (
-          (attr.name === 'src' ||
-            attr.name === 'srcset' ||
-            attr.name === 'href') &&
-          /^data:/i.test(attr.value)
-        ) {
-          el.setAttribute(attr.name, 'data:...');
+          if (
+            (attr.name === 'src' ||
+              attr.name === 'srcset' ||
+              attr.name === 'href') &&
+            /^data:/i.test(attr.value)
+          ) {
+            el.setAttribute(attr.name, 'data:...');
+          }
         }
       }
-    }
 
-    return root.innerHTML;
-  });
+      return root.innerHTML;
+    },
+    undefined,
+    { timeoutMs: 10_000 }
+  );
 
   return html.replace(/\s+/g, ' ').trim();
 }

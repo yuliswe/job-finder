@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
+import type { BrowserContext } from 'patchright';
 
 import { db } from 'src/db/index.js';
 import {
@@ -12,16 +13,18 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
+  previouslyQueuedForSourcing,
   inScopeForSourcing,
   neededForSourcing,
   qualifiedForSourcing,
 } from 'src/db/pipelineQualified.js';
-import { evaluateCompany } from 'src/llm/evaluateCompany.js';
 import { findCompanyUrl } from 'src/llm/findCompanyUrl.js';
+import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserInterests } from 'src/utils/userInterests.js';
 
-/** Soft cap on parallel LLM calls so we don't hammer the provider. */
+/** Soft cap on parallel LLM calls so we don't hammer the provider. Browser
+ * tab concurrency is independently capped inside `withBrowserTab`. */
 const LLM_CONCURRENCY = 10;
 const concurrency = pLimit(LLM_CONCURRENCY);
 
@@ -34,7 +37,7 @@ type SourcingOptions = {
 export function createSourcingCommand(): Command {
   return new Command('sourcing')
     .description(
-      'For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL and fill it in.'
+      'For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in.'
     )
     .addOption(
       new Option(
@@ -52,10 +55,15 @@ export function createSourcingCommand(): Command {
       '--job-source-id <id>',
       'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: SourcingOptions) => runSourcing(opts));
+    .action((opts: SourcingOptions) =>
+      withBrowserInstance(context => runSourcing(context, opts))
+    );
 }
 
-async function runSourcing(opts: SourcingOptions): Promise<void> {
+async function runSourcing(
+  context: BrowserContext,
+  opts: SourcingOptions
+): Promise<void> {
   if (opts.jobSourceId) {
     await enqueuePipelineTask({
       task: 'sourcing',
@@ -78,14 +86,24 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
     mode,
   });
 
-  let query = db
+  // Picker predicate = (qualified ∧ inScope [∧ needed] [∧ stateFilter])
+  //   ∨ (row is currently queued for sourcing).
+  // The OR override means anything explicitly enqueued is always processed,
+  // even if it now falls outside qualified/scope/needed/state filters.
+  const query = db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
-    .where(qualifiedForSourcing)
-    .where(inScopeForSourcing);
-
-  if (mode !== 'all') query = query.where(neededForSourcing);
-  if (stateFilter) query = query.where(stateFilter);
+    .where(eb =>
+      eb.or([
+        eb.and([
+          qualifiedForSourcing(eb),
+          inScopeForSourcing(eb),
+          ...(mode !== 'all' ? [neededForSourcing(eb)] : []),
+          ...(stateFilter ? [stateFilter(eb)] : []),
+        ]),
+        previouslyQueuedForSourcing(eb),
+      ])
+    );
 
   const sources = opts.jobSourceId
     ? await db
@@ -106,7 +124,7 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
 
   const results = await Promise.all(
     sources.map(source =>
-      concurrency(() => sourceOneJobSource({ source, interests }))
+      concurrency(() => sourceOneJobSource({ source, interests, context }))
     )
   );
 
@@ -117,42 +135,26 @@ async function runSourcing(opts: SourcingOptions): Promise<void> {
 async function sourceOneJobSource(args: {
   source: { id: string; name: string; url: string | null };
   interests: string;
+  context: BrowserContext;
 }): Promise<{ urlFilled: number } | undefined> {
-  const { source, interests } = args;
+  const { source, interests, context } = args;
   return processOne({
     task: 'sourcing',
     entity: { ofJobSourceId: source.id },
     label: source.name,
     work: async (): Promise<{ urlFilled: number }> => {
-      // URL is already set — only the research fields (summary / interest)
-      // need filling. Skip the URL-discovery question entirely so a flaky
-      // web search can't corrupt a previously-correct URL.
-      if (source.url != null) {
-        const research = await evaluateCompany({
-          name: source.name,
-          url: source.url,
-          interests,
-        });
-
-        await db
-          .updateTable('JobSource')
-          .set({
-            summary: research.summary,
-            interestScore: research.interestScore,
-            interestScoreReason: research.interestScoreReason,
-          })
-          .where('id', '=', source.id)
-          .execute();
-
-        await recordPipelineState({
-          task: 'sourcing',
-          state: PIPELINE_STATE.DONE,
-          entity: { ofJobSourceId: source.id },
-        });
-        return { urlFilled: 0 };
-      }
-
-      const evaluation = await findCompanyUrl({ name: source.name, interests });
+      // URL discovery + verification all happens inside `findCompanyUrl`:
+      // its `validate` opens each candidate URL in the browser and asks a
+      // fresh-memory LLM whether the page matches the summary. Mismatches
+      // feed back into the same loop so the LLM sees its rejected URLs in
+      // conversation history and refines the next search. We always run it
+      // — even when `source.url` is already set — so that the picker's
+      // selection drives a fresh verify-and-refresh pass.
+      const evaluation = await findCompanyUrl({
+        name: source.name,
+        interests,
+        context,
+      });
 
       const evalFields = {
         summary: evaluation.summary,
@@ -160,31 +162,10 @@ async function sourceOneJobSource(args: {
         interestScoreReason: evaluation.interestScoreReason,
       };
 
-      // No URL — still record summary + interest signal on the current
-      // row, then bail out with no_source_found. Nothing to merge against.
-      if (evaluation.url == null) {
-        await db
-          .updateTable('JobSource')
-          .set(evalFields)
-          .where('id', '=', source.id)
-          .execute();
-
-        await recordPipelineState({
-          task: 'sourcing',
-          state: PIPELINE_STATE.NO_SOURCE_FOUND,
-          entity: { ofJobSourceId: source.id },
-        });
-        return { urlFilled: 0 };
-      }
-
-      // URL UNIQUE conflict = the LLM resolved a different name to a URL
-      // that another JobSource already holds (e.g. "Acme" + "Acme Inc." →
-      // "acme.com"). Drop the current row (its children cascade —
-      // listings/posts/state) but DO NOT touch the survivor's columns:
-      // the LLM's reasoning for this call was framed around `source.name`,
-      // not the survivor's name, so its summary/interestScore/reason are
-      // unreliable signal for the survivor. The survivor keeps whatever
-      // values it got from its own (correctly-named) sourcing run.
+      // URL UNIQUE conflict: another JobSource already holds this URL.
+      // Drop the current row (its children cascade); the survivor was
+      // sourced under its own (correctly-named) call so its data stays
+      // canonical.
       const existing = await db
         .selectFrom('JobSource')
         .select('id')
@@ -198,6 +179,7 @@ async function sourceOneJobSource(args: {
         terminal.log(
           `Dropped "${source.name}" — its url ${evaluation.url} is already held by JobSource ${existing.id}.`
         );
+
         return { urlFilled: 0 };
       }
 

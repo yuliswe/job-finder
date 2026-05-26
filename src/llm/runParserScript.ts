@@ -112,7 +112,8 @@ async function callListFn(
 
       return fn();
     },
-    { s: script, name: fnName }
+    { s: script, name: fnName },
+    { timeoutMs: 60_000 }
   );
 
   if (!Array.isArray(value)) {
@@ -141,7 +142,8 @@ async function callSearchJobs(
       const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
       return await fn(a);
     },
-    { s: script, a: args }
+    { s: script, a: args },
+    { timeoutMs: 60_000 }
   );
 
   if (!Array.isArray(value)) {

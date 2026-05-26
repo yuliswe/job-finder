@@ -70,7 +70,7 @@ For each unprocessed `JobSource`, open the company URL and BFS the same-domain l
 Requires:
 
 - A locally installed Chrome/Chromium (run `npx patchright install chromium` once if not).
-- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+- `LLM_LISTING_MODEL` set in `jobfinder.config.js`.
 
 ## `pipeline scripting`
 
@@ -83,7 +83,7 @@ For each unprocessed `JobListSource` (i.e. one whose `parserScript` has not yet 
 Requires:
 
 - A locally installed Chrome/Chromium.
-- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+- `LLM_LISTING_MODEL` set in `jobfinder.config.js`.
 
 ## `pipeline run-scripts`
 
@@ -96,7 +96,7 @@ For every `JobListSource` with a validated `parserScript`, reload the listing pa
 Requires:
 
 - A locally installed Chrome/Chromium.
-- `LLM_LISTING_MODEL` set in `jobfinder.config.ts`.
+- `LLM_LISTING_MODEL` set in `jobfinder.config.js`.
 
 ## `pipeline viewing`
 
@@ -115,7 +115,7 @@ jobfinder pipeline viewing --all
 Requires:
 
 - A locally installed Chrome/Chromium.
-- `LLM_VIEWING_MODEL` set in `jobfinder.config.ts`.
+- `LLM_VIEWING_MODEL` set in `jobfinder.config.js`.
 
 ## `pipeline sourcing`
 
@@ -149,7 +149,7 @@ jobfinder pipeline run-scripts --job-list-source-id 0192...abcd
 Requires:
 
 - A locally installed Chrome/Chromium (run `npx puppeteer browsers install chrome` once if not).
-- `LLM_SOURCING_MODEL` set in `jobfinder.config.ts`.
+- `LLM_SOURCING_MODEL` set in `jobfinder.config.js`.
 
 ## `pipeline seeding`
 
