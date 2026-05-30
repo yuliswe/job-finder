@@ -59,10 +59,15 @@ export function createRunPipelineCommand(): Command {
 }
 
 async function runAllLoops(): Promise<void> {
+  // `running: true` at init is a "not yet completed first iteration" sentinel.
+  // Without it, a fast no-browser task (evaluate) can finish its first
+  // iteration before the browser-using tasks have even returned from
+  // `withBrowserInstance`'s chromium launch — making the drain check pass
+  // against state that's actually "hasn't started" rather than "drained".
   const state = Object.fromEntries(
     TASKS.map(name => [
       name,
-      { running: false, lastProcessed: 0, lastSeenGen: 0 },
+      { running: true, lastProcessed: 0, lastSeenGen: 0 },
     ])
   ) as Record<TaskName, TaskState>;
 

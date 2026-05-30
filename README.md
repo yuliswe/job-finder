@@ -165,12 +165,12 @@ Requires:
 - `LLM_SEEDING_MODEL` set in `src/llm/config.ts` (empty by default).
 - `seeds/interests.md` populated with the user's job-search interests.
 
-## `pipeline run-pipeline`
+## `run-pipeline`
 
 Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop re-iterates immediately when its previous iteration processed ≥1 row, and sleeps 5s only when it found nothing to do. The orchestrator exits once every task has finished an idle iteration with no productive work happening anywhere in between — so it's the right thing to leave running unattended after `pipeline seeding` + `pipeline approve-seeds`.
 
 ```bash
-jobfinder pipeline run-pipeline
+jobfinder run-pipeline
 ```
 
 Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them later with the relevant subcommand and `--include-failed` or `--all`.
