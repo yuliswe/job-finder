@@ -12,6 +12,17 @@ import { openFile } from 'src/tui/utils/openFile.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
 import { buildCvFilename } from 'src/utils/cvFilename.js';
 import { renderCvPdf } from 'src/utils/renderCvPdf.js';
+import type { Terminal } from 'src/utils/terminal.js';
+
+/** How many feedbackLoop log lines to surface under the "generating…" status
+ * line. Newest at the bottom; older lines are dropped to keep the footer
+ * compact when retries pile up. */
+const MAX_PDF_LOG_LINES = 6;
+
+type PdfLogLine = {
+  level: 'log' | 'warn' | 'error' | 'llmRequest' | 'llmResponse';
+  msg: string;
+};
 
 /** Full-screen view of a single JobPost. Opened via Enter on the list,
  * dismissed via Esc/q. Summary + scoring + skill breakdown + description all
@@ -35,11 +46,14 @@ export function JobPostDetailScreen({
     | { kind: 'error'; message: string }
   >({ kind: 'idle' });
 
+  const [pdfLog, setPdfLog] = useState<PdfLogLine[]>([]);
+
   // Reset scroll AND PDF status when the row changes (defensive — usually
   // unmounted/remounted).
   useEffect(() => {
     setScroll(0);
     setPdfStatus({ kind: 'idle' });
+    setPdfLog([]);
   }, [row.id]);
 
   // The fixed top/bottom chrome is intentionally minimal so the wrapped
@@ -110,7 +124,7 @@ export function JobPostDetailScreen({
       // Ignore repeat presses while a previous run is in flight — the LLM
       // call + chromium launch take seconds.
       if (pdfStatus.kind === 'generating') return;
-      void generateAndOpenCvPdf(row, setPdfStatus);
+      void generateAndOpenCvPdf(row, setPdfStatus, setPdfLog);
       return;
     }
   });
@@ -158,7 +172,7 @@ export function JobPostDetailScreen({
         </Text>
       </Box>
       {pdfStatus.kind !== 'idle' && (
-        <Box>
+        <Box flexDirection='column'>
           {pdfStatus.kind === 'generating' && (
             <Text color='yellow'>generating tailored CV pdf…</Text>
           )}
@@ -168,6 +182,12 @@ export function JobPostDetailScreen({
           {pdfStatus.kind === 'error' && (
             <Text color='red'>pdf failed: {pdfStatus.message}</Text>
           )}
+          {pdfLog.map((line, i) => (
+            <Text key={i} color={colorForLogLevel(line.level)} dimColor>
+              {'  '}
+              {truncate(line.msg, Math.max(20, termCols - 4))}
+            </Text>
+          ))}
         </Box>
       )}
     </Box>
@@ -187,9 +207,19 @@ async function generateAndOpenCvPdf(
       | { kind: 'generating' }
       | { kind: 'opened'; path: string }
       | { kind: 'error'; message: string }
-  ) => void
+  ) => void,
+  setLog: React.Dispatch<React.SetStateAction<PdfLogLine[]>>
 ): Promise<void> {
   setStatus({ kind: 'generating' });
+  setLog([]);
+  const logger = makeCapturingLogger(setLog);
+  // Stage milestones make the slow happy path (LLM 30-60s + chromium 1-2s)
+  // legible — without these the user sees only the static "generating…"
+  // line, since feedbackLoop is silent unless something fails.
+  const stage = (msg: string): void => {
+    logger.log(msg);
+  };
+
   try {
     if (!row.description) {
       throw new Error(
@@ -203,7 +233,11 @@ async function generateAndOpenCvPdf(
       );
     }
 
-    const { html } = await fillCvTemplate({
+    stage(
+      `calling LLM (${row.skillRequirements.length} skills, ${row.description.length.toLocaleString()} chars of JD)…`
+    );
+
+    const { html, sanitizations } = await fillCvTemplate({
       skillRequirements: row.skillRequirements,
       job: {
         title: row.title,
@@ -211,7 +245,14 @@ async function generateAndOpenCvPdf(
         location: row.location,
         isRemote: row.isRemote,
       },
+      logger,
     });
+
+    const sanitTotal = Object.values(sanitizations).reduce((a, b) => a + b, 0);
+
+    stage(
+      `LLM done: ${html.length.toLocaleString()} chars, ${sanitTotal} ATS char replacement(s)`
+    );
 
     const format = inferPageFormat(row.location);
     const outputPath = join(
@@ -219,7 +260,9 @@ async function generateAndOpenCvPdf(
       buildCvFilename({ company: row.company, title: row.title })
     );
 
+    stage(`rendering PDF (${format}) → ${outputPath}`);
     const { path } = await renderCvPdf({ html, outputPath, format });
+    stage(`opening ${path}`);
     openFile(path);
     setStatus({ kind: 'opened', path });
   } catch (err) {
@@ -228,6 +271,48 @@ async function generateAndOpenCvPdf(
       message: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+/** Build a Terminal-shaped logger that pushes each call into the TUI's
+ * pdfLog state instead of writing to stdout (which would corrupt ink's
+ * render). Caps the buffer at `MAX_PDF_LOG_LINES`, newest at the bottom. */
+function makeCapturingLogger(
+  setLog: React.Dispatch<React.SetStateAction<PdfLogLine[]>>
+): Terminal {
+  const push = (level: PdfLogLine['level']) => (msg: string) => {
+    setLog(prev => {
+      const next = [...prev, { level, msg }];
+      return next.length > MAX_PDF_LOG_LINES
+        ? next.slice(next.length - MAX_PDF_LOG_LINES)
+        : next;
+    });
+  };
+
+  return {
+    log: push('log'),
+    warn: push('warn'),
+    error: push('error'),
+    llmRequest: push('llmRequest'),
+    llmResponse: push('llmResponse'),
+  };
+}
+
+function colorForLogLevel(level: PdfLogLine['level']): string {
+  if (level === 'error') return 'red';
+  if (level === 'warn') return 'yellow';
+  if (level === 'llmRequest') return 'gray';
+  if (level === 'llmResponse') return 'cyan';
+  return 'white';
+}
+
+/** Trim `s` to fit `width` (incl. ellipsis). Keeps the head of the message
+ * so the level and "what we tried" are visible — usually more useful than
+ * the trailing detail when multiple lines stack up. */
+function truncate(s: string, width: number): string {
+  // Collapse newlines so multi-line log strings don't blow up the footer.
+  const flat = s.replace(/\s+/g, ' ').trim();
+  if (flat.length <= width) return flat;
+  return flat.slice(0, Math.max(1, width - 1)) + '…';
 }
 
 /** US/Canada → Letter, everything else → A4. Same heuristic career-ops

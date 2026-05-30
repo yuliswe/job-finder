@@ -4,7 +4,7 @@ import { LLM_CV_TEMPLATE_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import type { SkillRequirements } from 'src/llm/viewJobPost.js';
 import { FILL_CV_TEMPLATE_SYSTEM_PROMPT } from 'src/prompts/fillCvTemplate.js';
-import { terminal } from 'src/utils/terminal.js';
+import { terminal, type Terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserCvTemplate } from 'src/utils/userInterests.js';
 
 const MAX_ATTEMPTS = 2;
@@ -38,8 +38,12 @@ export async function fillCvTemplate(args: {
     location?: string | null;
     isRemote?: number | null;
   };
+  /** Where feedbackLoop's retry/failure messages go. Defaults to the global
+   * `terminal` (stdout). The TUI passes a capturing logger so progress shows
+   * inside the ink screen instead of corrupting the render. */
+  logger?: Terminal;
 }): Promise<FillCvTemplateResult> {
-  const { skillRequirements, job } = args;
+  const { skillRequirements, job, logger = terminal } = args;
 
   const [cv, template] = await Promise.all([getUserCV(), getUserCvTemplate()]);
 
@@ -100,7 +104,7 @@ Fill the template now and return { "html": "..." }.`,
     maxAttempts: MAX_ATTEMPTS,
     model: LLM_CV_TEMPLATE_MODEL,
     metadata: { configKey: 'LLM_CV_TEMPLATE_MODEL' },
-    logger: terminal,
+    logger,
     validate: parsed => {
       const trimmed = parsed.html.trim();
       if (!/^<!DOCTYPE html>/i.test(trimmed)) {

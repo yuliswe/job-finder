@@ -30,7 +30,7 @@ export const SERPER_API_KEY = process.env.SERPER_API_KEY;
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './jin-seeds';
+export const SEEDS_DIR = './jin-seeds.local';
 
 /**
  * Path to the SQLite database file. May be relative (to the CWD where you
@@ -69,7 +69,7 @@ export const LLM_SOURCING_MODEL = 'mistralai/mistral-nemo';
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
+export const LLM_LISTING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -79,8 +79,8 @@ export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
-export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
+export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
+export const LLM_CODING_MODEL_SMARTER = 'deepseek/deepseek-v4-pro';
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -91,7 +91,7 @@ export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
+export const LLM_VIEWING_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -103,7 +103,7 @@ export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
  * - low input cost
  * - low input cost
  */
-export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
+export const LLM_EVALUATION_MODEL = 'deepseek/deepseek-v4-flash';
 
 /**
  * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
@@ -124,7 +124,7 @@ export const LLM_CV_TEMPLATE_MODEL = 'deepseek/deepseek-v4-pro';
  * (resolved against the CWD where you run `jobfinder`) or absolute. Default:
  * `'./resumes'`.
  */
-export const RESUME_OUTPUT_DIR = './resumes-out';
+export const RESUME_OUTPUT_DIR = './resumes.out';
 
 /**
  * Whether to use a headless browser when scraping websites.
@@ -158,7 +158,7 @@ export const BROWSER_NAVIGATION_MIN_WAIT_MS = 5_000;
  * After sourcing, companies less than this interest score are tossed out to
  * reduce spam.
  */
-export const PIPELINE_LISTING_MIN_INTEREST_SCORE = 0.75;
+export const PIPELINE_LISTING_MIN_INTEREST_SCORE = 0.5;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum depth
