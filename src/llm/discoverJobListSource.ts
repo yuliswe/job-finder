@@ -42,7 +42,13 @@ export async function findJobListPage(args: {
   const { context, startUrl } = args;
 
   const visited = new Set<string>();
-  const queue: { url: string; depth: number }[] = [];
+  // Best-first priority queue: sort descending by `score` on every insert
+  // so `shift()` always returns the currently-most-promising URL.
+  // Cross-page comparison: a high-scoring child of an earlier page wins
+  // over a low-scoring child of a later page. Sort-on-insert is O(n log n)
+  // per insert, but n is bounded by PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE
+  // (50 by default), so a heap library would be over-engineering.
+  const queue: { url: string; depth: number; score: number }[] = [];
 
   const normalizedStart = normalizeUrl(startUrl);
   if (!normalizedStart) {
@@ -50,22 +56,25 @@ export async function findJobListPage(args: {
     return { kind: 'not_found' };
   }
 
-  queue.push({ url: normalizedStart, depth: 0 });
+  // Root is unscored — it's the source the user gave us. Use 1.0 so it's
+  // always processed first (queue is empty anyway, but this stays
+  // consistent if the caller ever pre-seeds extra URLs).
+  queue.push({ url: normalizedStart, depth: 0, score: 1 });
 
   while (queue.length > 0) {
     if (visited.size >= PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE) {
       terminal.warn(
-        `BFS node budget exhausted (${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE} pages visited) for ${normalizedStart} — giving up`
+        `Priority-queue node budget exhausted (${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE} pages visited) for ${normalizedStart} — giving up`
       );
       break;
     }
 
-    const { url, depth } = queue.shift()!;
+    const { url, depth, score } = queue.shift()!;
     if (visited.has(url)) continue;
     visited.add(url);
 
     terminal.log(
-      `[listing BFS depth=${depth} visited=${visited.size}/${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE}] ${url}`
+      `[listing PQ depth=${depth} score=${score.toFixed(2)} visited=${visited.size}/${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE}] ${url}`
     );
 
     let page: PageSnapshot;
@@ -124,12 +133,24 @@ export async function findJobListPage(args: {
     }
 
     if (depth < PIPELINE_LISTING_BFS_MAX_DEPTH) {
-      for (const raw of decision.candidateLinks) {
-        const norm = normalizeUrl(raw);
+      let enqueued = 0;
+      for (const candidate of decision.candidateLinks) {
+        const norm = normalizeUrl(candidate.url);
         if (!norm) continue;
         if (visited.has(norm)) continue;
-        queue.push({ url: norm, depth: depth + 1 });
+
+        queue.push({
+          url: norm,
+          depth: depth + 1,
+          score: candidate.score,
+        });
+
+        enqueued++;
       }
+
+      // Re-sort the whole queue: a high-scoring new entry must jump ahead
+      // of stale lower-scoring entries from earlier pages.
+      if (enqueued > 0) queue.sort((a, b) => b.score - a.score);
     }
   }
 
@@ -148,7 +169,7 @@ async function classifyAndRankLinks(args: {
 }): Promise<{
   isJobListingPage: boolean;
   jobPostUrls: { url: string; title: string }[];
-  candidateLinks: string[];
+  candidateLinks: { url: string; score: number }[];
   abortSearch: boolean;
   abortReason: string;
   reason: string;
@@ -195,9 +216,22 @@ ${page.links.join('\n')}`,
         )
       ),
       candidateLinks: v.pipe(
-        v.array(v.string()),
+        v.array(
+          v.object({
+            url: v.pipe(
+              v.string(),
+              v.description('URL copied verbatim FROM THE LINKS LIST above.')
+            ),
+            score: v.pipe(
+              v.number(),
+              v.description(
+                'Probability in [0, 1] that this URL is — or leads to — the listing page. The crawler pops the highest-scored URL across the entire search next, so use the full range honestly (see the system prompt for the scale).'
+              )
+            ),
+          })
+        ),
         v.description(
-          'URLs copied verbatim FROM THE LINKS LIST above that are most likely to lead to the company careers/jobs page. Order them most-likely first. Empty only if this page IS the listing page, you are aborting the search, or there are truly no plausible candidates.'
+          'URLs copied verbatim FROM THE LINKS LIST above, each with a likelihood score. Order does not matter — the crawler sorts by score. Empty only if this page IS the listing page, you are aborting the search, or there are truly no plausible candidates.'
         )
       ),
       abortSearch: v.pipe(
@@ -242,14 +276,25 @@ ${page.links.join('\n')}`,
         };
       }
 
-      const hallucinated = parsed.candidateLinks.filter(
-        l => !linksOnPageSet.has(l)
-      );
+      const hallucinated = parsed.candidateLinks
+        .map(c => c.url)
+        .filter(u => !linksOnPageSet.has(u));
 
       if (hallucinated.length > 0) {
         return {
           valid: false,
           feedback: `candidateLinks must be copied verbatim FROM THE LINKS LIST. These ${hallucinated.length} are not in the list and look invented: ${JSON.stringify(hallucinated.slice(0, 5))}. Pick only URLs that appear in the provided list.`,
+        };
+      }
+
+      const outOfRange = parsed.candidateLinks.filter(
+        c => !Number.isFinite(c.score) || c.score < 0 || c.score > 1
+      );
+
+      if (outOfRange.length > 0) {
+        return {
+          valid: false,
+          feedback: `Every candidateLinks.score must be a finite number in [0, 1]. Out-of-range scores: ${JSON.stringify(outOfRange.slice(0, 5))}.`,
         };
       }
 
