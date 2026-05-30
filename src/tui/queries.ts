@@ -109,6 +109,12 @@ export type SourceRow = {
   /** Mirrors `listIsActive` — strict JobListSource.isActive, `null` when the
    * source has no JobListSource yet. */
   isActive: number | null;
+  /** True iff the source was either deactivated OR sourcing scored it below
+   * `PIPELINE_LISTING_MIN_INTEREST_SCORE`. Null-score rows (sourcing hasn't
+   * completed yet) are NOT considered out-of-scope — they're surfaced as
+   * backlog regardless of the toggle. The TUI uses this to dim out-of-scope
+   * rows when they're shown via `includeOutOfScope`. */
+  isOutOfScopeForListing: boolean;
 };
 
 export type ActivityRow = {
@@ -431,8 +437,19 @@ function parseJsonArray<T>(json: string | null): T[] | null {
   }
 }
 
+/** Sources-tab scope filter:
+ *   - `'in'`  → only sources that are in-scope for listing (active + score
+ *               above threshold), plus null-score "pending sourcing" rows.
+ *               Default; matches the original TUI behavior.
+ *   - `'all'` → above PLUS out-of-scope rows (low-interest + inactive),
+ *               which the table renders dim.
+ *   - `'out'` → only out-of-scope rows (low-interest OR inactive). Useful
+ *               for auditing what the listing stage is skipping. */
+export type SourcesScopeFilter = 'in' | 'all' | 'out';
+
 export async function listSources(args: {
   sort: SourceSortKey;
+  scope?: SourcesScopeFilter;
 }): Promise<SourceRow[]> {
   // One row per JobSource. approve-seeds promotes SourceSeed names into
   // JobSource rows (url=null until sourcing fills it in), so there's no
@@ -444,42 +461,44 @@ export async function listSources(args: {
   // scalar subquery so it counts every relevant post under the source
   // regardless of which JobListSource it belongs to. Threshold gates posts
   // the same way the viewing bar / SourceJobsScreen do.
-  const { sort } = args;
-  const rows = await db
-    .selectFrom('JobSource')
-    .leftJoin(
-      eb =>
-        eb
-          .selectFrom('JobListSource')
-          .select([
-            'JobListSource.id as id',
-            'JobListSource.ofJobSourceId as ofJobSourceId',
-            'JobListSource.url as url',
-            'JobListSource.isActive as isActive',
-            'JobListSource.parserScript as parserScript',
-            'JobListSource.locations as locations',
-            'JobListSource.divisions as divisions',
-          ])
-          .where(eb2 =>
-            eb2(
-              'JobListSource.createdAt',
-              '=',
-              eb2
-                .selectFrom('JobListSource as inner')
-                .select(eb3 => eb3.fn.max('inner.createdAt').as('m'))
-                .whereRef(
-                  'inner.ofJobSourceId',
-                  '=',
-                  'JobListSource.ofJobSourceId'
-                )
-            )
+  const { sort, scope = 'in' } = args;
+  let query = db.selectFrom('JobSource').leftJoin(
+    eb =>
+      eb
+        .selectFrom('JobListSource')
+        .select([
+          'JobListSource.id as id',
+          'JobListSource.ofJobSourceId as ofJobSourceId',
+          'JobListSource.url as url',
+          'JobListSource.isActive as isActive',
+          'JobListSource.parserScript as parserScript',
+          'JobListSource.locations as locations',
+          'JobListSource.divisions as divisions',
+        ])
+        .where(eb2 =>
+          eb2(
+            'JobListSource.createdAt',
+            '=',
+            eb2
+              .selectFrom('JobListSource as inner')
+              .select(eb3 => eb3.fn.max('inner.createdAt').as('m'))
+              .whereRef(
+                'inner.ofJobSourceId',
+                '=',
+                'JobListSource.ofJobSourceId'
+              )
           )
-          .as('list'),
-      join => join.onRef('list.ofJobSourceId', '=', 'JobSource.id')
-    )
-    // Hide low-interest companies from the TUI. Null score = not yet
-    // sourced — still surface those so the user can see backlog progress.
-    .where(eb =>
+        )
+        .as('list'),
+    join => join.onRef('list.ofJobSourceId', '=', 'JobSource.id')
+  );
+
+  // Default ('in'): hide low-interest. Null score = not yet sourced — still
+  // surface those so the user can see backlog progress. 'all' drops the
+  // low-interest filter. 'out' inverts: only rows that are out-of-scope
+  // for listing — low-interest OR deactivated.
+  if (scope === 'in') {
+    query = query.where(eb =>
       eb.or([
         eb('JobSource.interestScore', 'is', null),
         eb(
@@ -488,7 +507,24 @@ export async function listSources(args: {
           PIPELINE_LISTING_MIN_INTEREST_SCORE
         ),
       ])
-    )
+    );
+  } else if (scope === 'out') {
+    query = query.where(eb =>
+      eb.or([
+        eb('JobSource.isActive', '!=', Bool.True),
+        eb.and([
+          eb('JobSource.interestScore', 'is not', null),
+          eb(
+            'JobSource.interestScore',
+            '<',
+            PIPELINE_LISTING_MIN_INTEREST_SCORE
+          ),
+        ]),
+      ])
+    );
+  }
+
+  const rows = await query
     .select(eb => [
       'JobSource.id as sourceId',
       'JobSource.name as sourceName',
@@ -531,22 +567,31 @@ export async function listSources(args: {
     })
     .execute();
 
-  return rows.map(r => ({
-    sourceId: r.sourceId,
-    sourceName: r.sourceName,
-    sourceUrl: r.sourceUrl ?? '-',
-    sourceInterestScore: r.sourceInterestScore,
-    sourceSummary: r.sourceSummary,
-    sourceIsActive: r.sourceIsActive ?? 0,
-    listId: r.listId,
-    listUrl: r.listUrl,
-    listIsActive: r.listIsActive ?? null,
-    listLocations: r.listLocations,
-    listDivisions: r.listDivisions,
-    hasScript: r.listParserScript ? 1 : 0,
-    jobPostCount: Number(r.jobPostCount ?? 0),
-    isActive: r.listIsActive ?? null,
-  }));
+  return rows.map(r => {
+    const sourceIsActive = r.sourceIsActive ?? 0;
+    const score = r.sourceInterestScore;
+    const isOutOfScopeForListing =
+      sourceIsActive !== 1 ||
+      (score != null && score < PIPELINE_LISTING_MIN_INTEREST_SCORE);
+
+    return {
+      sourceId: r.sourceId,
+      sourceName: r.sourceName,
+      sourceUrl: r.sourceUrl ?? '-',
+      sourceInterestScore: score,
+      sourceSummary: r.sourceSummary,
+      sourceIsActive,
+      listId: r.listId,
+      listUrl: r.listUrl,
+      listIsActive: r.listIsActive ?? null,
+      listLocations: r.listLocations,
+      listDivisions: r.listDivisions,
+      hasScript: r.listParserScript ? 1 : 0,
+      jobPostCount: Number(r.jobPostCount ?? 0),
+      isActive: r.listIsActive ?? null,
+      isOutOfScopeForListing,
+    };
+  });
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {

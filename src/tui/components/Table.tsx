@@ -26,6 +26,10 @@ export type TableProps<T> = {
   emptyMessage: string;
   /** When false, suppress the row-selection highlight. */
   active?: boolean;
+  /** Per-row dim predicate. Rows where this returns true render in dim color
+   * (still inversed when selected, so the cursor stays legible). Used by the
+   * Sources tab to mark out-of-scope-for-listing rows. */
+  isDim?: (r: T) => boolean;
 };
 
 /**
@@ -47,6 +51,7 @@ export function Table<T>({
   getKey,
   emptyMessage,
   active = true,
+  isDim,
 }: TableProps<T>) {
   if (rows.length === 0) return <Text dimColor>{emptyMessage}</Text>;
 
@@ -78,6 +83,7 @@ export function Table<T>({
           columns={columns}
           row={r}
           selected={active && i === localCursor}
+          dim={isDim?.(r) ?? false}
           w={w}
         />
       ))}
@@ -95,15 +101,17 @@ function Row<T>({
   columns,
   row,
   selected,
+  dim,
   w,
 }: {
   columns: Column<T>[];
   row: T;
   selected: boolean;
+  dim: boolean;
   w: number[];
 }) {
   return (
-    <Text inverse={selected}>
+    <Text inverse={selected} dimColor={dim}>
       {' '}
       {columns.map((c, i) => pad(c.value(row), w[i]!)).join('  ')}{' '}
     </Text>

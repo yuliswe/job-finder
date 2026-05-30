@@ -1,18 +1,30 @@
 import { Box, Text } from 'ink';
 import React from 'react';
 
-import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
+import type {
+  JobPostSortKey,
+  SourcesScopeFilter,
+  SourceSortKey,
+} from 'src/tui/queries.js';
 import { TAB_LABELS, type AppTab } from 'src/tui/utils/types.js';
+
+const SCOPE_LABEL: Record<SourcesScopeFilter, string> = {
+  in: 'in-scope',
+  all: 'all',
+  out: 'out-of-scope only',
+};
 
 export function TabBar({
   tab,
   sort,
   sourcesSort,
+  sourcesScopeFilter,
   counts,
 }: {
   tab: AppTab;
   sort: JobPostSortKey;
   sourcesSort: SourceSortKey;
+  sourcesScopeFilter: SourcesScopeFilter;
   counts: Record<AppTab, number>;
 }) {
   const activeSort = tab === 'jobs' ? sort : sourcesSort;
@@ -34,6 +46,12 @@ export function TabBar({
         <Text dimColor>sort: </Text>
         <Text color='cyan'>{activeSort}</Text>
       </Box>
+      {tab === 'sources' && (
+        <Box marginLeft={2}>
+          <Text dimColor>scope: </Text>
+          <Text color='cyan'>{SCOPE_LABEL[sourcesScopeFilter]}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

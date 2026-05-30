@@ -34,6 +34,7 @@ export function SourceList(props: {
       {...props}
       columns={COLS}
       getKey={r => r.sourceId}
+      isDim={r => r.isOutOfScopeForListing}
       emptyMessage='(no Source rows yet — run `jobfinder pipeline sourcing`)'
     />
   );

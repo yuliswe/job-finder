@@ -14,6 +14,7 @@ import {
   listJobPosts,
   listSources,
   type JobPostSortKey,
+  type SourcesScopeFilter,
   type SourceSortKey,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
@@ -37,6 +38,16 @@ export function App({ initial }: { initial: AppOptions }) {
     initial.sourcesSort
   );
 
+  // Scope filter for the Sources tab. Three states:
+  //   'in'  → only in-scope-for-listing rows + null-score backlog (default,
+  //           matches the original TUI behavior).
+  //   'all' → also include low-interest + deactivated rows, dimmed by the
+  //           table. Press 'o' to toggle in ↔ all.
+  //   'out' → only show out-of-scope rows (low-interest OR deactivated).
+  //           Press Shift+O to toggle in ↔ out.
+  const [sourcesScopeFilter, setSourcesScopeFilter] =
+    useState<SourcesScopeFilter>('in');
+
   const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
   const [pipelineCursor, setPipelineCursor] = useState(0);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
@@ -58,7 +69,10 @@ export function App({ initial }: { initial: AppOptions }) {
   );
 
   const sources = useLiveData(
-    useCallback(() => listSources({ sort: sourcesSort }), [sourcesSort])
+    useCallback(
+      () => listSources({ sort: sourcesSort, scope: sourcesScopeFilter }),
+      [sourcesSort, sourcesScopeFilter]
+    )
   );
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
@@ -145,6 +159,18 @@ export function App({ initial }: { initial: AppOptions }) {
           `jobfinder tui --tab ${tab} --sort ${sort} --sources-sort ${sourcesSort}`
         );
       }
+
+      if (input === 'o' && tab === 'sources') {
+        // 'o': toggle in ↔ all. From 'out', return to 'in' as well so the
+        // key always behaves like "show all on / off" regardless of mode.
+        setSourcesScopeFilter(v => (v === 'all' ? 'in' : 'all'));
+      }
+
+      if (input === 'O' && tab === 'sources') {
+        // Shift+O: toggle in ↔ out. From 'all', collapse to 'out' so the
+        // key always lands on the requested mode.
+        setSourcesScopeFilter(v => (v === 'out' ? 'in' : 'out'));
+      }
     },
     // App-level keys go silent while a layered screen (JobPost detail or
     // SourceJobs) is open — those screens own all input.
@@ -182,6 +208,7 @@ export function App({ initial }: { initial: AppOptions }) {
         tab={tab}
         sort={sort}
         sourcesSort={sourcesSort}
+        sourcesScopeFilter={sourcesScopeFilter}
         counts={{
           jobs: jobPosts?.length ?? 0,
           sources: sources?.length ?? 0,
