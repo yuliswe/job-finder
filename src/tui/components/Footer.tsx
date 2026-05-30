@@ -3,6 +3,7 @@ import React from 'react';
 
 const HINTS: { keys: string; label: string }[] = [
   { keys: '↑↓', label: 'nav' },
+  { keys: 'PgUp/Dn or U/D', label: 'page' },
   { keys: '←→/Tab', label: 'tab' },
   { keys: 'Enter', label: 'open (Job / Source)' },
   { keys: 'p', label: 'pipeline focus' },
@@ -16,7 +17,7 @@ const HINTS: { keys: string; label: string }[] = [
 
 export function Footer() {
   return (
-    <Box marginTop={1}>
+    <Box marginTop={1} flexWrap='wrap'>
       {HINTS.map(h => (
         <Box key={h.keys} marginRight={2}>
           <Text color='cyan'>{h.keys}</Text>

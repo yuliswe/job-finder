@@ -67,8 +67,26 @@ export function TabView({
     }
   }, [cursor, rowCount]);
 
+  // Page step scales with viewport: ~1/3 of the visible rows so the jump
+  // feels proportional on both short and tall terminals. Floor + max(1)
+  // guarantees at least one row of movement.
+  const pageStep = Math.max(1, Math.floor(visibleCount / 3));
+
   useInput(
     (input, key) => {
+      // Page up: PageUp or Shift+U. Page down: PageDown or Shift+D.
+      // Uppercase letters are universally detected (no terminal-escape
+      // dependency) and leave plain 'u' / 'd' free for future bindings.
+      if (key.pageUp || input === 'U') {
+        setCursor(c => Math.max(0, c - pageStep));
+        return;
+      }
+
+      if (key.pageDown || input === 'D') {
+        setCursor(c => Math.min(rowCount - 1, c + pageStep));
+        return;
+      }
+
       if (key.upArrow) setCursor(c => Math.max(0, c - 1));
       if (key.downArrow) setCursor(c => Math.min(rowCount - 1, c + 1));
       if (key.return && tab === 'jobs') {
