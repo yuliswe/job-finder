@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { Command } from 'commander';
 import * as v from 'valibot';
@@ -7,7 +8,7 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { PIPELINE_STATE, recordPipelineState } from 'src/db/pipelineState.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { LLM_SEEDING_MODEL } from 'jobfinder.config.js';
+import { LLM_SEEDING_MODEL, SEEDS_DIR } from 'jobfinder.config.js';
 import {
   SEEDING_SUMMARY_SYSTEM_PROMPT,
   SEEDING_SYSTEM_PROMPT,
@@ -41,7 +42,7 @@ const JOB_TYPES = [
 ] as const;
 
 /** Hard ceiling — keeps a runaway loop from burning the LLM bill. */
-const MAX_ATTEMPTS = 50;
+const MAX_ATTEMPTS = 10;
 /** Auto-stop after this many consecutive attempts that added 0 new postings,
  * even if the LLM keeps saying it isn't done. Coverage has clearly plateaued. */
 const MAX_CONSECUTIVE_ZERO_NEW = 50;
@@ -59,10 +60,34 @@ async function runSeeding(): Promise<void> {
     throw new Error('LLM_SEEDING_MODEL is empty — set it in src/llm/config.ts');
   }
 
+  const interests = await readSeedFile(join(SEEDS_DIR, 'interests.md'));
+  const cv = await readSeedFile(join(SEEDS_DIR, 'cv.md'));
+
+  // jobspy needs a location to scope the search (Indeed in particular returns
+  // garbage when called without one), and the downstream `viewing` stage
+  // scores `locationScore` against the interests file. Bail early with an
+  // actionable message rather than letting an interests-without-location
+  // file produce noisy results.
+  const locCheck = await checkInterestsLocation(interests);
+  if (!locCheck.hasLocation) {
+    terminal.warn(
+      `${join(SEEDS_DIR, 'interests.md')} does not mention any location preference.`
+    );
+    terminal.warn(`  Reason: ${locCheck.reason}`);
+
+    terminal.warn(
+      'Add a location (e.g. "Toronto, ON", "remote in Canada", "anywhere in EU") and re-run `jobfinder pipeline seeding`.'
+    );
+    return;
+  }
+
+  terminal.log(
+    `Location preference detected: ${locCheck.locationsFound.join(', ') || '(see interests)'}\n`
+  );
+
   await clearSourceSeeds();
 
-  const jobs = await discoverSeedJobs();
-  const { inserted } = await insertSeeds(jobs);
+  const inserted = await discoverSeedJobs({ interests, cv });
 
   terminal.log(`\nInserted ${inserted.length} rows into SourceSeed.`);
   if (inserted.length === 0) return;
@@ -151,15 +176,20 @@ async function printLlmSummary(inserted: JobResult[]): Promise<void> {
   for (const c of result.companies) terminal.log(`  - ${c}`);
 }
 
-async function discoverSeedJobs(): Promise<JobResult[]> {
-  const interests = await readSeedFile('seeds/interests.md');
-  const cv = await readSeedFile('seeds/cv.md');
+async function discoverSeedJobs(args: {
+  interests: string;
+  cv: string;
+}): Promise<JobResult[]> {
+  const { interests, cv } = args;
 
   const memory = new Memory([{ system: SEEDING_SYSTEM_PROMPT }]);
 
   // Accumulate across attempts so we keep results from earlier searches even
-  // as the LLM tries different terms/sites. Dedup by job_url.
+  // as the LLM tries different terms/sites. Dedup by job_url. `inserted`
+  // mirrors the SourceSeed rows actually written this run — built up
+  // incrementally so a crash mid-run leaves a usable partial seed table.
   const accumulated = new Map<string, JobResult>();
+  const inserted: JobResult[] = [];
   const state = { attempt: 0, consecutiveZeroNew: 0 };
 
   const { result } = await feedbackLoop({
@@ -231,7 +261,7 @@ async function discoverSeedJobs(): Promise<JobResult[]> {
     model: LLM_SEEDING_MODEL,
     metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
-    validate: args => runAttempt(args, state, accumulated),
+    validate: args => runAttempt(args, state, accumulated, inserted),
   });
 
   return result;
@@ -242,7 +272,8 @@ type AttemptState = { attempt: number; consecutiveZeroNew: number };
 async function runAttempt(
   args: { done: boolean } & Record<string, unknown>,
   state: AttemptState,
-  accumulated: Map<string, JobResult>
+  accumulated: Map<string, JobResult>,
+  inserted: JobResult[]
 ): Promise<
   { valid: true; result: JobResult[] } | { valid: false; feedback: string }
 > {
@@ -268,7 +299,7 @@ async function runAttempt(
     terminal.log(
       `\nLLM declared done after ${state.attempt} attempt(s); ${accumulated.size} unique postings.`
     );
-    return { valid: true, result: [...accumulated.values()] };
+    return { valid: true, result: inserted };
   }
 
   state.attempt += 1;
@@ -286,14 +317,19 @@ async function runAttempt(
 
   let attemptCount = 0;
   let attemptNew = 0;
+  let attemptInserted = 0;
   let crashDetail: string | null = null;
   try {
     const results = await scrapeJobs(options);
     attemptCount = results.length;
     for (const r of results) {
-      if (r.job_url && !accumulated.has(r.job_url)) {
-        accumulated.set(r.job_url, r);
-        attemptNew++;
+      if (!r.job_url || accumulated.has(r.job_url)) continue;
+      accumulated.set(r.job_url, r);
+      attemptNew++;
+      const { inserted: didInsert } = await seedOne({ job: r });
+      if (didInsert) {
+        inserted.push(r);
+        attemptInserted++;
       }
     }
   } catch (err) {
@@ -314,7 +350,7 @@ async function runAttempt(
 
   if (crashDetail == null) {
     terminal.log(
-      `  → ${attemptCount} results (${attemptNew} new); ${accumulated.size} unique total.`
+      `  → ${attemptCount} results (${attemptNew} new, ${attemptInserted} inserted); ${accumulated.size} unique total, ${inserted.length} inserted total.`
     );
   }
 
@@ -333,7 +369,7 @@ async function runAttempt(
     terminal.log(
       `\n${exhausted ? `Auto-stop after ${MAX_CONSECUTIVE_ZERO_NEW} consecutive zero-new attempts` : `Hit ceiling of ${MAX_ATTEMPTS} attempts`}; ${accumulated.size} unique postings.`
     );
-    return { valid: true, result: [...accumulated.values()] };
+    return { valid: true, result: inserted };
   }
 
   const feedback =
@@ -342,6 +378,55 @@ async function runAttempt(
       : `Attempt ${attempt} returned ${attemptCount} results (${attemptNew} new, deduped by URL). Total inserted so far: ${accumulated.size} unique postings. Consecutive zero-new attempts: ${state.consecutiveZeroNew}/${MAX_CONSECUTIVE_ZERO_NEW}. Decide: either set done=true (if you believe further attempts won't surface new postings), or pick a different search_term and/or site mix and try again. Avoid repeating queries.`;
 
   return { valid: false, feedback };
+}
+
+/** Ask the LLM to scan `interests` for any location preference (city,
+ * region, country, "remote", "remote in X", etc.). Returns the boolean
+ * verdict plus a short list of matched phrases for the log. Throws on LLM
+ * failure — `runSeeding` will surface that as a normal error. */
+async function checkInterestsLocation(interests: string): Promise<{
+  hasLocation: boolean;
+  locationsFound: string[];
+  reason: string;
+}> {
+  const memory = new Memory([
+    {
+      system: `You read a user's free-form interests file (markdown) and decide whether it states any preference about WHERE the user wants to work — a city, region, country, "remote", "remote in {region}", "anywhere in {area}", or similar. Output:
+- "hasLocation": true if ANY location signal is present; false only when the file is silent on location.
+- "locationsFound": short list of the location-related phrases / values you found (e.g. ["Toronto", "Remote in Canada"]). Empty array when hasLocation=false.
+- "reason": one short sentence explaining what you found (or what is missing).`,
+    },
+  ]);
+
+  const { result } = await feedbackLoop({
+    memory,
+    initialPrompt: `Interests file:\n\n${interests || '(empty)'}`,
+    schema: v.object({
+      hasLocation: v.pipe(
+        v.boolean(),
+        v.description(
+          'true if the file mentions any location preference (city, region, country, "remote", etc.); false otherwise.'
+        )
+      ),
+      locationsFound: v.pipe(
+        v.array(v.string()),
+        v.description(
+          'Short list of the location-related phrases found in the file. Empty when hasLocation=false.'
+        )
+      ),
+      reason: v.pipe(
+        v.string(),
+        v.description('One short sentence explaining the verdict.')
+      ),
+    }),
+    maxAttempts: 2,
+    model: LLM_SEEDING_MODEL,
+    metadata: { configKey: 'LLM_SEEDING_MODEL' },
+    logger: terminal,
+    validate: parsed => ({ valid: true, result: parsed }),
+  });
+
+  return result;
 }
 
 /** Read `path`, preferring a sibling `*.local.md` if it has non-empty trimmed content. */
@@ -357,27 +442,16 @@ async function readSeedFile(path: string): Promise<string> {
   return readFile(path, 'utf-8');
 }
 
-async function insertSeeds(
-  jobs: JobResult[]
-): Promise<{ inserted: JobResult[] }> {
-  const dedup = new Map<string, JobResult>();
-  for (const j of jobs) {
-    if (j.job_url && !dedup.has(j.job_url)) dedup.set(j.job_url, j);
-  }
-
-  const inserted = [...dedup.values()];
-  for (const j of inserted) await seedOne({ job: j });
-  return { inserted };
-}
-
 // Sourcing is NOT auto-enqueued: the user reviews the inserted seeds (and
 // their interests/CV) and runs `pipeline approve-seeds` to release them.
-async function seedOne(args: { job: JobResult }): Promise<void> {
+async function seedOne(args: {
+  job: JobResult;
+}): Promise<{ inserted: boolean }> {
   const { job } = args;
   // No company name = no anchor for the downstream approve-seeds/sourcing
   // flow (which keys off SourceSeed.name to create JobSource rows). Drop
   // these instead of polluting the table with 'Unknown' aggregations.
-  if (!job.company) return;
+  if (!job.company) return { inserted: false };
 
   const id = newId();
 
@@ -398,11 +472,12 @@ async function seedOne(args: { job: JobResult }): Promise<void> {
     .executeTakeFirst();
 
   const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
-  if (!wasInserted) return;
+  if (!wasInserted) return { inserted: false };
 
   await recordPipelineState({
     task: 'seeding',
     state: PIPELINE_STATE.DONE,
     entity: { ofSourceSeedId: id },
   });
+  return { inserted: true };
 }
