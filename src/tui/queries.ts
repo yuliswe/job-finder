@@ -89,6 +89,17 @@ export type JobPostRow = {
   overallScore: number | null;
   description: string | null;
   summary: string | null;
+  /** True iff the post fails `inScopeForViewing` — either its source tree
+   * has been deactivated, OR `titleRelavency` came back below the
+   * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY` threshold. Null relevancy is
+   * NOT considered out-of-scope (treated as "not yet evaluated", same as
+   * the listing-scope rule treats null interestScore on Sources). The TUI
+   * uses this to dim out-of-scope rows when they're surfaced via the
+   * 'all' or 'out' scope filter. */
+  isOutOfScopeForViewing: boolean;
+  /** Single-line summary of where this post is in the pipeline. Computed
+   * from the other fields; see `computeJobPostStatus`. */
+  status: string;
 };
 
 export type SourceRow = {
@@ -335,25 +346,43 @@ export async function listJobPosts(args: {
   /** If set, only return JobPosts belonging to this JobSource. Used by the
    * source-jobs screen. */
   ofJobSourceId?: string;
-  /** If true, only return JobPosts that pass `inScopeForViewing` — i.e. that
-   * cleared the relevancy threshold and are in an active source tree. Matches
-   * the per-source count shown in the Sources list. */
-  inScopeOnly?: boolean;
+  /** Filter relative to `inScopeForViewing`. Default `'in'` matches the
+   * historical TUI behavior (active tree + cleared title-relevancy
+   * threshold). `'all'` drops both filters and the table dims out-of-scope
+   * rows. `'out'` returns only out-of-scope rows for auditing. */
+  scope?: ScopeFilter;
 }): Promise<JobPostRow[]> {
-  const { sort, limit = 500, ofJobSourceId, inScopeOnly = false } = args;
+  const { sort, limit = 500, ofJobSourceId, scope = 'in' } = args;
 
   let base = db
     .selectFrom('JobPost')
-    .leftJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id')
-    .where(jobPostInActiveSource);
+    .leftJoin('JobPostEval', 'JobPostEval.ofJobPostId', 'JobPost.id');
 
   if (ofJobSourceId) {
     base = base.where('JobPost.ofJobSourceId', '=', ofJobSourceId);
   }
 
-  if (inScopeOnly) {
-    base = base.where(inScopeForViewing);
+  if (scope === 'in') {
+    base = base.where(jobPostInActiveSource).where(inScopeForViewing);
+  } else if (scope === 'out') {
+    // Out-of-scope for viewing = NOT in active source tree, OR (relevancy
+    // is known AND below threshold). Null relevancy stays in 'in' as
+    // backlog (matches the Sources-scope treatment of null interestScore).
+    base = base.where(eb =>
+      eb.or([
+        eb.not(jobPostInActiveSource(eb)),
+        eb.and([
+          eb('JobPostEval.titleRelavency', 'is not', null),
+          eb(
+            'JobPostEval.titleRelavency',
+            '<',
+            PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+          ),
+        ]),
+      ])
+    );
   }
+  // 'all': no scope filter — return every JobPost regardless.
 
   let q = base.select([
     'JobPost.id as id',
@@ -401,9 +430,39 @@ export async function listJobPosts(args: {
       break;
   }
 
-  const rows = await q.limit(limit).execute();
+  // `isOutOfScopeForViewing` needs the active-tree check, which we don't
+  // have on the row directly. Re-evaluate cheaply per row by joining the
+  // source's active state into the select.
+  const qWithScope = q
+    .leftJoin('JobSource', 'JobSource.id', 'JobPost.ofJobSourceId')
+    .leftJoin('JobListSource', 'JobListSource.id', 'JobPost.ofJobListSourceId')
+    .select([
+      'JobSource.isActive as sourceIsActive',
+      'JobListSource.isActive as listSourceIsActive',
+    ]);
+
+  const rows = await qWithScope.limit(limit).execute();
   return rows.map(r => {
-    const { skillScoreBreakdownJson, skillRequirementsJson, ...rest } = r;
+    const {
+      skillScoreBreakdownJson,
+      skillRequirementsJson,
+      sourceIsActive,
+      listSourceIsActive,
+      ...rest
+    } = r;
+
+    // Mirror `jobPostInActiveSource` in JS: source must be active, and the
+    // list source (if any) must also be active. Null listSourceIsActive
+    // means no JobListSource, which the SQL helper treats as active.
+    const inActiveTree =
+      sourceIsActive === 1 &&
+      (listSourceIsActive == null || listSourceIsActive === 1);
+
+    const isOutOfScopeForViewing =
+      !inActiveTree ||
+      (r.titleRelavency != null &&
+        r.titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY);
+
     return {
       ...rest,
       postedAtSource: narrowPostedAtSource(r.postedAtSource),
@@ -417,8 +476,38 @@ export async function listJobPosts(args: {
         r.skillScore != null && r.interestScore != null
           ? r.skillScore * r.interestScore * (r.locationScore ?? 1)
           : null,
+      isOutOfScopeForViewing,
+      status: computeJobPostStatus({
+        inActiveTree,
+        titleRelavency: r.titleRelavency,
+        description: r.description,
+        interestScore: r.interestScore,
+      }),
     };
   });
+}
+
+/** Single-line pipeline status for a JobPost, derived from the same fields
+ * the rest of JobPostRow exposes. Checked in priority order — out-of-scope
+ * verdicts shadow any "Waiting for…" interpretation. */
+function computeJobPostStatus(args: {
+  inActiveTree: boolean;
+  titleRelavency: number | null;
+  description: string | null;
+  interestScore: number | null;
+}): string {
+  const { inActiveTree, titleRelavency, description, interestScore } = args;
+  if (!inActiveTree) return 'Out of scope: deactivated';
+  if (
+    titleRelavency != null &&
+    titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+  ) {
+    return 'Out of scope: low relevancy';
+  }
+
+  if (!description) return 'Waiting for viewing';
+  if (interestScore == null) return 'Waiting for evaluate';
+  return 'Done';
 }
 
 /** The DB stores `postedAtSource` as plain text, but we constrain it to the
@@ -440,19 +529,24 @@ function parseJsonArray<T>(json: string | null): T[] | null {
   }
 }
 
-/** Sources-tab scope filter:
- *   - `'in'`  → only sources that are in-scope for listing (active + score
- *               above threshold), plus null-score "pending sourcing" rows.
- *               Default; matches the original TUI behavior.
- *   - `'all'` → above PLUS out-of-scope rows (low-interest + inactive),
- *               which the table renders dim.
- *   - `'out'` → only out-of-scope rows (low-interest OR inactive). Useful
- *               for auditing what the listing stage is skipping. */
-export type SourcesScopeFilter = 'in' | 'all' | 'out';
+/** Shared 3-state scope filter, used by both the Sources tab and the Jobs
+ * tab. The exact meaning of in/out depends on the tab — Sources keys off
+ * `inScopeForListing` (active + interestScore >= threshold), Jobs keys off
+ * `inScopeForViewing` (in active source tree + titleRelavency >= threshold).
+ *
+ *   - `'in'`  → only in-scope rows (matches the original TUI behavior).
+ *   - `'all'` → in-scope PLUS out-of-scope, with the latter rendered dim.
+ *   - `'out'` → only out-of-scope rows. Useful for auditing what the
+ *               pipeline is skipping. */
+export type ScopeFilter = 'in' | 'all' | 'out';
+
+/** @deprecated alias — use {@link ScopeFilter}. Kept so older code that
+ * imports the Sources-specific name keeps working. */
+export type SourcesScopeFilter = ScopeFilter;
 
 export async function listSources(args: {
   sort: SourceSortKey;
-  scope?: SourcesScopeFilter;
+  scope?: ScopeFilter;
 }): Promise<SourceRow[]> {
   // One row per JobSource. approve-seeds promotes SourceSeed names into
   // JobSource rows (url=null until sourcing fills it in), so there's no

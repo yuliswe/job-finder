@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import React, { useCallback, useEffect } from 'react';
+import { useCallback, useEffect } from 'react';
 
 import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
@@ -10,9 +10,9 @@ import {
   listJobPosts,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
-import { JOB_POST_SORTS } from 'src/tui/utils/types.js';
-import { openUrl } from 'src/tui/utils/openUrl.js';
 import { prettyUrl } from 'src/tui/utils/format.js';
+import { openUrl } from 'src/tui/utils/openUrl.js';
+import { JOB_POST_SORTS } from 'src/tui/utils/types.js';
 
 /** Full-screen "jobs from this source" view, opened with Enter on a row in
  * the Sources tab. Same list-on-left, detail-on-right layout as the main
@@ -49,7 +49,7 @@ export function SourceJobsScreen({
       listJobPosts({
         sort,
         ofJobSourceId: source.sourceId,
-        inScopeOnly: true,
+        scope: 'in',
       }),
     [sort, source.sourceId]
   );
@@ -154,7 +154,6 @@ export function SourceJobsScreen({
           flexDirection='column'
           width={DETAIL_WIDTH}
           height={visibleCount + 2}
-          paddingLeft={2}
           overflow='hidden'
         >
           <JobPostDetail row={jobPosts?.[cursor] ?? null} />

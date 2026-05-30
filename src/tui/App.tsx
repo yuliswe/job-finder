@@ -14,7 +14,7 @@ import {
   listJobPosts,
   listSources,
   type JobPostSortKey,
-  type SourcesScopeFilter,
+  type ScopeFilter,
   type SourceSortKey,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
@@ -38,15 +38,18 @@ export function App({ initial }: { initial: AppOptions }) {
     initial.sourcesSort
   );
 
-  // Scope filter for the Sources tab. Three states:
-  //   'in'  → only in-scope-for-listing rows + null-score backlog (default,
-  //           matches the original TUI behavior).
-  //   'all' → also include low-interest + deactivated rows, dimmed by the
-  //           table. Press 'o' to toggle in ↔ all.
-  //   'out' → only show out-of-scope rows (low-interest OR deactivated).
-  //           Press Shift+O to toggle in ↔ out.
+  // Scope filter for each tab. Both tabs share the same 'in' | 'all' | 'out'
+  // shape (see ScopeFilter):
+  //   - Sources keys off inScopeForListing (active + interestScore >=
+  //     PIPELINE_LISTING_MIN_INTEREST_SCORE).
+  //   - Jobs keys off inScopeForViewing (active tree + titleRelavency >=
+  //     PIPELINE_VIEWING_MIN_TITLE_RELEVANCY).
+  // 'o' toggles in ↔ all, Shift+O toggles in ↔ out. Out-of-scope rows
+  // surfaced by 'all' render dim; 'out' shows them as the only rows.
   const [sourcesScopeFilter, setSourcesScopeFilter] =
-    useState<SourcesScopeFilter>('in');
+    useState<ScopeFilter>('in');
+
+  const [jobsScopeFilter, setJobsScopeFilter] = useState<ScopeFilter>('in');
 
   const [focus, setFocus] = useState<'pipeline' | 'table'>('table');
   const [pipelineCursor, setPipelineCursor] = useState(0);
@@ -65,7 +68,10 @@ export function App({ initial }: { initial: AppOptions }) {
   );
 
   const jobPosts = useLiveData(
-    useCallback(() => listJobPosts({ sort, inScopeOnly: true }), [sort])
+    useCallback(
+      () => listJobPosts({ sort, scope: jobsScopeFilter }),
+      [sort, jobsScopeFilter]
+    )
   );
 
   const sources = useLiveData(
@@ -160,16 +166,18 @@ export function App({ initial }: { initial: AppOptions }) {
         );
       }
 
-      if (input === 'o' && tab === 'sources') {
-        // 'o': toggle in ↔ all. From 'out', return to 'in' as well so the
-        // key always behaves like "show all on / off" regardless of mode.
-        setSourcesScopeFilter(v => (v === 'all' ? 'in' : 'all'));
-      }
+      if (input === 'o' || input === 'O') {
+        // 'o': toggle in ↔ all. Shift+O: toggle in ↔ out. From the other
+        // non-default mode, both keys land on the requested mode (so 'o'
+        // from 'out' goes to 'all', not back to 'in'). The setter that
+        // fires depends on which tab is focused.
+        const next =
+          input === 'o'
+            ? (v: ScopeFilter) => (v === 'all' ? 'in' : 'all')
+            : (v: ScopeFilter) => (v === 'out' ? 'in' : 'out');
 
-      if (input === 'O' && tab === 'sources') {
-        // Shift+O: toggle in ↔ out. From 'all', collapse to 'out' so the
-        // key always lands on the requested mode.
-        setSourcesScopeFilter(v => (v === 'out' ? 'in' : 'out'));
+        if (tab === 'sources') setSourcesScopeFilter(next);
+        else if (tab === 'jobs') setJobsScopeFilter(next);
       }
     },
     // App-level keys go silent while a layered screen (JobPost detail or
@@ -209,6 +217,7 @@ export function App({ initial }: { initial: AppOptions }) {
         sort={sort}
         sourcesSort={sourcesSort}
         sourcesScopeFilter={sourcesScopeFilter}
+        jobsScopeFilter={jobsScopeFilter}
         counts={{
           jobs: jobPosts?.length ?? 0,
           sources: sources?.length ?? 0,

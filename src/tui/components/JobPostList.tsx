@@ -15,6 +15,7 @@ const COLS: Column<JobPostRow>[] = [
   { label: 'company', value: r => r.company ?? '—', min: 7, max: 22 },
   { label: 'title', value: r => r.title, min: 20, priority: 3 },
   { label: 'location', value: r => r.location ?? '—', min: 10, max: 20 },
+  { label: 'status', value: r => r.status, min: 12, max: 28 },
 ];
 
 export function JobPostList(props: {
@@ -30,6 +31,7 @@ export function JobPostList(props: {
       {...props}
       columns={COLS}
       getKey={r => r.id}
+      isDim={r => r.isOutOfScopeForViewing}
       emptyMessage='(no JobPost rows — run `jobfinder pipeline run-scripts`)'
     />
   );
