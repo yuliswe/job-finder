@@ -171,9 +171,17 @@ Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrentl
 
 ```bash
 jobfinder run-pipeline
+
+# Also retry every in-scope row whose latest state is NOT done
+# (failed / aborted / no_result / etc.) — applied once on each task's
+# first iteration via the same picker semantics as
+# `jobfinder pipeline <task> --include-failed`. Subsequent iterations
+# run in default queued-only mode so a transient failure inside the
+# run is not retried forever.
+jobfinder run-pipeline --include-failed
 ```
 
-Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them later with the relevant subcommand and `--include-failed` or `--all`.
+Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them with `--include-failed` on a fresh `run-pipeline`, or with the relevant subcommand and `--include-failed` / `--all`.
 
 Requires:
 

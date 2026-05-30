@@ -1,4 +1,4 @@
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import type { BrowserContext } from 'patchright';
 
 import { runEvaluate } from 'src/cli/commands/pipeline/evaluate.js';
@@ -9,6 +9,11 @@ import { runSourcing } from 'src/cli/commands/pipeline/sourcing.js';
 import { runViewing } from 'src/cli/commands/pipeline/viewing.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
+
+/** Per-task opts forwarded to each runX. We only thread the bits run-pipeline
+ * cares about; runX functions accept additional task-specific fields
+ * (division/location/jobSourceId/etc.) that we never set here. */
+type IterationOpts = { includeFailed?: boolean };
 
 /** Idle-poll interval applied only when a task's previous iteration found
  * nothing to do. Iterations that processed >0 items re-loop immediately. */
@@ -50,15 +55,25 @@ type Orchestrator = {
   sleepers: Set<() => void>;
 };
 
+type RunPipelineOptions = {
+  includeFailed?: boolean;
+};
+
 export function createRunPipelineCommand(): Command {
   return new Command('run-pipeline')
     .description(
       'Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.'
     )
+    .addOption(
+      new Option(
+        '--include-failed',
+        'Pass --include-failed to each task on its FIRST iteration only — same picker semantics as `jobfinder pipeline <task> --include-failed`, applied once at the start so failed / aborted / no_result rows get retried. Subsequent iterations of each loop run in default queued-only mode so a fresh failure during the run is not retried forever.'
+      )
+    )
     .action(runAllLoops);
 }
 
-async function runAllLoops(): Promise<void> {
+async function runAllLoops(opts: RunPipelineOptions): Promise<void> {
   // `running: true` at init is a "not yet completed first iteration" sentinel.
   // Without it, a fast no-browser task (evaluate) can finish its first
   // iteration before the browser-using tasks have even returned from
@@ -79,18 +94,39 @@ async function runAllLoops(): Promise<void> {
   };
 
   terminal.log(
-    `Starting run-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s`
+    `Starting run-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
   );
 
+  // First-iteration opts each task consumes. After the first call, every
+  // task drops back to default queued-only opts. This routes through each
+  // task's existing `includeFailed` plumbing — no separate bulk-requeue
+  // implementation to keep in sync.
+  const firstOpts: IterationOpts = opts.includeFailed
+    ? { includeFailed: true }
+    : {};
+
   await Promise.all([
-    runLoopWithBrowser(orchestrator, 'sourcing', ctx => runSourcing(ctx, {})),
-    runLoopWithBrowser(orchestrator, 'listing', ctx => runListing(ctx, {})),
-    runLoopWithBrowser(orchestrator, 'scripting', ctx => runScripting(ctx, {})),
-    runLoopWithBrowser(orchestrator, 'run-scripts', ctx =>
-      runRunScripts(ctx, {})
+    runLoopWithBrowser(orchestrator, 'sourcing', firstOpts, (ctx, iterOpts) =>
+      runSourcing(ctx, iterOpts)
     ),
-    runLoopWithBrowser(orchestrator, 'viewing', ctx => runViewing(ctx, {})),
-    runLoop(orchestrator, 'evaluate', () => runEvaluate({})),
+    runLoopWithBrowser(orchestrator, 'listing', firstOpts, (ctx, iterOpts) =>
+      runListing(ctx, iterOpts)
+    ),
+    runLoopWithBrowser(orchestrator, 'scripting', firstOpts, (ctx, iterOpts) =>
+      runScripting(ctx, iterOpts)
+    ),
+    runLoopWithBrowser(
+      orchestrator,
+      'run-scripts',
+      firstOpts,
+      (ctx, iterOpts) => runRunScripts(ctx, iterOpts)
+    ),
+    runLoopWithBrowser(orchestrator, 'viewing', firstOpts, (ctx, iterOpts) =>
+      runViewing(ctx, iterOpts)
+    ),
+    runLoop(orchestrator, 'evaluate', firstOpts, iterOpts =>
+      runEvaluate(iterOpts)
+    ),
   ]);
 
   terminal.log('All pipeline tasks drained. Shutting down.');
@@ -99,25 +135,36 @@ async function runAllLoops(): Promise<void> {
 async function runLoopWithBrowser(
   orchestrator: Orchestrator,
   name: TaskName,
-  fn: (ctx: BrowserContext) => Promise<{ processed: number }>
+  firstOpts: IterationOpts,
+  fn: (
+    ctx: BrowserContext,
+    iterOpts: IterationOpts
+  ) => Promise<{ processed: number }>
 ): Promise<void> {
   await withBrowserInstance(context =>
-    runLoop(orchestrator, name, () => fn(context))
+    runLoop(orchestrator, name, firstOpts, iterOpts => fn(context, iterOpts))
   );
 }
 
 async function runLoop(
   orchestrator: Orchestrator,
   name: TaskName,
-  fn: () => Promise<{ processed: number }>
+  firstOpts: IterationOpts,
+  fn: (iterOpts: IterationOpts) => Promise<{ processed: number }>
 ): Promise<void> {
   const slot = orchestrator.state[name];
+  // `firstOpts` (e.g. {includeFailed:true} from --include-failed) is
+  // consumed on iteration 1 only; subsequent iterations get `{}` so a
+  // failure inside the run doesn't keep retrying forever.
+  let nextOpts: IterationOpts = firstOpts;
 
   while (!orchestrator.shutdown) {
     slot.running = true;
     let processed = 0;
+    const iterOpts = nextOpts;
+    nextOpts = {};
     try {
-      ({ processed } = await fn());
+      ({ processed } = await fn(iterOpts));
     } catch (err) {
       terminal.error(`[${name}] iteration failed: ${String(err)}`);
     }

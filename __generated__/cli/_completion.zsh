@@ -100,6 +100,11 @@ _jobfinder_pipeline() {
   esac
 }
 
+_jobfinder_run_pipeline() {
+  _arguments -s -S \
+    '--include-failed[include-failed]'
+}
+
 _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
@@ -128,7 +133,7 @@ _jobfinder() {
     scrape) _jobfinder_scrape ;;
     sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
-    run-pipeline) _normal ;;
+    run-pipeline) _jobfinder_run_pipeline ;;
     tui) _jobfinder_tui ;;
     completion-script-dump) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;
