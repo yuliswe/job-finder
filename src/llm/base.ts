@@ -12,6 +12,16 @@ import { COLOURS, type Terminal } from 'src/utils/terminal';
 
 const plugin = new OpenRouterPlugin();
 
+/** Thrown when the provider returns a successful HTTP response with no content
+ * (e.g. upstream model filtered the request or hit an internal timeout). Named
+ * so the retry loop in `sendWithRetry` can distinguish it from a hard failure. */
+export class LlmEmptyResponseError extends Error {
+  constructor() {
+    super('LLM returned empty response');
+    this.name = 'LlmEmptyResponseError';
+  }
+}
+
 const schemaNameCache = new WeakMap<v.GenericSchema, string>();
 
 function getSchemaName(schema: v.GenericSchema): string {
@@ -155,7 +165,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
     enableWebSearch,
   });
 
-  if (!content) throw new Error('LLM returned empty response');
+  if (!content) throw new LlmEmptyResponseError();
   const extracted = extractJson(content);
   let parsed: unknown;
   try {
@@ -299,7 +309,9 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
       const isNetworkError =
         error instanceof TypeError && error.message === 'terminated';
 
-      const isRetryable = isSchemaError || isNetworkError;
+      const isEmptyResponse = error instanceof LlmEmptyResponseError;
+
+      const isRetryable = isSchemaError || isNetworkError || isEmptyResponse;
 
       if (isRetryable && retry < MAX_SEND_RETRIES - 1) {
         logger.error(
@@ -308,6 +320,10 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         if (isSchemaError) {
           memory.add(
             'Your previous response was not valid or did not match the expected schema. Please respond with valid JSON only, matching the required schema exactly.'
+          );
+        } else if (isEmptyResponse) {
+          memory.add(
+            'Your previous response was empty. Please reply now with the required JSON object.'
           );
         }
 
