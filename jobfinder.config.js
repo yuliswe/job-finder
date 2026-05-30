@@ -25,6 +25,21 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 /**
+ * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
+ * their gitignored `*.local.md` overrides. May be relative (resolved against
+ * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
+ * repo-local folder).
+ */
+export const SEEDS_DIR = './jin-seeds';
+
+/**
+ * Path to the SQLite database file. May be relative (to the CWD where you
+ * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
+ * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
+ */
+export const DB_PATH = './jin-jobs.db';
+
+/**
  * The model used by the seeding process.
  */
 export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';

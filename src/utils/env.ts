@@ -3,6 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
+  DB_PATH,
   OPENROUTER_API_KEY,
   SERPER_API_KEY,
 } from 'jobfinder.config.js';
@@ -38,7 +39,7 @@ export const Env = {
   },
 
   get DB_PATH() {
-    return requiredEnvVar('DB_PATH', 'jobs.db');
+    return requiredEnvVar('DB_PATH', DB_PATH);
   },
 
   /** Optional — only required by features that hit the Serper API (e.g.
