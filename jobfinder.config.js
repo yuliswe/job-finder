@@ -106,6 +106,27 @@ export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
 export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
 
 /**
+ * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
+ * for a given job posting. Asked to rewrite the summary, build the
+ * competency grid, reorder bullets, and inject keywords ethically from the
+ * job's skillRequirements + full JD into the user's cv.md.
+ *
+ * Model requirements:
+ * - reasoning capability (it's selecting + reordering content)
+ * - >=200K context window (template + cv + JD all fit)
+ * - moderate output cost (the whole filled HTML comes back)
+ */
+export const LLM_CV_TEMPLATE_MODEL = 'deepseek/deepseek-v4-pro';
+
+/**
+ * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut
+ * on the job-detail screen) are written. Created on demand. May be relative
+ * (resolved against the CWD where you run `jobfinder`) or absolute. Default:
+ * `'./resumes'`.
+ */
+export const RESUME_OUTPUT_DIR = './resumes-out';
+
+/**
  * Whether to use a headless browser when scraping websites.
  */
 export const USE_HEADLESS_BROWSER = true;

@@ -36,3 +36,23 @@ export async function getUserInterests(): Promise<string> {
 export async function getUserCV(): Promise<string> {
   return readSeed('cv');
 }
+
+/** Read `<SEEDS_DIR>/cv-template.local.html` if non-empty, else
+ * `<SEEDS_DIR>/cv-template.html`. The template uses `{{TOKEN}}` placeholders
+ * (`{{NAME}}`, `{{SUMMARY_TEXT}}`, `{{EXPERIENCE}}`, etc.) that
+ * `fillCvTemplate` asks an LLM to populate per job posting. */
+export async function getUserCvTemplate(): Promise<string> {
+  for (const path of [
+    join(SEEDS_DIR, 'cv-template.local.html'),
+    join(SEEDS_DIR, 'cv-template.html'),
+  ]) {
+    try {
+      const text = (await readFile(path, 'utf-8')).trim();
+      if (text) return text;
+    } catch {
+      // file missing — try the next one
+    }
+  }
+
+  return '';
+}

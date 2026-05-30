@@ -1,11 +1,17 @@
 import { Box, Text, useInput } from 'ink';
 import React, { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { join } from 'node:path';
 
+import { RESUME_OUTPUT_DIR } from 'jobfinder.config.js';
+import { fillCvTemplate } from 'src/llm/fillCvTemplate.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import type { JobPostRow } from 'src/tui/queries.js';
 import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { fmtSalary, fmtScore } from 'src/tui/utils/format.js';
+import { openFile } from 'src/tui/utils/openFile.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
+import { buildCvFilename } from 'src/utils/cvFilename.js';
+import { renderCvPdf } from 'src/utils/renderCvPdf.js';
 
 /** Full-screen view of a single JobPost. Opened via Enter on the list,
  * dismissed via Esc/q. Summary + scoring + skill breakdown + description all
@@ -19,10 +25,21 @@ export function JobPostDetailScreen({
 }) {
   const { rows: termRows, cols: termCols } = useTerminalSize();
   const [scroll, setScroll] = useState(0);
+  // PDF generation status (LLM fill → chromium render → openFile). Tracked
+  // here so the footer can show progress / errors and the keyboard handler
+  // can ignore a second 'p' press while a previous one is still in flight.
+  const [pdfStatus, setPdfStatus] = useState<
+    | { kind: 'idle' }
+    | { kind: 'generating' }
+    | { kind: 'opened'; path: string }
+    | { kind: 'error'; message: string }
+  >({ kind: 'idle' });
 
-  // Reset scroll when the row changes (defensive — usually unmounted/remounted).
+  // Reset scroll AND PDF status when the row changes (defensive — usually
+  // unmounted/remounted).
   useEffect(() => {
     setScroll(0);
+    setPdfStatus({ kind: 'idle' });
   }, [row.id]);
 
   // The fixed top/bottom chrome is intentionally minimal so the wrapped
@@ -88,6 +105,14 @@ export function JobPostDetailScreen({
       copyToClipboard(row.url);
       return;
     }
+
+    if (input === 'p') {
+      // Ignore repeat presses while a previous run is in flight — the LLM
+      // call + chromium launch take seconds.
+      if (pdfStatus.kind === 'generating') return;
+      void generateAndOpenCvPdf(row, setPdfStatus);
+      return;
+    }
   });
 
   return (
@@ -128,12 +153,92 @@ export function JobPostDetailScreen({
         <Text dimColor>
           <Text color='cyan'>↑↓/jk</Text> scroll · <Text color='cyan'>g/G</Text>{' '}
           top/bottom · <Text color='cyan'>l</Text> open ·{' '}
-          <Text color='cyan'>y</Text> copy url · <Text color='cyan'>Esc/q</Text>{' '}
-          back
+          <Text color='cyan'>y</Text> copy url · <Text color='cyan'>p</Text>{' '}
+          tailored CV pdf · <Text color='cyan'>Esc/q</Text> back
         </Text>
       </Box>
+      {pdfStatus.kind !== 'idle' && (
+        <Box>
+          {pdfStatus.kind === 'generating' && (
+            <Text color='yellow'>generating tailored CV pdf…</Text>
+          )}
+          {pdfStatus.kind === 'opened' && (
+            <Text color='green'>opened {pdfStatus.path}</Text>
+          )}
+          {pdfStatus.kind === 'error' && (
+            <Text color='red'>pdf failed: {pdfStatus.message}</Text>
+          )}
+        </Box>
+      )}
     </Box>
   );
+}
+
+/** Fill the CV template for `row` via the LLM, render the resulting HTML to
+ * a temp PDF via headless Chromium, and open it with the platform's default
+ * viewer. Updates `setStatus` at each transition. Failure modes (missing
+ * description, missing cv/template seed files, LLM error, chromium error)
+ * all surface as a single short message in the footer. */
+async function generateAndOpenCvPdf(
+  row: JobPostRow,
+  setStatus: (
+    s:
+      | { kind: 'idle' }
+      | { kind: 'generating' }
+      | { kind: 'opened'; path: string }
+      | { kind: 'error'; message: string }
+  ) => void
+): Promise<void> {
+  setStatus({ kind: 'generating' });
+  try {
+    if (!row.description) {
+      throw new Error(
+        'JobPost has no description — run `jobfinder pipeline viewing` first'
+      );
+    }
+
+    if (!row.skillRequirements || row.skillRequirements.length === 0) {
+      throw new Error(
+        'JobPost has no skillRequirements — run `jobfinder pipeline viewing` first'
+      );
+    }
+
+    const { html } = await fillCvTemplate({
+      skillRequirements: row.skillRequirements,
+      job: {
+        title: row.title,
+        description: row.description,
+        location: row.location,
+        isRemote: row.isRemote,
+      },
+    });
+
+    const format = inferPageFormat(row.location);
+    const outputPath = join(
+      RESUME_OUTPUT_DIR,
+      buildCvFilename({ company: row.company, title: row.title })
+    );
+
+    const { path } = await renderCvPdf({ html, outputPath, format });
+    openFile(path);
+    setStatus({ kind: 'opened', path });
+  } catch (err) {
+    setStatus({
+      kind: 'error',
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** US/Canada → Letter, everything else → A4. Same heuristic career-ops
+ * applies. Falls back to Letter when the location string is empty. */
+function inferPageFormat(location: string | null): 'Letter' | 'A4' {
+  if (!location) return 'Letter';
+  return /\b(usa?|united states|us|canada|ca|on|ontario|quebec|qc|bc|alberta|ab|manitoba|saskatchewan)\b/i.test(
+    location
+  )
+    ? 'Letter'
+    : 'A4';
 }
 
 /** Flatten everything scrollable (summary, scoring reasons, skill breakdown,
