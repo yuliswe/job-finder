@@ -144,7 +144,7 @@ export function App({ initial }: { initial: AppOptions }) {
         const next =
           JOB_POST_SORTS[
             (idx + delta + JOB_POST_SORTS.length) % JOB_POST_SORTS.length
-          ] ?? 'overall';
+          ] ?? 'all';
 
         setSort(next);
       }
@@ -232,6 +232,7 @@ export function App({ initial }: { initial: AppOptions }) {
         tab={tab}
         jobPosts={jobPosts}
         sources={sources}
+        jobsSort={sort}
         stagesCount={stats?.length ?? 0}
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}

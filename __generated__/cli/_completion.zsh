@@ -108,7 +108,7 @@ _jobfinder_run_pipeline() {
 _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
-    '--sort[sort]:sort:(overall interest skill location)' \
+    '--sort[sort]:sort:(all interest skill location excl. interest excl. location)' \
     '--sources-sort[sources-sort]:sources-sort:(interest posts name)'
 }
 

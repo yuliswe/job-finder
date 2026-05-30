@@ -143,7 +143,18 @@ export type ActivityRow = {
   entity: string;
 };
 
-export type JobPostSortKey = 'overall' | 'interest' | 'skill' | 'location';
+export type JobPostSortKey =
+  /** Skill × interest × location — the full product, default. */
+  | 'all'
+  | 'interest'
+  | 'skill'
+  | 'location'
+  /** Skill × location, ignore interest. Useful when the interests file
+   * isn't matching well but you trust the skill + location signals. */
+  | 'excl. interest'
+  /** Skill × interest, ignore location. Useful for ranking by fit alone
+   * when you're willing to relocate / consider remote regardless. */
+  | 'excl. location';
 export type SourceSortKey = 'interest' | 'posts' | 'name';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
@@ -415,7 +426,7 @@ export async function listJobPosts(args: {
   ]);
 
   switch (sort) {
-    case 'overall':
+    case 'all':
       // Match the in-JS `overallScore` formula: missing locationScore is
       // treated as 1 (neutral) so rows not yet re-evaluated don't sink.
       q = q.orderBy(
@@ -431,6 +442,22 @@ export async function listJobPosts(args: {
       break;
     case 'location':
       q = q.orderBy('JobPostEval.locationScore', ob => ob.desc().nullsLast());
+      break;
+    case 'excl. interest':
+      // skill × location, treating missing locationScore as 1 (neutral) so
+      // rows not yet re-evaluated don't sink — same convention as 'all'.
+      q = q.orderBy(
+        sql`"JobPostEval"."skillScore" * COALESCE("JobPostEval"."locationScore", 1)`,
+        ob => ob.desc().nullsLast()
+      );
+      break;
+    case 'excl. location':
+      // skill × interest. No COALESCE: both scores fill in the same
+      // evaluate run, so if one is null the other is too.
+      q = q.orderBy(
+        sql`"JobPostEval"."skillScore" * "JobPostEval"."interestScore"`,
+        ob => ob.desc().nullsLast()
+      );
       break;
   }
 

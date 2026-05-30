@@ -5,10 +5,12 @@ import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
 
 const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
-  'overall',
+  'all',
   'interest',
   'skill',
   'location',
+  'excl. interest',
+  'excl. location',
 ] as const satisfies readonly JobPostSortKey[];
 
 const SOURCE_SORT_CHOICES = [
@@ -30,7 +32,7 @@ export function createTuiCommand(): Command {
     .addOption(
       new Option('--sort <key>', 'sort key for the JobPost tab')
         .choices([...SORTS])
-        .default('overall' satisfies JobPostSortKey)
+        .default('all' satisfies JobPostSortKey)
     )
     .addOption(
       new Option('--sources-sort <key>', 'sort key for the Sources tab')

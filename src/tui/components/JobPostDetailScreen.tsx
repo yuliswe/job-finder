@@ -347,7 +347,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
   const reasons: { label: string; score: number | null; reason: string }[] = [];
   if (row.overallScore != null) {
     reasons.push({
-      label: 'overall',
+      label: 'all',
       score: row.overallScore,
       reason: 'interest * skill * location',
     });

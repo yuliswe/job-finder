@@ -13,11 +13,13 @@ import {
 } from 'src/tui/queries.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
 import type { AppTab } from 'src/tui/utils/types.js';
+import type { JobPostSortKey } from 'src/tui/queries.js';
 
 export function TabView({
   tab,
   jobPosts,
   sources,
+  jobsSort,
   stagesCount,
   activityCount,
   active = true,
@@ -27,6 +29,9 @@ export function TabView({
   tab: AppTab;
   jobPosts: JobPostRow[] | null;
   sources: SourceRow[] | null;
+  /** Active Jobs-tab sort. The JobPostList uses this to keep the
+   * `overall` column's number aligned with the active ordering. */
+  jobsSort: JobPostSortKey;
   stagesCount: number;
   activityCount: number;
   active?: boolean;
@@ -137,6 +142,7 @@ export function TabView({
             windowStart={windowStart}
             visibleCount={visibleCount}
             width={listWidth}
+            sort={jobsSort}
             active={active}
           />
         )}

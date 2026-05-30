@@ -14,10 +14,12 @@ export const TAB_LABELS: { key: AppTab; label: string }[] = [
 ];
 
 export const JOB_POST_SORTS: JobPostSortKey[] = [
-  'overall',
+  'all',
   'interest',
   'skill',
   'location',
+  'excl. interest',
+  'excl. location',
 ];
 
 export const SOURCE_SORTS: SourceSortKey[] = ['interest', 'posts', 'name'];

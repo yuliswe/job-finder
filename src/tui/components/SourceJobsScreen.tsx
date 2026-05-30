@@ -101,8 +101,7 @@ export function SourceJobsScreen({
 
     if (input === 's') {
       const idx = JOB_POST_SORTS.indexOf(sort);
-      const next =
-        JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
+      const next = JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'all';
 
       onSortChange(next);
       return;
@@ -147,6 +146,7 @@ export function SourceJobsScreen({
             windowStart={windowStart}
             visibleCount={visibleCount}
             width={listWidth}
+            sort={sort}
             active
           />
         </Box>
