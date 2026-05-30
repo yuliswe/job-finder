@@ -53,10 +53,14 @@ export function createEvaluateCommand(): Command {
       '--job-post-id <id>',
       'Re-evaluate only the JobPost with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: EvaluateOptions) => runEvaluate(opts));
+    .action(async (opts: EvaluateOptions) => {
+      await runEvaluate(opts);
+    });
 }
 
-async function runEvaluate(opts: EvaluateOptions): Promise<void> {
+export async function runEvaluate(
+  opts: EvaluateOptions
+): Promise<{ processed: number }> {
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -127,7 +131,7 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
     terminal.log(
       'No viewed JobPost rows with a description. Run `pipeline viewing` first.'
     );
-    return;
+    return { processed: 0 };
   }
 
   const results = await Promise.all(
@@ -140,6 +144,7 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
   );
 
   terminal.log(`Evaluated ${jobPostEvaluated}/${targets.length} JobPost rows`);
+  return { processed: targets.length };
 }
 
 async function evaluateOne(args: {

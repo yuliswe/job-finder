@@ -55,15 +55,15 @@ export function createSourcingCommand(): Command {
       '--job-source-id <id>',
       'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: SourcingOptions) =>
-      withBrowserInstance(context => runSourcing(context, opts))
-    );
+    .action(async (opts: SourcingOptions) => {
+      await withBrowserInstance(context => runSourcing(context, opts));
+    });
 }
 
-async function runSourcing(
+export async function runSourcing(
   context: BrowserContext,
   opts: SourcingOptions
-): Promise<void> {
+): Promise<{ processed: number }> {
   if (opts.jobSourceId) {
     await enqueuePipelineTask({
       task: 'sourcing',
@@ -115,7 +115,7 @@ async function runSourcing(
 
   if (sources.length === 0) {
     terminal.log('No JobSource rows need sourcing. Nothing to do.');
-    return;
+    return { processed: 0 };
   }
 
   // Read interests once up front. Empty is OK — `findCompanyUrl` scores 0.0
@@ -130,6 +130,7 @@ async function runSourcing(
 
   const filled = results.reduce((sum, r) => sum + (r?.urlFilled ?? 0), 0);
   terminal.log(`Filled url on ${filled} JobSource row(s)\n`);
+  return { processed: sources.length };
 }
 
 async function sourceOneJobSource(args: {

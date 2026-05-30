@@ -54,15 +54,15 @@ export function createScriptingCommand(): Command {
       '--job-list-source-id <id>',
       'Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: ScriptingOptions) =>
-      withBrowserInstance(context => runScripting(context, opts))
-    );
+    .action(async (opts: ScriptingOptions) => {
+      await withBrowserInstance(context => runScripting(context, opts));
+    });
 }
 
-async function runScripting(
+export async function runScripting(
   context: BrowserContext,
   opts: ScriptingOptions
-): Promise<void> {
+): Promise<{ processed: number }> {
   if (opts.jobListSourceId) {
     const exists = await db
       .selectFrom('JobListSource')
@@ -120,6 +120,7 @@ async function runScripting(
   terminal.log(
     `Updated ${jobListSourceUpdated} JobListSource rows with parser scripts\n`
   );
+  return { processed: targets.length };
 }
 
 async function scriptOneTarget(args: {

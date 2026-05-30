@@ -51,15 +51,15 @@ export function createViewingCommand(): Command {
       '--job-post-id <id>',
       'Re-view only the JobPost with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: ViewingOptions) =>
-      withBrowserInstance(context => runAll(context, opts))
-    );
+    .action(async (opts: ViewingOptions) => {
+      await withBrowserInstance(context => runViewing(context, opts));
+    });
 }
 
-async function runAll(
+export async function runViewing(
   context: BrowserContext,
   opts: ViewingOptions
-): Promise<void> {
+): Promise<{ processed: number }> {
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -109,7 +109,7 @@ async function runAll(
 
   if (targets.length === 0) {
     terminal.log('No unprocessed JobPost rows. Nothing to do.');
-    return;
+    return { processed: 0 };
   }
 
   const results = await Promise.all(
@@ -122,6 +122,7 @@ async function runAll(
   );
 
   terminal.log(`Viewed and updated ${jobPostUpdated} JobPost rows\n`);
+  return { processed: targets.length };
 }
 
 async function viewOneTarget(args: {

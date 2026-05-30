@@ -67,12 +67,12 @@ export function createRunScriptsCommand(): Command {
         includeFailed?: boolean;
         jobListSourceId?: string;
       }) => {
-        await withBrowserInstance(context => runAll(context, opts));
+        await withBrowserInstance(context => runRunScripts(context, opts));
       }
     );
 }
 
-async function runAll(
+export async function runRunScripts(
   context: BrowserContext,
   opts: {
     division?: string;
@@ -81,7 +81,7 @@ async function runAll(
     includeFailed?: boolean;
     jobListSourceId?: string;
   }
-): Promise<void> {
+): Promise<{ processed: number }> {
   if (opts.jobListSourceId) {
     const exists = await db
       .selectFrom('JobListSource')
@@ -131,7 +131,7 @@ async function runAll(
     terminal.log(
       'No JobListSource rows with a validated parserScript. Nothing to do.'
     );
-    return;
+    return { processed: 0 };
   }
 
   const interests = await getUserInterests();
@@ -168,6 +168,7 @@ async function runAll(
   );
 
   terminal.log(`Inserted ${jobPostInserted} rows into JobPost\n`);
+  return { processed: targets.length };
 }
 
 async function resolveFilterPrefs(args: {

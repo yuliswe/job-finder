@@ -51,15 +51,15 @@ export function createListingCommand(): Command {
       '--job-source-id <id>',
       'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
-    .action((opts: ListingOptions) =>
-      withBrowserInstance(context => runListing(context, opts))
-    );
+    .action(async (opts: ListingOptions) => {
+      await withBrowserInstance(context => runListing(context, opts));
+    });
 }
 
-async function runListing(
+export async function runListing(
   context: BrowserContext,
   opts: ListingOptions
-): Promise<void> {
+): Promise<{ processed: number }> {
   if (opts.jobSourceId) {
     const exists = await db
       .selectFrom('JobSource')
@@ -123,6 +123,7 @@ async function runListing(
   );
 
   terminal.log(`Inserted ${jobListSourceInserted} rows into JobListSource\n`);
+  return { processed: sources.length };
 }
 
 async function listOneSource(args: {
