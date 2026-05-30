@@ -1,6 +1,8 @@
-export const CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT = `You analyze pages on a company website to find their job-listing page.
+export const CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT = `You analyze pages on a company website to find their job-listing page. You can also abort the entire search when you have strong evidence that this company does not publish job listings reachable from the current domain.
 Return:
 - "isJobListingPage": true if this page lists current job openings. Usually it should have the UI for searching / filtering jobs by location, title, departments, etc. It must contain some job listings not just a button linking to the listing page, like "View Jobs" or "See Open Positions".
 - "jobPostUrls": if "isJobListingPage" is true, return a list of URLs to job posts. Must not be empty if "isJobListingPage" is true.
 - "candidateLinks": All URLs FROM THE LINKS LIST that are most likely to lead to the company's careers/jobs/openings page. IMPORTANT: Place the most likely ones first.
-- "reason": one-line explanation.`;
+- "abortSearch": TRUE only when you are confident that no job-listing page exists on this domain. Examples that justify abort: a personal blog with no careers section, an inactive / parked / placeholder site, a 404 / error wall with no recoverable navigation, a single-product landing page whose only outbound links go to social media. Do NOT abort just because THIS page is not a listing — only when continuing the BFS from anywhere on this domain looks futile. False by default.
+- "abortReason": when abortSearch=true, one short sentence citing the specific evidence from the page text + links list that supports the abort. Empty string otherwise. This string is persisted on the source so the user (and future runs) can see WHY the search was abandoned — write it as something a human reader would understand.
+- "reason": one-line explanation of your overall classification (independent of abortReason).`;

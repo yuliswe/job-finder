@@ -126,6 +126,10 @@ export type SourceRow = {
    * backlog regardless of the toggle. The TUI uses this to dim out-of-scope
    * rows when they're shown via `includeOutOfScope`. */
   isOutOfScopeForListing: boolean;
+  /** LLM-generated reason from the listing BFS when it gave up on this
+   * source (`abortSearch=true`). Null when the BFS hasn't aborted or hasn't
+   * run yet. Surfaced in the status column when present. */
+  abortListingReason: string | null;
   /** Single-line summary of where this source is in the pipeline. Computed
    * from the other fields; see `computeSourceStatus`. */
   status: string;
@@ -628,6 +632,7 @@ export async function listSources(args: {
       'JobSource.url as sourceUrl',
       'JobSource.interestScore as sourceInterestScore',
       'JobSource.summary as sourceSummary',
+      'JobSource.abortListingReason as abortListingReason',
       eb.ref('JobSource.isActive').as('sourceIsActive'),
       'list.id as listId',
       'list.url as listUrl',
@@ -690,12 +695,14 @@ export async function listSources(args: {
       jobPostCount,
       isActive: r.listIsActive ?? null,
       isOutOfScopeForListing,
+      abortListingReason: r.abortListingReason,
       status: computeSourceStatus({
         score,
         sourceIsActive,
         listId: r.listId,
         hasScript,
         jobPostCount,
+        abortListingReason: r.abortListingReason,
       }),
     };
   });
@@ -711,15 +718,30 @@ function computeSourceStatus(args: {
   listId: string | null;
   hasScript: number;
   jobPostCount: number;
+  abortListingReason: string | null;
 }): string {
-  const { score, sourceIsActive, listId, hasScript, jobPostCount } = args;
+  const {
+    score,
+    sourceIsActive,
+    listId,
+    hasScript,
+    jobPostCount,
+    abortListingReason,
+  } = args;
+
   if (score == null) return 'Waiting for sourcing';
   if (sourceIsActive !== 1) return 'Out of scope: deactivated';
   if (score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
     return 'Out of scope: low interest';
   }
 
-  if (listId == null) return 'Waiting for listing';
+  if (listId == null) {
+    // BFS already gave up — surface the LLM's reason instead of the bland
+    // "Waiting for listing" so the user knows it won't auto-retry.
+    if (abortListingReason) return `Listing aborted: ${abortListingReason}`;
+    return 'Waiting for listing';
+  }
+
   if (hasScript === 0) return 'Waiting for scripting';
   if (jobPostCount === 0) return 'Waiting for jobs';
   return 'Done';

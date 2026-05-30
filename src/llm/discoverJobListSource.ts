@@ -14,17 +14,31 @@ import { terminal } from 'src/utils/terminal';
 
 const MAX_CRAWL_DECISION_ATTEMPTS = 3;
 
+export type FindJobListPageResult =
+  | { kind: 'found'; url: string }
+  | { kind: 'not_found' }
+  | { kind: 'aborted'; reason: string };
+
 /**
  * Starting from `startUrl`, BFS the same-domain links the LLM ranks as most
  * likely to lead to a job-listing page (depth root = 0, capped at
  * `PIPELINE_LISTING_BFS_MAX_DEPTH` and at most
- * `PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE` pages visited overall). Returns
- * the URL of the first page the LLM classifies as a listing page, or null.
+ * `PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE` pages visited overall).
+ *
+ * Returns:
+ *   - `{ kind: 'found', url }`         — first page the LLM classified AND
+ *                                        verified as a listing page.
+ *   - `{ kind: 'aborted', reason }`    — LLM signalled `abortSearch=true`
+ *                                        with a high-confidence verdict that
+ *                                        this source has no listings to find.
+ *                                        Caller should persist the reason.
+ *   - `{ kind: 'not_found' }`          — exhausted depth / node budget or
+ *                                        ran out of links without success.
  */
 export async function findJobListPage(args: {
   context: BrowserContext;
   startUrl: string;
-}): Promise<string | null> {
+}): Promise<FindJobListPageResult> {
   const { context, startUrl } = args;
 
   const visited = new Set<string>();
@@ -33,7 +47,7 @@ export async function findJobListPage(args: {
   const normalizedStart = normalizeUrl(startUrl);
   if (!normalizedStart) {
     terminal.warn(`Invalid start URL: ${startUrl}`);
-    return null;
+    return { kind: 'not_found' };
   }
 
   queue.push({ url: normalizedStart, depth: 0 });
@@ -70,6 +84,14 @@ export async function findJobListPage(args: {
       continue;
     }
 
+    if (decision.abortSearch) {
+      // `abortReason` is LLM-generated and validated non-empty above.
+      terminal.warn(
+        `BFS aborted by LLM at ${url} after ${visited.size} page(s): ${decision.abortReason}`
+      );
+      return { kind: 'aborted', reason: decision.abortReason };
+    }
+
     if (decision.isJobListingPage) {
       // Sanity-check: open the first job post URL the LLM extracted and ask
       // the LLM to confirm it actually looks like a job posting. Catches
@@ -87,7 +109,7 @@ export async function findJobListPage(args: {
             terminal.log(
               `Found listing page: ${url} — ${decision.reason} (sample ${sampleUrl}: ${verdict.reason})`
             );
-            return url;
+            return { kind: 'found', url };
           }
 
           terminal.warn(
@@ -111,7 +133,7 @@ export async function findJobListPage(args: {
     }
   }
 
-  return null;
+  return { kind: 'not_found' };
 }
 
 /**
@@ -127,6 +149,8 @@ async function classifyAndRankLinks(args: {
   isJobListingPage: boolean;
   jobPostUrls: { url: string; title: string }[];
   candidateLinks: string[];
+  abortSearch: boolean;
+  abortReason: string;
   reason: string;
 }> {
   const { url, page } = args;
@@ -173,7 +197,19 @@ ${page.links.join('\n')}`,
       candidateLinks: v.pipe(
         v.array(v.string()),
         v.description(
-          'URLs copied verbatim FROM THE LINKS LIST above that are most likely to lead to the company careers/jobs page. Order them most-likely first. Empty only if this page IS the listing page or there are truly no plausible candidates.'
+          'URLs copied verbatim FROM THE LINKS LIST above that are most likely to lead to the company careers/jobs page. Order them most-likely first. Empty only if this page IS the listing page, you are aborting the search, or there are truly no plausible candidates.'
+        )
+      ),
+      abortSearch: v.pipe(
+        v.boolean(),
+        v.description(
+          'Set TRUE only if you have high confidence this company does NOT publish job listings reachable from anywhere within the same domain — e.g. the site is a personal blog, an inactive/parked domain, a non-hiring landing page with no careers section that links nowhere relevant, or a 404/error wall. When TRUE, the BFS abandons this source entirely. Do NOT set true just because THIS page is not a listing — only when you are sure the whole search is futile. False by default.'
+        )
+      ),
+      abortReason: v.pipe(
+        v.string(),
+        v.description(
+          'When abortSearch=true, one short sentence explaining what about the site makes the search futile (cited evidence from the page text + links). Empty string when abortSearch=false.'
         )
       ),
       reason: v.pipe(
@@ -186,11 +222,23 @@ ${page.links.join('\n')}`,
     metadata: { configKey: 'LLM_LISTING_MODEL' },
     logger: terminal,
     validate: parsed => {
-      if (!parsed.isJobListingPage && parsed.candidateLinks.length === 0) {
+      if (
+        !parsed.isJobListingPage &&
+        !parsed.abortSearch &&
+        parsed.candidateLinks.length === 0
+      ) {
         return {
           valid: false,
           feedback:
-            'You said this is NOT a job-listing page AND returned no candidateLinks. That leaves the search with no next step. Either (a) pick the most plausible links from the provided links list, or (b) reconsider whether this page actually is a listing page.',
+            'You said this is NOT a job-listing page, did NOT abort the search, AND returned no candidateLinks. That leaves the search with no next step. Either (a) pick the most plausible links from the provided links list, (b) reconsider whether this page actually is a listing page, or (c) set abortSearch=true with an abortReason if you genuinely believe the whole site has no listings to find.',
+        };
+      }
+
+      if (parsed.abortSearch && !parsed.abortReason.trim()) {
+        return {
+          valid: false,
+          feedback:
+            'abortSearch=true requires a non-empty abortReason citing the evidence (e.g. "site is a personal blog with no careers section and no outbound links to job platforms").',
         };
       }
 

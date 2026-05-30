@@ -63,6 +63,7 @@ export interface JobPostEval {
 }
 
 export interface JobSource {
+  abortListingReason: string | null;
   createdAt: Generated<Timestamp>;
   id: string;
   interestScore: number | null;

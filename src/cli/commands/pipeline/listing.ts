@@ -141,8 +141,33 @@ async function listOneSource(args: {
         ? source.url
         : `https://${source.url}`;
 
-      const listingUrl = await findJobListPage({ context, startUrl });
-      if (!listingUrl) {
+      const outcome = await findJobListPage({ context, startUrl });
+
+      if (outcome.kind === 'aborted') {
+        // Persist the LLM's reason on JobSource so the TUI / future runs can
+        // see WHY this source was abandoned (the BFS won't be re-attempted
+        // unless --include-failed / --all are passed). The reason string
+        // here is the LLM-generated `abortReason` field, never hardcoded.
+        await db
+          .updateTable('JobSource')
+          .set({ abortListingReason: outcome.reason })
+          .where('id', '=', source.id)
+          .execute();
+
+        terminal.warn(
+          `Listing aborted by LLM for "${source.name}": ${outcome.reason}`
+        );
+
+        await recordPipelineState({
+          task: 'listing',
+          state: PIPELINE_STATE.NO_LISTING_FOUND,
+          reason: `LLM aborted: ${outcome.reason}`,
+          entity: { ofJobSourceId: source.id },
+        });
+        return { jobListSourceInserted: 0 };
+      }
+
+      if (outcome.kind === 'not_found') {
         terminal.warn(
           `No job-listing page found within depth limit for "${source.name}"`
         );
@@ -155,6 +180,7 @@ async function listOneSource(args: {
         return { jobListSourceInserted: 0 };
       }
 
+      const listingUrl = outcome.url;
       const newListId = newId();
       const result = await db
         .insertInto('JobListSource')
