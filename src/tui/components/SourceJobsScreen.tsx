@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect } from 'react';
 
 import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
@@ -16,20 +16,28 @@ import { prettyUrl } from 'src/tui/utils/format.js';
 
 /** Full-screen "jobs from this source" view, opened with Enter on a row in
  * the Sources tab. Same list-on-left, detail-on-right layout as the main
- * Jobs tab — with the company name pinned in the header. */
+ * Jobs tab — with the company name pinned in the header.
+ *
+ * `cursor` and `sort` are controlled by the parent (App) so they survive
+ * this screen's unmount when the user drills into a JobPostDetailScreen
+ * and back out. Resetting them on a new source is the parent's job. */
 export function SourceJobsScreen({
   source,
-  initialSort,
+  sort,
+  onSortChange,
+  cursor,
+  onCursorChange,
   onClose,
   onOpenJob,
 }: {
   source: SourceRow;
-  initialSort: JobPostSortKey;
+  sort: JobPostSortKey;
+  onSortChange: (next: JobPostSortKey) => void;
+  cursor: number;
+  onCursorChange: (next: number) => void;
   onClose: () => void;
   onOpenJob: (id: string) => void;
 }) {
-  const [sort, setSort] = useState<JobPostSortKey>(initialSort);
-  const [cursor, setCursor] = useState(0);
   const { rows: termRows, cols: termCols } = useTerminalSize();
 
   // Only refetch when sort / source.sourceId changes — useCallback keeps the
@@ -65,9 +73,9 @@ export function SourceJobsScreen({
   // Clamp cursor when data shrinks.
   useEffect(() => {
     if (cursor > 0 && cursor >= rowCount) {
-      setCursor(Math.max(0, rowCount - 1));
+      onCursorChange(Math.max(0, rowCount - 1));
     }
-  }, [cursor, rowCount]);
+  }, [cursor, rowCount, onCursorChange]);
 
   useInput((input, key) => {
     if (key.escape || input === 'q') {
@@ -76,12 +84,12 @@ export function SourceJobsScreen({
     }
 
     if (key.upArrow) {
-      setCursor(c => Math.max(0, c - 1));
+      onCursorChange(Math.max(0, cursor - 1));
       return;
     }
 
     if (key.downArrow) {
-      setCursor(c => Math.min(rowCount - 1, c + 1));
+      onCursorChange(Math.min(rowCount - 1, cursor + 1));
       return;
     }
 
@@ -96,7 +104,7 @@ export function SourceJobsScreen({
       const next =
         JOB_POST_SORTS[(idx + 1) % JOB_POST_SORTS.length] ?? 'overall';
 
-      setSort(next);
+      onSortChange(next);
       return;
     }
 

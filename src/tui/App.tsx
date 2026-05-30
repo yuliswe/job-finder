@@ -41,6 +41,12 @@ export function App({ initial }: { initial: AppOptions }) {
   const [pipelineCursor, setPipelineCursor] = useState(0);
   const [openJobId, setOpenJobId] = useState<string | null>(null);
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
+  // Cursor/sort for SourceJobsScreen live here (not inside the screen) so
+  // they survive its unmount when the user drills into a JobPostDetailScreen
+  // and back out. Both reset when a *different* source is opened from the
+  // Sources tab.
+  const [sourceJobsCursor, setSourceJobsCursor] = useState(0);
+  const [sourceJobsSort, setSourceJobsSort] = useState<JobPostSortKey>(sort);
 
   const stats = useLiveData(useCallback(() => getPipelineStats(), []));
   const activity = useLiveData(
@@ -155,7 +161,10 @@ export function App({ initial }: { initial: AppOptions }) {
     return (
       <SourceJobsScreen
         source={openSource}
-        initialSort={sort}
+        sort={sourceJobsSort}
+        onSortChange={setSourceJobsSort}
+        cursor={sourceJobsCursor}
+        onCursorChange={setSourceJobsCursor}
         onClose={() => setOpenSourceId(null)}
         onOpenJob={id => setOpenJobId(id)}
       />
@@ -191,7 +200,14 @@ export function App({ initial }: { initial: AppOptions }) {
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}
         onOpenJob={id => setOpenJobId(id)}
-        onOpenSource={id => setOpenSourceId(id)}
+        onOpenSource={id => {
+          // Fresh source session: reset cursor + seed sort from the Jobs
+          // tab's current sort. (When the user drills into JobPostDetail and
+          // back out *within* the same session, these are preserved.)
+          setSourceJobsCursor(0);
+          setSourceJobsSort(sort);
+          setOpenSourceId(id);
+        }}
       />
       <ActivityFeed rows={activity ?? []} />
       <Footer />
