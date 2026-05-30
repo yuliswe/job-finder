@@ -115,6 +115,9 @@ export type SourceRow = {
    * backlog regardless of the toggle. The TUI uses this to dim out-of-scope
    * rows when they're shown via `includeOutOfScope`. */
   isOutOfScopeForListing: boolean;
+  /** Single-line summary of where this source is in the pipeline. Computed
+   * from the other fields; see `computeSourceStatus`. */
+  status: string;
 };
 
 export type ActivityRow = {
@@ -574,6 +577,9 @@ export async function listSources(args: {
       sourceIsActive !== 1 ||
       (score != null && score < PIPELINE_LISTING_MIN_INTEREST_SCORE);
 
+    const hasScript = r.listParserScript ? 1 : 0;
+    const jobPostCount = Number(r.jobPostCount ?? 0);
+
     return {
       sourceId: r.sourceId,
       sourceName: r.sourceName,
@@ -586,12 +592,43 @@ export async function listSources(args: {
       listIsActive: r.listIsActive ?? null,
       listLocations: r.listLocations,
       listDivisions: r.listDivisions,
-      hasScript: r.listParserScript ? 1 : 0,
-      jobPostCount: Number(r.jobPostCount ?? 0),
+      hasScript,
+      jobPostCount,
       isActive: r.listIsActive ?? null,
       isOutOfScopeForListing,
+      status: computeSourceStatus({
+        score,
+        sourceIsActive,
+        listId: r.listId,
+        hasScript,
+        jobPostCount,
+      }),
     };
   });
+}
+
+/** Single-line pipeline status for a source, derived from the same fields
+ * the rest of SourceRow exposes. Checked in priority order — earlier states
+ * (still pre-sourcing) shadow later ones, and out-of-scope verdicts shadow
+ * any "Waiting for…" interpretation. */
+function computeSourceStatus(args: {
+  score: number | null;
+  sourceIsActive: number;
+  listId: string | null;
+  hasScript: number;
+  jobPostCount: number;
+}): string {
+  const { score, sourceIsActive, listId, hasScript, jobPostCount } = args;
+  if (score == null) return 'Waiting for sourcing';
+  if (sourceIsActive !== 1) return 'Out of scope: deactivated';
+  if (score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
+    return 'Out of scope: low interest';
+  }
+
+  if (listId == null) return 'Waiting for listing';
+  if (hasScript === 0) return 'Waiting for scripting';
+  if (jobPostCount === 0) return 'Waiting for jobs';
+  return 'Done';
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
