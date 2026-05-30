@@ -81,7 +81,7 @@ _jobfinder_pipeline() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seeding approve-seeds sourcing listing scripting run-scripts viewing evaluate)' \
+    '1:subcommand:(seeding approve-seeds sourcing listing scripting run-scripts viewing evaluate run-pipeline)' \
     '*:: :->args'
 
   case $state in
@@ -95,6 +95,7 @@ _jobfinder_pipeline() {
     run-scripts) _jobfinder_pipeline_run_scripts ;;
     viewing) _jobfinder_pipeline_viewing ;;
     evaluate) _jobfinder_pipeline_evaluate ;;
+    run-pipeline) _normal ;;
       esac
       ;;
   esac
@@ -118,12 +119,13 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(scrape sites pipeline tui completion-script-dump help-menu-dump)' \
+    '1:subcommand:(init scrape sites pipeline tui completion-script-dump help-menu-dump)' \
     '*:: :->args'
 
   case $state in
     args)
       case $line[1] in
+    init) _normal ;;
     scrape) _jobfinder_scrape ;;
     sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
