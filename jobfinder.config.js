@@ -165,6 +165,14 @@ export const PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE = 50;
 export const PIPELINE_VIEWING_MIN_TITLE_RELEVANCY = 0.5;
 
 /**
+ * Posts whose viewing-stage locationScore falls below this threshold are
+ * treated as out-of-scope by downstream stages (notably `evaluate`). The
+ * viewing LLM produces a score in [0, 1] based on the posting's location +
+ * remote status against the location preferences in interests.md.
+ */
+export const PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY = 0.5;
+
+/**
  * If a single job listing page shows more jobs than this amount, ask the LLM to
  * restrict the filters to narrow it down, to avoid overwhelming the user with
  * too many listings at once.

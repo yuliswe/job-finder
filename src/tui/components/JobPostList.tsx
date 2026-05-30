@@ -6,6 +6,7 @@ const COLS: Column<JobPostRow>[] = [
   { label: 'overall', value: r => fmtScore(r.overallScore), min: 1 },
   { label: 'interest', value: r => fmtScore(r.interestScore), min: 1 },
   { label: 'skill', value: r => fmtScore(r.skillScore), min: 1 },
+  { label: 'loc', value: r => fmtScore(r.locationScore), min: 1 },
   {
     label: 'days',
     value: r => fmtDaysAgo(r.postedAt, r.postedAtSource),

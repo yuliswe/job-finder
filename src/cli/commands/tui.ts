@@ -8,6 +8,7 @@ const SORTS = [
   'overall',
   'interest',
   'skill',
+  'location',
 ] as const satisfies readonly JobPostSortKey[];
 
 const SOURCE_SORT_CHOICES = [

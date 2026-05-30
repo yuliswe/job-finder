@@ -89,6 +89,8 @@ type JobPostEval = {
   // ── fields ──
   interestScore?: Real;
   interestScoreReason?: Text;
+  locationScore?: Real;
+  locationScoreReason?: Text;
   skillScore?: Real;
   skillScoreBreakdown?: Text;
   skillScoreReason?: Text;

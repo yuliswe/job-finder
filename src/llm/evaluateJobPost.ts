@@ -20,21 +20,33 @@ export type JobPostEvaluation = {
   skillScore: number;
   skillScoreReason: string;
   skillScoreBreakdown: SkillBreakdownEntry[];
+  locationScore: number;
+  locationScoreReason: string;
 };
 
 /**
  * Ask the LLM to score a single job posting against the user's interests + CV
- * along two axes (interest and skill). The set of skills under consideration
- * comes from the posting-derived `skillRequirements` (extracted at viewing
- * time, CV-free); here the LLM only scores the user's experience with each.
+ * along three axes (interest, skill, location). The set of skills under
+ * consideration comes from the posting-derived `skillRequirements` (extracted
+ * at viewing time, CV-free); here the LLM only scores the user's experience
+ * with each. Location is scored against the location preferences expressed
+ * in the interests file vs the posting's location + remote status.
  */
 export async function evaluateJobPost(args: {
   interests: string;
   cv: string;
-  job: { title: string; description: string };
+  job: {
+    title: string;
+    description: string;
+    location: string | null;
+    isRemote: number | null;
+  };
   skillRequirements: SkillRequirements;
 }): Promise<JobPostEvaluation> {
   const { interests, cv, job, skillRequirements } = args;
+
+  const isRemoteLabel =
+    job.isRemote === null ? 'unknown' : job.isRemote ? 'yes' : 'no';
 
   const memory = new Memory([{ system: EVALUATE_JOB_POST_SYSTEM_PROMPT }]);
 
@@ -56,6 +68,9 @@ User CV:
 ${cv || '(empty)'}
 
 Job title: ${job.title}
+
+Job location: ${job.location || '(not given)'}
+Is remote: ${isRemoteLabel}
 
 Job description:
 
@@ -105,6 +120,18 @@ Score this posting and return the structured evaluation. For skillScores, return
           'One entry for every skill in the input skillRequirements, using the EXACT skill name strings. Each input skill must appear exactly once; do not add, rename, or omit any.'
         )
       ),
+      locationScore: v.pipe(
+        v.number(),
+        v.description(
+          "Score in [0, 1] of how well the posting's location (and remote status) fits the user's location preferences from the interests file. 0.5 when the posting's location is unknown or the user has no stated preference."
+        )
+      ),
+      locationScoreReason: v.pipe(
+        v.string(),
+        v.description(
+          "One sentence (≤ ~200 chars) justifying locationScore, citing the user's stated location preference (or its absence) and the posting's location / remote status."
+        )
+      ),
     }),
     maxAttempts: MAX_ATTEMPTS,
     model: LLM_EVALUATION_MODEL,
@@ -116,6 +143,21 @@ Score this posting and return the structured evaluation. For skillScores, return
         return {
           valid: false,
           feedback: `interestScore must be in [0, 1]; got ${parsed.interestScore}.`,
+        };
+      }
+
+      if (!inRange(parsed.locationScore)) {
+        return {
+          valid: false,
+          feedback: `locationScore must be in [0, 1]; got ${parsed.locationScore}.`,
+        };
+      }
+
+      if (!parsed.locationScoreReason.trim()) {
+        return {
+          valid: false,
+          feedback:
+            'locationScoreReason must be a non-empty sentence citing the user-stated location preference (or its absence) and the posting location.',
         };
       }
 
@@ -202,6 +244,8 @@ Score this posting and return the structured evaluation. For skillScores, return
     skillScore,
     skillScoreReason,
     skillScoreBreakdown,
+    locationScore: result.locationScore,
+    locationScoreReason: result.locationScoreReason.trim(),
   };
 }
 

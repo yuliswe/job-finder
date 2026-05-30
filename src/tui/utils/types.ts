@@ -17,6 +17,7 @@ export const JOB_POST_SORTS: JobPostSortKey[] = [
   'overall',
   'interest',
   'skill',
+  'location',
 ];
 
 export const SOURCE_SORTS: SourceSortKey[] = ['interest', 'posts', 'name'];

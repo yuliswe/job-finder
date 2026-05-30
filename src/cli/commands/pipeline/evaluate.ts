@@ -98,9 +98,18 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
     mode,
   });
 
+  const selectCols = [
+    'id',
+    'title',
+    'description',
+    'location',
+    'isRemote',
+    'skillRequirements',
+  ] as const;
+
   let query = db
     .selectFrom('JobPost')
-    .select(['id', 'title', 'description', 'skillRequirements'])
+    .select(selectCols)
     .where(qualifiedForEvaluate)
     .where(inScopeForEvaluate);
 
@@ -109,7 +118,7 @@ async function runEvaluate(opts: EvaluateOptions): Promise<void> {
   const targets = opts.jobPostId
     ? await db
         .selectFrom('JobPost')
-        .select(['id', 'title', 'description', 'skillRequirements'])
+        .select(selectCols)
         .where('JobPost.id', '=', opts.jobPostId)
         .execute()
     : await query.execute();
@@ -138,6 +147,8 @@ async function evaluateOne(args: {
     id: string;
     title: string;
     description: string | null;
+    location: string | null;
+    isRemote: number | null;
     skillRequirements: string | null;
   };
   interests: string;
@@ -162,7 +173,12 @@ async function evaluateOne(args: {
       const eva = await evaluateJobPost({
         interests,
         cv,
-        job: { title: target.title, description: target.description },
+        job: {
+          title: target.title,
+          description: target.description,
+          location: target.location,
+          isRemote: target.isRemote,
+        },
         skillRequirements,
       });
 
@@ -176,6 +192,8 @@ async function evaluateOne(args: {
           skillScore: eva.skillScore,
           skillScoreReason: eva.skillScoreReason,
           skillScoreBreakdown: JSON.stringify(eva.skillScoreBreakdown),
+          locationScore: eva.locationScore,
+          locationScoreReason: eva.locationScoreReason,
         })
         .onConflict(oc =>
           oc.column('ofJobPostId').doUpdateSet({
@@ -184,6 +202,8 @@ async function evaluateOne(args: {
             skillScore: eva.skillScore,
             skillScoreReason: eva.skillScoreReason,
             skillScoreBreakdown: JSON.stringify(eva.skillScoreBreakdown),
+            locationScore: eva.locationScore,
+            locationScoreReason: eva.locationScoreReason,
             updatedAt: new Date().toISOString(),
           })
         )

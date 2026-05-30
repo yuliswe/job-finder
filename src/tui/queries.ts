@@ -82,6 +82,8 @@ export type JobPostRow = {
   skillScoreReason: string | null;
   /** Parsed from the JSON-encoded JobPostEval.skillScoreBreakdown column. */
   skillScoreBreakdown: SkillBreakdownEntry[] | null;
+  locationScore: number | null;
+  locationScoreReason: string | null;
   /** Parsed from JobPost.skillRequirements — posting-derived only (no CV). */
   skillRequirements: SkillRequirements | null;
   overallScore: number | null;
@@ -117,7 +119,7 @@ export type ActivityRow = {
   entity: string;
 };
 
-export type JobPostSortKey = 'overall' | 'interest' | 'skill';
+export type JobPostSortKey = 'overall' | 'interest' | 'skill' | 'location';
 export type SourceSortKey = 'interest' | 'posts' | 'name';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
@@ -366,12 +368,16 @@ export async function listJobPosts(args: {
     'JobPostEval.skillScore as skillScore',
     'JobPostEval.skillScoreReason as skillScoreReason',
     'JobPostEval.skillScoreBreakdown as skillScoreBreakdownJson',
+    'JobPostEval.locationScore as locationScore',
+    'JobPostEval.locationScoreReason as locationScoreReason',
   ]);
 
   switch (sort) {
     case 'overall':
+      // Match the in-JS `overallScore` formula: missing locationScore is
+      // treated as 1 (neutral) so rows not yet re-evaluated don't sink.
       q = q.orderBy(
-        sql`"JobPostEval"."skillScore" * "JobPostEval"."interestScore"`,
+        sql`"JobPostEval"."skillScore" * "JobPostEval"."interestScore" * COALESCE("JobPostEval"."locationScore", 1)`,
         ob => ob.desc().nullsLast()
       );
       break;
@@ -380,6 +386,9 @@ export async function listJobPosts(args: {
       break;
     case 'skill':
       q = q.orderBy('JobPostEval.skillScore', ob => ob.desc().nullsLast());
+      break;
+    case 'location':
+      q = q.orderBy('JobPostEval.locationScore', ob => ob.desc().nullsLast());
       break;
   }
 
@@ -397,7 +406,7 @@ export async function listJobPosts(args: {
       ),
       overallScore:
         r.skillScore != null && r.interestScore != null
-          ? r.skillScore * r.interestScore
+          ? r.skillScore * r.interestScore * (r.locationScore ?? 1)
           : null,
     };
   });

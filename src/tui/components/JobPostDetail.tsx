@@ -39,6 +39,9 @@ export function JobPostDetail({ row }: { row: JobPostRow | null }) {
           interest: <Text bold>{fmtScore(row.interestScore)}</Text>
         </Text>
         <Text>
+          location: <Text bold>{fmtScore(row.locationScore)}</Text>
+        </Text>
+        <Text>
           overall: <Text bold>{fmtScore(row.overallScore)}</Text>
         </Text>
       </Box>

@@ -159,7 +159,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
     reasons.push({
       label: 'overall',
       score: row.overallScore,
-      reason: 'interest * skill',
+      reason: 'interest * skill * location',
     });
   }
 
@@ -176,6 +176,14 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
       label: 'skill',
       score: row.skillScore,
       reason: 'weighted average score of skill breakdown',
+    });
+  }
+
+  if (row.locationScoreReason) {
+    reasons.push({
+      label: 'location',
+      score: row.locationScore,
+      reason: row.locationScoreReason,
     });
   }
 
