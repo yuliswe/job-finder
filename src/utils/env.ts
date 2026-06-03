@@ -4,9 +4,14 @@ import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
   DB_PATH,
+  LLM_PLUGIN,
+  OLLAMA_HOST,
   OPENROUTER_API_KEY,
   SERPER_API_KEY,
 } from 'jobfinder.config.js';
+
+const VALID_LLM_PLUGINS = ['openrouter', 'anthropic', 'ollama'] as const;
+export type LlmPluginName = (typeof VALID_LLM_PLUGINS)[number];
 
 const ENV_PATH = '.env.local';
 const REQUIRED_VARS = ['OPENROUTER_API_KEY', 'DB_PATH'] as const;
@@ -47,5 +52,26 @@ export const Env = {
    * `jobfinder.config.js` populated it; callers decide whether that's fatal. */
   get SERPER_API_KEY(): string | undefined {
     return SERPER_API_KEY ?? process.env.SERPER_API_KEY;
+  },
+
+  /** Base URL of the local Ollama daemon. Only consulted when
+   * `LLM_PLUGIN === 'ollama'`. Defaults to `http://localhost:11434` via
+   * `jobfinder.config.js`. */
+  get OLLAMA_HOST(): string {
+    return process.env.OLLAMA_HOST ?? OLLAMA_HOST;
+  },
+
+  /** Which provider plugin handles every LLM call. See
+   * `jobfinder.config.js#LLM_PLUGIN` for the documented choices. Throws
+   * on an unrecognized value so a typo doesn't silently fall back. */
+  get LLM_PLUGIN(): LlmPluginName {
+    const raw = process.env.LLM_PLUGIN ?? LLM_PLUGIN;
+    if ((VALID_LLM_PLUGINS as readonly string[]).includes(raw)) {
+      return raw as LlmPluginName;
+    }
+
+    throw new Error(
+      `LLM_PLUGIN=${JSON.stringify(raw)} is not one of ${VALID_LLM_PLUGINS.join(' / ')}.`
+    );
   },
 };

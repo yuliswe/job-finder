@@ -25,6 +25,28 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 /**
+ * Which LLM provider every `LLM_*_MODEL` model name is sent to.
+ *   - `'openrouter'`  → OpenRouter API (default; supports the full model
+ *                       catalogue + web-search). Requires OPENROUTER_API_KEY.
+ *   - `'anthropic'`   → Anthropic SDK direct. Requires ANTHROPIC_API_KEY.
+ *                       Note: enableWebSearch is not yet wired up.
+ *   - `'ollama'`      → Local Ollama daemon. Requires Ollama installed and
+ *                       the chosen model pulled (`ollama pull <tag>`). The
+ *                       `LLM_*_MODEL` values become bare Ollama tags
+ *                       (e.g. `'llama3.1'`, `'qwen2.5:14b'`).
+ *
+ * This is a global switch — all pipeline tasks use the same provider.
+ */
+export const LLM_PLUGIN = 'openrouter';
+
+/**
+ * Base URL of the local Ollama daemon, consulted when `LLM_PLUGIN ===
+ * 'ollama'`. Default: `'http://localhost:11434'` (Ollama's default port).
+ * Override via `OLLAMA_HOST` env var to point at a remote daemon.
+ */
+export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the

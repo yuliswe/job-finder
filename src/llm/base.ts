@@ -7,10 +7,28 @@ import type {
   LlmMessage,
   LlmReasoningEffort,
 } from 'src/llm/plugins/interface.js';
+import { AnthropicSdkPlugin } from 'src/llm/plugins/anthropicSdk.js';
+import type { LlmPlugin } from 'src/llm/plugins/interface.js';
+import { OllamaPlugin } from 'src/llm/plugins/ollama.js';
 import { OpenRouterPlugin } from 'src/llm/plugins/openRouter.js';
+import { Env, type LlmPluginName } from 'src/utils/env.js';
 import { COLOURS, type Terminal } from 'src/utils/terminal';
 
-const plugin = new OpenRouterPlugin();
+// Single plugin instance picked at module load based on
+// `jobfinder.config.js#LLM_PLUGIN`. Provider switch is global — all
+// pipeline tasks talk to the same backend.
+const plugin: LlmPlugin = createPlugin(Env.LLM_PLUGIN);
+
+function createPlugin(name: LlmPluginName): LlmPlugin {
+  switch (name) {
+    case 'openrouter':
+      return new OpenRouterPlugin();
+    case 'anthropic':
+      return new AnthropicSdkPlugin();
+    case 'ollama':
+      return new OllamaPlugin();
+  }
+}
 
 /** Thrown when the provider returns a successful HTTP response with no content
  * (e.g. upstream model filtered the request or hit an internal timeout). Named
