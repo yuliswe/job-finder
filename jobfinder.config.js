@@ -47,6 +47,23 @@ export const LLM_PLUGIN = 'openrouter';
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
 /**
+ * Cap on simultaneous in-flight LLM requests across the whole process.
+ * Wraps `plugin.send()` in a pLimit so the run-pipeline orchestrator
+ * (6 task loops × per-task concurrency) doesn't fan out to the LLM
+ * provider unboundedly.
+ *
+ * `undefined` (default for `openrouter` / `anthropic`) = unlimited; the
+ *  provider's own rate limits are the only cap.
+ *
+ * When `LLM_PLUGIN === 'ollama'` and this value is not explicitly set,
+ * the effective cap is forced to **1** — a local Ollama daemon
+ * serializes inference internally and parallel requests just thrash GPU
+ * memory. Set this explicitly to override that default (e.g. set to 2 if
+ * you have enough VRAM for two simultaneous loads).
+ */
+export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the

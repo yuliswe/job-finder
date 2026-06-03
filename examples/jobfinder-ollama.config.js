@@ -47,6 +47,15 @@ export const LLM_PLUGIN = 'ollama';
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
 /**
+ * Cap on simultaneous in-flight LLM requests across the whole process.
+ * `undefined` lets `src/llm/base.ts` pick the plugin default — which for
+ * Ollama is **1** (a local daemon serializes inference; parallel calls
+ * just thrash VRAM). Bump to 2+ only if you actually have the GPU
+ * memory for multiple concurrent model loads.
+ */
+export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the

@@ -5,6 +5,7 @@ import {
   ANTHROPIC_API_KEY,
   DB_PATH,
   LLM_PLUGIN,
+  LLM_REQUEST_CONCURRENCY_MAX,
   OLLAMA_HOST,
   OPENROUTER_API_KEY,
   SERPER_API_KEY,
@@ -73,5 +74,22 @@ export const Env = {
     throw new Error(
       `LLM_PLUGIN=${JSON.stringify(raw)} is not one of ${VALID_LLM_PLUGINS.join(' / ')}.`
     );
+  },
+
+  /** User-configured cap on simultaneous LLM requests, or `undefined`
+   * when unset (the caller may then pick a plugin-appropriate default —
+   * see `resolveLlmConcurrency` in `src/llm/base.ts`). Env-var override
+   * accepts a positive integer; anything else throws. */
+  get LLM_REQUEST_CONCURRENCY_MAX(): number | undefined {
+    const raw = process.env.LLM_REQUEST_CONCURRENCY_MAX;
+    if (raw === undefined || raw === '') return LLM_REQUEST_CONCURRENCY_MAX;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(
+        `LLM_REQUEST_CONCURRENCY_MAX=${JSON.stringify(raw)} must be a positive integer (or unset for unlimited).`
+      );
+    }
+
+    return n;
   },
 };

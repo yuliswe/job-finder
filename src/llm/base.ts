@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { toJsonSchema } from '@valibot/to-json-schema';
+import pLimit, { type LimitFunction } from 'p-limit';
 import * as v from 'valibot';
 
 import type {
@@ -28,6 +29,33 @@ function createPlugin(name: LlmPluginName): LlmPlugin {
     case 'ollama':
       return new OllamaPlugin();
   }
+}
+
+/** Process-wide cap on simultaneous `plugin.send(...)` calls. `null` =
+ * unlimited (the limit fn is just bypassed in `llmSend`). See
+ * `resolveLlmConcurrency` for the resolution order. */
+const sendLimit: LimitFunction | null = (() => {
+  const cap = resolveLlmConcurrency(
+    Env.LLM_PLUGIN,
+    Env.LLM_REQUEST_CONCURRENCY_MAX
+  );
+
+  return cap == null ? null : pLimit(cap);
+})();
+
+/** Resolve the effective concurrency cap for `plugin.send(...)`:
+ *  1. Explicit `LLM_REQUEST_CONCURRENCY_MAX` always wins.
+ *  2. Otherwise, Ollama defaults to 1 — local daemons serialize
+ *     inference anyway and parallel requests just thrash GPU memory.
+ *  3. Otherwise, `null` (unlimited; the provider's own rate limits
+ *     are the only cap). */
+function resolveLlmConcurrency(
+  pluginName: LlmPluginName,
+  explicit: number | undefined
+): number | null {
+  if (explicit !== undefined) return explicit;
+  if (pluginName === 'ollama') return 1;
+  return null;
 }
 
 /** Thrown when the provider returns a successful HTTP response with no content
@@ -174,14 +202,19 @@ async function llmSend<S extends v.GenericSchema>(args: {
 
   const schemaBlock = `\n\n# Required response format\n\nYour response MUST be a single JSON object validating against this schema (descriptions explain each field; read them carefully):\n\n\`\`\`json\n${JSON.stringify(responseFormat.schema, null, 2)}\n\`\`\``;
   const messagesWithSchema = appendToLastSystemMessage(messages, schemaBlock);
-  const { content, totalTokens } = await plugin.send({
-    model,
-    messages: messagesWithSchema,
-    reasoningEffort,
-    responseFormat,
-    metadata,
-    enableWebSearch,
-  });
+  const doSend = (): Promise<{ content: string; totalTokens: number }> =>
+    plugin.send({
+      model,
+      messages: messagesWithSchema,
+      reasoningEffort,
+      responseFormat,
+      metadata,
+      enableWebSearch,
+    });
+
+  const { content, totalTokens } = sendLimit
+    ? await sendLimit(doSend)
+    : await doSend();
 
   if (!content) throw new LlmEmptyResponseError();
   const extracted = extractJson(content);

@@ -47,6 +47,15 @@ export const LLM_PLUGIN = 'openrouter';
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
 /**
+ * Cap on simultaneous in-flight LLM requests across the whole process.
+ * `undefined` (default) = unlimited; OpenRouter's own rate limits are
+ * the only cap. Set to a small integer if you're hitting rate limits
+ * during run-pipeline. When `LLM_PLUGIN === 'ollama'` and this is
+ * unset, the effective cap is forced to 1 — see `src/llm/base.ts`.
+ */
+export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
