@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from 'src/utils/fetchWithTimeout.js';
 import { terminal } from 'src/utils/terminal.js';
 
 const CDX_BASE = 'https://web.archive.org/cdx/search/cdx';
@@ -23,14 +24,9 @@ export async function earliestWaybackSnapshot(
     fl: 'timestamp',
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    // Hand-rolled timeout via AbortController above replaces the
-    // `fetchWithTimeout` helper the project lint rule normally requires.
-    // eslint-disable-next-line no-restricted-globals
-    const res = await fetch(`${CDX_BASE}?${params.toString()}`, {
-      signal: controller.signal,
+    const res = await fetchWithTimeout(`${CDX_BASE}?${params.toString()}`, {
+      timeoutMs: TIMEOUT_MS,
     });
 
     if (!res.ok) {
@@ -56,8 +52,6 @@ export async function earliestWaybackSnapshot(
     }
 
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

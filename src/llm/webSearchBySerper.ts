@@ -5,6 +5,7 @@ import { feedbackLoop, Memory, type ValidateResult } from 'src/llm/base.js';
 import type { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
 import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
 import { Env } from 'src/utils/env.js';
+import { fetchWithTimeout } from 'src/utils/fetchWithTimeout.js';
 import { type Terminal } from 'src/utils/terminal.js';
 
 const SERPER_ENDPOINT = 'https://google.serper.dev/search';
@@ -230,33 +231,24 @@ export async function webSearchBySerper<
  * Throws on HTTP failure / timeout — the agent loop's validator catches and
  * feeds the error back to the LLM as conversation feedback. */
 async function fetchSerper(query: string): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), SERPER_TIMEOUT_MS);
-  try {
-    // Hand-rolled timeout via AbortController above replaces the
-    // `fetchWithTimeout` helper the project lint rule normally requires.
-    // eslint-disable-next-line no-restricted-globals
-    const response = await fetch(SERPER_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': Env.SERPER_API_KEY!,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ q: query }),
-      signal: controller.signal,
-    });
+  const response = await fetchWithTimeout(SERPER_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'X-API-KEY': Env.SERPER_API_KEY!,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ q: query }),
+    timeoutMs: SERPER_TIMEOUT_MS,
+  });
 
-    if (!response.ok) {
-      const body = await response.text().catch(() => '');
-      throw new Error(
-        `Serper request failed: ${response.status} ${response.statusText}${body ? ` — ${body.slice(0, 500)}` : ''}`
-      );
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Serper request failed: ${response.status} ${response.statusText}${body ? ` — ${body.slice(0, 500)}` : ''}`
+    );
   }
+
+  return await response.json();
 }
 
 /** Open `url` in a fresh tab, return `document.body.innerText`. Throws on
