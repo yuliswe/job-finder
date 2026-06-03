@@ -18,3 +18,4 @@ build/
 *.db-wal
 *.db-shm
 *.out
+*.out.*

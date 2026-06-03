@@ -188,6 +188,20 @@ Requires:
 - A locally installed Chrome/Chromium.
 - All `LLM_*` models that the individual subcommands need (sourcing/listing/scripting/viewing/evaluate).
 
+## `export jobs`
+
+Dump fully-evaluated JobPost rows (status=`Done`) to a CSV file — i.e. posts in an active source tree, above the title-relevancy threshold, with viewing + evaluate already populated. Useful for ad-hoc analysis in a spreadsheet / pandas.
+
+```bash
+# Default output: ./jobs.out.csv (matches the *.out.* gitignore)
+jobfinder export jobs
+
+# Custom path + sort by skill × interest (ignore location)
+jobfinder export jobs ./shortlist.csv --sort 'excl. location'
+```
+
+Sort keys mirror `jobfinder tui`'s `--sort`: `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
+
 ## `help-menu-dump`
 
 Dump the full command tree (commands, subcommands, options, choices, defaults) as JSON. Useful for tooling that needs a machine-readable view of the CLI surface.

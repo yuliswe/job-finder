@@ -105,6 +105,29 @@ _jobfinder_run_pipeline() {
     '--include-failed[include-failed]'
 }
 
+_jobfinder_export_jobs() {
+  _arguments -s -S \
+    '1::output:' \
+    '(-s --sort)'{-s,--sort}'[sort]:sort:(all interest skill location excl. interest excl. location)'
+}
+
+_jobfinder_export() {
+  local state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:subcommand:(jobs)' \
+    '*:: :->args'
+
+  case $state in
+    args)
+      case $line[1] in
+    jobs) _jobfinder_export_jobs ;;
+      esac
+      ;;
+  esac
+}
+
 _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
@@ -123,7 +146,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init scrape sites pipeline run-pipeline tui completion-script-dump help-menu-dump)' \
+    '1:subcommand:(init scrape sites pipeline run-pipeline export tui completion-script-dump help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -134,6 +157,7 @@ _jobfinder() {
     sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
     run-pipeline) _jobfinder_run_pipeline ;;
+    export) _jobfinder_export ;;
     tui) _jobfinder_tui ;;
     completion-script-dump) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;

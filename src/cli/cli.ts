@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 
 import { createCompletionScriptDumpCommand } from 'src/cli/commands/completion-script-dump.js';
+import { createExportCommand } from 'src/cli/commands/export.js';
 import { createHelpMenuDumpCommand } from 'src/cli/commands/help-menu-dump.js';
 import { createInitCommand } from 'src/cli/commands/init.js';
 import { createPipelineCommand } from 'src/cli/commands/pipeline.js';
@@ -20,6 +21,7 @@ program.addCommand(createScrapeCommand());
 program.addCommand(createSitesCommand());
 program.addCommand(createPipelineCommand());
 program.addCommand(createRunPipelineCommand());
+program.addCommand(createExportCommand());
 program.addCommand(createTuiCommand());
 program.addCommand(createCompletionScriptDumpCommand(program));
 program.addCommand(createHelpMenuDumpCommand(program));
