@@ -52,19 +52,19 @@ export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './jin-seeds.local';
+export const SEEDS_DIR = './seeds.local';
 
 /**
  * Path to the SQLite database file. May be relative (to the CWD where you
  * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
  * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
  */
-export const DB_PATH = './jin-jobs.db';
+export const DB_PATH = './jobs.db';
 
 /**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_SEEDING_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used by the sourcing process.
@@ -78,7 +78,7 @@ export const LLM_SEEDING_MODEL = 'deepseek/deepseek-v4-flash';
  * company, and assign an interest score to the company based on the interest.md
  * file.
  */
-export const LLM_SOURCING_MODEL = 'mistralai/mistral-nemo';
+export const LLM_SOURCING_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -91,7 +91,7 @@ export const LLM_SOURCING_MODEL = 'mistralai/mistral-nemo';
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -101,8 +101,8 @@ export const LLM_LISTING_MODEL = 'deepseek/deepseek-v4-flash';
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = 'deepseek/deepseek-v4-flash';
-export const LLM_CODING_MODEL_SMARTER = 'deepseek/deepseek-v4-pro';
+export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
+export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -113,7 +113,7 @@ export const LLM_CODING_MODEL_SMARTER = 'deepseek/deepseek-v4-pro';
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -125,7 +125,7 @@ export const LLM_VIEWING_MODEL = 'deepseek/deepseek-v4-flash';
  * - low input cost
  * - low input cost
  */
-export const LLM_EVALUATION_MODEL = 'deepseek/deepseek-v4-flash';
+export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
 
 /**
  * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
@@ -138,7 +138,7 @@ export const LLM_EVALUATION_MODEL = 'deepseek/deepseek-v4-flash';
  * - >=200K context window (template + cv + JD all fit)
  * - moderate output cost (the whole filled HTML comes back)
  */
-export const LLM_CV_TEMPLATE_MODEL = 'deepseek/deepseek-v4-pro';
+export const LLM_CV_TEMPLATE_MODEL = 'openai/gpt-5-nano';
 
 /**
  * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut
@@ -195,7 +195,7 @@ export const PIPELINE_LISTING_BFS_MAX_DEPTH = 3;
  * is to prevent the crawler from visiting an unbounded number of pages on large
  * websites with many same-domain links.
  */
-export const PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE = 50;
+export const PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE = 25;
 
 /**
  * Toss out any job post whose title relevancy score is below this threshold
