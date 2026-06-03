@@ -4,12 +4,14 @@ import { join } from 'node:path';
 
 import { RESUME_OUTPUT_DIR } from 'jobfinder.config.js';
 import { fillCvTemplate } from 'src/llm/fillCvTemplate.js';
+import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
-import type { JobPostRow } from 'src/tui/queries.js';
+import { toggleJobPostTag, type JobPostRow } from 'src/tui/queries.js';
 import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { fmtSalary, fmtScore } from 'src/tui/utils/format.js';
 import { openFile } from 'src/tui/utils/openFile.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
+import { listTagOptions, tagOption } from 'src/tui/utils/tags.js';
 import { buildCvFilename } from 'src/utils/cvFilename.js';
 import { renderCvPdf } from 'src/utils/renderCvPdf.js';
 import type { Terminal } from 'src/utils/terminal.js';
@@ -47,6 +49,10 @@ export function JobPostDetailScreen({
   >({ kind: 'idle' });
 
   const [pdfLog, setPdfLog] = useState<PdfLogLine[]>([]);
+  // See TabView for the two-step `t`/Shift+T + shortcut-letter pattern.
+  const [tagPickerMode, setTagPickerMode] = useState<'add' | 'remove' | null>(
+    null
+  );
 
   // Reset scroll AND PDF status when the row changes (defensive — usually
   // unmounted/remounted).
@@ -75,8 +81,34 @@ export function JobPostDetailScreen({
   const visible = scrollLines.slice(scroll, scroll + viewportRows);
 
   useInput((input, key) => {
+    if (tagPickerMode != null) {
+      if (key.escape || input === 'q') {
+        setTagPickerMode(null);
+        return;
+      }
+
+      const candidates =
+        tagPickerMode === 'add'
+          ? listTagOptions()
+          : row.tags.map(t => tagOption(t));
+
+      const opt = candidates.find(o => o.shortcut === input.toLowerCase());
+
+      if (opt) {
+        void toggleJobPostTag(row.id, opt.key);
+        setTagPickerMode(null);
+      }
+
+      return;
+    }
+
     if (key.escape || input === 'q') {
       onClose();
+      return;
+    }
+
+    if (input === 't' || input === 'T') {
+      setTagPickerMode(input === 'T' ? 'remove' : 'add');
       return;
     }
 
@@ -131,9 +163,20 @@ export function JobPostDetailScreen({
 
   return (
     <Box flexDirection='column' width={termCols} height={termRows}>
-      <Text bold color='cyan' wrap='truncate-end'>
-        {row.title}
-      </Text>
+      <Box>
+        {row.tags.length > 0 && (
+          <Box marginRight={1}>
+            {row.tags.map((t, i) => (
+              <Text key={`${t}-${i}`} color={tagOption(t).inkColor}>
+                ●
+              </Text>
+            ))}
+          </Box>
+        )}
+        <Text bold color='cyan' wrap='truncate-end'>
+          {row.title}
+        </Text>
+      </Box>
       <Text wrap='truncate-end'>
         {row.company ?? '(unknown company)'}
         {row.location ? ` · ${row.location}` : ''}
@@ -168,9 +211,13 @@ export function JobPostDetailScreen({
           <Text color='cyan'>↑↓/jk</Text> scroll · <Text color='cyan'>g/G</Text>{' '}
           top/bottom · <Text color='cyan'>l</Text> open ·{' '}
           <Text color='cyan'>y</Text> copy url · <Text color='cyan'>p</Text>{' '}
-          tailored CV pdf · <Text color='cyan'>Esc/q</Text> back
+          tailored CV pdf · <Text color='cyan'>t/T</Text> tag/untag ·{' '}
+          <Text color='cyan'>Esc/q</Text> back
         </Text>
       </Box>
+      {tagPickerMode != null && (
+        <TagMenuBar activeTags={row.tags} mode={tagPickerMode} />
+      )}
       {pdfStatus.kind !== 'idle' && (
         <Box flexDirection='column'>
           {pdfStatus.kind === 'generating' && (

@@ -41,6 +41,7 @@ export interface JobPost {
   salaryMin: number | null;
   skillRequirements: string | null;
   summary: string | null;
+  tags: string | null;
   title: string;
   updatedAt: Generated<Timestamp>;
   url: string;

@@ -1,16 +1,24 @@
 import { Box, Text } from 'ink';
-import React from 'react';
+import React, { type ReactNode } from 'react';
 
 import { allocateContentColumns, pad } from 'src/tui/utils/format.js';
 import { WindowFooter } from 'src/tui/components/WindowFooter.js';
 
 export type Column<T> = {
   label: string;
+  /** Plain-text projection of the cell. Always used for width budgeting; also
+   * used to draw the cell when `render` is not provided. */
   value: (r: T) => string;
   min: number;
   max?: number;
   /** Lower number = considered first ("most important"). Default 0. */
   priority?: number;
+  /** Optional rich renderer. When set, the cell draws `render(r)` instead of
+   * the padded `value(r)` string — used for per-character coloring (e.g.
+   * the tags column's colored dots). The renderer is responsible for
+   * padding/trimming itself to `width` so columns stay aligned; the helper
+   * `padNode(node, plain, width)` covers the common case. */
+  render?: (r: T, width: number) => ReactNode;
 };
 
 export type TableProps<T> = {
@@ -110,10 +118,28 @@ function Row<T>({
   dim: boolean;
   w: number[];
 }) {
+  const hasRender = columns.some(c => c.render);
+  if (!hasRender) {
+    return (
+      <Text inverse={selected} dimColor={dim}>
+        {' '}
+        {columns.map((c, i) => pad(c.value(row), w[i]!)).join('  ')}{' '}
+      </Text>
+    );
+  }
+
+  // Rich path: interleave columns as <Text> children + literal "  " gaps so
+  // per-character colors (e.g. tag dots) survive ink's render. Outer Text
+  // owns the inverse/dim styling so selection still highlights the full row.
   return (
     <Text inverse={selected} dimColor={dim}>
       {' '}
-      {columns.map((c, i) => pad(c.value(row), w[i]!)).join('  ')}{' '}
+      {columns.map((c, i) => (
+        <React.Fragment key={c.label}>
+          {i > 0 && '  '}
+          {c.render ? c.render(row, w[i]!) : pad(c.value(row), w[i]!)}
+        </React.Fragment>
+      ))}{' '}
     </Text>
   );
 }

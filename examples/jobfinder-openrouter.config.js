@@ -230,3 +230,20 @@ export const PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY = 0.5;
  * too many listings at once.
  */
 export const PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS = 50;
+
+/**
+ * User-defined color tags for JobPosts, surfaced as colored dots in the TUI.
+ *
+ * Keys are stored verbatim in `JobPost.tags` (JSON array, sorted
+ * alphabetically by key). Values are the display labels shown in the
+ * tag-picker menu. The first letter of each key becomes its keyboard
+ * shortcut after pressing `t` (e.g. `t+r` toggles "red"), so keep the
+ * first letters unique.
+ */
+export const TAGS = {
+  red: 'Red',
+  yellow: 'Yellow',
+  blue: 'Blue',
+  green: 'Green',
+  purple: 'Purple',
+};

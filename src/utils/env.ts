@@ -9,6 +9,7 @@ import {
   OLLAMA_HOST,
   OPENROUTER_API_KEY,
   SERPER_API_KEY,
+  TAGS,
 } from 'jobfinder.config.js';
 
 const VALID_LLM_PLUGINS = ['openrouter', 'anthropic', 'ollama'] as const;
@@ -74,6 +75,13 @@ export const Env = {
     throw new Error(
       `LLM_PLUGIN=${JSON.stringify(raw)} is not one of ${VALID_LLM_PLUGINS.join(' / ')}.`
     );
+  },
+
+  /** User-defined color tags for JobPosts. See `jobfinder.config.js#TAGS`.
+   * Keys are color identifiers stored in `JobPost.tags`; values are
+   * display labels. Defaults to the five Ink-friendly colors. */
+  get TAGS(): Record<string, string> {
+    return TAGS ?? {};
   },
 
   /** User-configured cap on simultaneous LLM requests, or `undefined`

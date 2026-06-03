@@ -5,13 +5,16 @@ import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
 import { SourceDetail } from 'src/tui/components/SourceDetail.js';
 import { SourceList } from 'src/tui/components/SourceList.js';
+import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
+  toggleJobPostTag,
   toggleSourceActive,
   type JobPostRow,
   type SourceRow,
 } from 'src/tui/queries.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
+import { listTagOptions, tagOption } from 'src/tui/utils/tags.js';
 import type { AppTab } from 'src/tui/utils/types.js';
 import type { JobPostSortKey } from 'src/tui/queries.js';
 
@@ -41,6 +44,15 @@ export function TabView({
   onOpenSource?: (sourceId: string) => void;
 }) {
   const [cursor, setCursor] = useState(0);
+  // `t` opens an "add" tag picker (every configured tag), Shift+T opens a
+  // "remove" picker (only the row's currently-applied tags). The next
+  // keypress (the shortcut letter for a color) toggles that tag and
+  // dismisses the picker. Esc cancels without changing anything. Jobs tab
+  // only — pressing `t` on the Sources tab is a no-op.
+  const [tagPickerMode, setTagPickerMode] = useState<'add' | 'remove' | null>(
+    null
+  );
+
   const { rows: terminalRows, cols: terminalCols } = useTerminalSize();
 
   // Count what we render so the table fits the viewport.
@@ -79,6 +91,43 @@ export function TabView({
 
   useInput(
     (input, key) => {
+      // Tag picker intercepts every key while open: shortcut letters toggle
+      // the matching tag on the focused row; Esc cancels. Returning early
+      // keeps the rest of the handler from firing on the same press. In
+      // 'remove' mode the shortcut lookup is restricted to active tags so
+      // an unrelated letter (matching a color the row doesn't have) is a
+      // no-op rather than silently adding it.
+      if (tagPickerMode != null) {
+        if (key.escape || input === 'q') {
+          setTagPickerMode(null);
+          return;
+        }
+
+        const row = jobPosts?.[cursor];
+        const candidates =
+          tagPickerMode === 'add'
+            ? listTagOptions()
+            : (row?.tags.map(t => tagOption(t)) ?? []);
+
+        const opt = candidates.find(o => o.shortcut === input.toLowerCase());
+
+        if (opt && row) {
+          void toggleJobPostTag(row.id, opt.key);
+          setTagPickerMode(null);
+        }
+
+        return;
+      }
+
+      // Open the picker on `t` / Shift+T (Jobs tab only — no tags on Sources).
+      if ((input === 't' || input === 'T') && tab === 'jobs') {
+        if ((jobPosts?.length ?? 0) > 0) {
+          setTagPickerMode(input === 'T' ? 'remove' : 'add');
+        }
+
+        return;
+      }
+
       // Page up: PageUp or Shift+U. Page down: PageDown or Shift+D.
       // Uppercase letters are universally detected (no terminal-escape
       // dependency) and leave plain 'u' / 'd' free for future bindings.
@@ -133,40 +182,55 @@ export function TabView({
   const listWidth = Math.max(20, terminalCols - DETAIL_WIDTH - 2 - 1);
 
   return (
-    <Box flexDirection='row' marginTop={1}>
-      <Box flexDirection='column' flexGrow={1} flexShrink={1} overflow='hidden'>
-        {tab === 'jobs' && (
-          <JobPostList
-            rows={jobPosts ?? []}
-            cursor={cursor}
-            windowStart={windowStart}
-            visibleCount={visibleCount}
-            width={listWidth}
-            sort={jobsSort}
-            active={active}
-          />
-        )}
-        {tab === 'sources' && (
-          <SourceList
-            rows={sources ?? []}
-            cursor={cursor}
-            windowStart={windowStart}
-            visibleCount={visibleCount}
-            width={listWidth}
-            active={active}
-          />
-        )}
+    <Box flexDirection='column' marginTop={1}>
+      <Box flexDirection='row'>
+        <Box
+          flexDirection='column'
+          flexGrow={1}
+          flexShrink={1}
+          overflow='hidden'
+        >
+          {tab === 'jobs' && (
+            <JobPostList
+              rows={jobPosts ?? []}
+              cursor={cursor}
+              windowStart={windowStart}
+              visibleCount={visibleCount}
+              width={listWidth}
+              sort={jobsSort}
+              active={active}
+            />
+          )}
+          {tab === 'sources' && (
+            <SourceList
+              rows={sources ?? []}
+              cursor={cursor}
+              windowStart={windowStart}
+              visibleCount={visibleCount}
+              width={listWidth}
+              active={active}
+            />
+          )}
+        </Box>
+        <Box
+          flexDirection='column'
+          width={DETAIL_WIDTH}
+          height={visibleCount + 2}
+          paddingLeft={2}
+          overflow='hidden'
+        >
+          {tab === 'jobs' && <JobPostDetail row={jobPosts?.[cursor] ?? null} />}
+          {tab === 'sources' && (
+            <SourceDetail row={sources?.[cursor] ?? null} />
+          )}
+        </Box>
       </Box>
-      <Box
-        flexDirection='column'
-        width={DETAIL_WIDTH}
-        height={visibleCount + 2}
-        paddingLeft={2}
-        overflow='hidden'
-      >
-        {tab === 'jobs' && <JobPostDetail row={jobPosts?.[cursor] ?? null} />}
-        {tab === 'sources' && <SourceDetail row={sources?.[cursor] ?? null} />}
-      </Box>
+      {tagPickerMode != null && tab === 'jobs' && (
+        <TagMenuBar
+          activeTags={jobPosts?.[cursor]?.tags ?? []}
+          mode={tagPickerMode}
+        />
+      )}
     </Box>
   );
 }

@@ -1,17 +1,20 @@
 import { Box, Text, useInput } from 'ink';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
+import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
   type JobPostSortKey,
   type SourceRow,
   listJobPosts,
+  toggleJobPostTag,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
 import { prettyUrl } from 'src/tui/utils/format.js';
 import { openUrl } from 'src/tui/utils/openUrl.js';
+import { listTagOptions, tagOption } from 'src/tui/utils/tags.js';
 import { JOB_POST_SORTS } from 'src/tui/utils/types.js';
 
 /** Full-screen "jobs from this source" view, opened with Enter on a row in
@@ -56,6 +59,11 @@ export function SourceJobsScreen({
 
   const jobPosts = useLiveData(fetchJobs);
 
+  // See TabView for the two-step `t`/Shift+T + shortcut-letter pattern.
+  const [tagPickerMode, setTagPickerMode] = useState<'add' | 'remove' | null>(
+    null
+  );
+
   // Chrome: 1 header + 1 url + 1 hint + 1 marginTop + 1 table header + 1 footer.
   const SAFETY = 2;
   const chromeLines = 6 + SAFETY;
@@ -78,8 +86,38 @@ export function SourceJobsScreen({
   }, [cursor, rowCount, onCursorChange]);
 
   useInput((input, key) => {
+    if (tagPickerMode != null) {
+      if (key.escape || input === 'q') {
+        setTagPickerMode(null);
+        return;
+      }
+
+      const row = jobPosts?.[cursor];
+      const candidates =
+        tagPickerMode === 'add'
+          ? listTagOptions()
+          : (row?.tags.map(t => tagOption(t)) ?? []);
+
+      const opt = candidates.find(o => o.shortcut === input.toLowerCase());
+
+      if (opt && row) {
+        void toggleJobPostTag(row.id, opt.key);
+        setTagPickerMode(null);
+      }
+
+      return;
+    }
+
     if (key.escape || input === 'q') {
       onClose();
+      return;
+    }
+
+    if (input === 't' || input === 'T') {
+      if ((jobPosts?.length ?? 0) > 0) {
+        setTagPickerMode(input === 'T' ? 'remove' : 'add');
+      }
+
       return;
     }
 
@@ -163,9 +201,16 @@ export function SourceJobsScreen({
         <Text dimColor>
           <Text color='cyan'>↑↓</Text> nav · <Text color='cyan'>Enter</Text>{' '}
           open · <Text color='cyan'>s</Text> sort · <Text color='cyan'>l</Text>{' '}
-          open url · <Text color='cyan'>Esc/q</Text> back
+          open url · <Text color='cyan'>t/T</Text> tag/untag ·{' '}
+          <Text color='cyan'>Esc/q</Text> back
         </Text>
       </Box>
+      {tagPickerMode != null && (
+        <TagMenuBar
+          activeTags={jobPosts?.[cursor]?.tags ?? []}
+          mode={tagPickerMode}
+        />
+      )}
     </Box>
   );
 }

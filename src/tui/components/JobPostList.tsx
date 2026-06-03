@@ -1,6 +1,9 @@
+import { Text } from 'ink';
+
 import { Table, type Column } from 'src/tui/components/Table.js';
 import type { JobPostRow, JobPostSortKey } from 'src/tui/queries.js';
 import { fmtDaysAgo, fmtScore } from 'src/tui/utils/format.js';
+import { tagOption } from 'src/tui/utils/tags.js';
 
 /** The "overall" column reports the aggregate score the active sort is
  * keyed on — so when you switch to `excl. interest`, the column shows
@@ -43,6 +46,34 @@ function buildColumns(sort: JobPostSortKey): Column<JobPostRow>[] {
       min: 1,
     },
     { label: 'company', value: r => r.company ?? '—', min: 7, max: 22 },
+    {
+      label: 'tags',
+      // Plain projection: one '●' per tag. Drives column width and the
+      // text rendered when `render` isn't used (shouldn't happen, but the
+      // fallback keeps Table generic).
+      value: r => (r.tags.length === 0 ? '·' : '●'.repeat(r.tags.length)),
+      min: 1,
+      max: 5,
+      render: (r, width) => {
+        const dots = r.tags.map((t, i) => {
+          const opt = tagOption(t);
+          return (
+            <Text key={`${t}-${i}`} color={opt.inkColor}>
+              ●
+            </Text>
+          );
+        });
+
+        const used = r.tags.length || 1;
+        const padding = ' '.repeat(Math.max(0, width - used));
+        return (
+          <>
+            {r.tags.length === 0 ? <Text dimColor>·</Text> : dots}
+            {padding}
+          </>
+        );
+      },
+    },
     { label: 'title', value: r => r.title, min: 20, priority: 3 },
     { label: 'where', value: r => r.location ?? '—', min: 10, max: 20 },
     { label: 'status', value: r => r.status, min: 12, max: 28 },

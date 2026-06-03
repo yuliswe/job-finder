@@ -9,6 +9,7 @@ const HINTS: { keys: string; label: string }[] = [
   { keys: 'p', label: 'pipeline focus' },
   { keys: 's/S', label: 'sort next/prev' },
   { keys: 'a', label: 'toggle active (Source)' },
+  { keys: 't/T', label: 'tag / untag (Job)' },
   { keys: 'o/O', label: 'scope all / out-of-scope only' },
   { keys: 'l', label: 'open url' },
   { keys: 'y', label: 'copy state cmd' },

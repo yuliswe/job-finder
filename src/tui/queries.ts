@@ -100,6 +100,9 @@ export type JobPostRow = {
   /** Single-line summary of where this post is in the pipeline. Computed
    * from the other fields; see `computeJobPostStatus`. */
   status: string;
+  /** User-applied color tags (keys from `TAGS` config), sorted
+   * alphabetically. Empty array when the post is untagged. */
+  tags: string[];
 };
 
 export type SourceRow = {
@@ -414,6 +417,7 @@ export async function listJobPosts(args: {
     'JobPost.description as description',
     'JobPost.summary as summary',
     'JobPost.skillRequirements as skillRequirementsJson',
+    'JobPost.tags as tagsJson',
     'JobPostEval.titleRelavency as titleRelavency',
     'JobPostEval.titleRelavencyReason as titleRelavencyReason',
     'JobPostEval.interestScore as interestScore',
@@ -477,6 +481,7 @@ export async function listJobPosts(args: {
     const {
       skillScoreBreakdownJson,
       skillRequirementsJson,
+      tagsJson,
       sourceIsActive,
       listSourceIsActive,
       ...rest
@@ -514,8 +519,38 @@ export async function listJobPosts(args: {
         description: r.description,
         interestScore: r.interestScore,
       }),
+      tags: parseJsonArray<string>(tagsJson) ?? [],
     };
   });
+}
+
+/** Toggle a single color tag on a JobPost. Persisted as a sorted JSON
+ * array — sorting on every write keeps the column render deterministic and
+ * sidesteps any caller having to remember the invariant. Bumps the local
+ * revision so the TUI refetches without waiting for the next 1s poll. */
+export async function toggleJobPostTag(
+  jobPostId: string,
+  tagKey: string
+): Promise<void> {
+  const existing = await db
+    .selectFrom('JobPost')
+    .select('tags')
+    .where('id', '=', jobPostId)
+    .executeTakeFirst();
+
+  const current = parseJsonArray<string>(existing?.tags ?? null) ?? [];
+  const set = new Set(current);
+  if (set.has(tagKey)) set.delete(tagKey);
+  else set.add(tagKey);
+  const next = [...set].sort();
+
+  await db
+    .updateTable('JobPost')
+    .set({ tags: next.length === 0 ? null : JSON.stringify(next) })
+    .where('id', '=', jobPostId)
+    .execute();
+
+  bumpLocalRevision();
 }
 
 /** Single-line pipeline status for a JobPost, derived from the same fields
