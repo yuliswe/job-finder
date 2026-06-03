@@ -32,6 +32,11 @@ type SourcingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobSourceId?: string;
+  /** Suppress "nothing to do" / "0 rows" log lines. Set by the
+   * run-pipeline orchestrator since its tight poll loop would otherwise
+   * spam the terminal. Individual `jobfinder pipeline sourcing` invocations
+   * leave it false so the user sees actionable feedback. */
+  suppressNothingToDoLog?: boolean;
 };
 
 export function createSourcingCommand(): Command {
@@ -114,7 +119,10 @@ export async function runSourcing(
     : await query.execute();
 
   if (sources.length === 0) {
-    terminal.log('No JobSource rows need sourcing. Nothing to do.');
+    if (!opts.suppressNothingToDoLog) {
+      terminal.log('No JobSource rows need sourcing. Nothing to do.');
+    }
+
     return { processed: 0 };
   }
 
@@ -129,7 +137,10 @@ export async function runSourcing(
   );
 
   const filled = results.reduce((sum, r) => sum + (r?.urlFilled ?? 0), 0);
-  terminal.log(`Filled url on ${filled} JobSource row(s)\n`);
+  if (filled > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(`Filled url on ${filled} JobSource row(s)\n`);
+  }
+
   return { processed: sources.length };
 }
 

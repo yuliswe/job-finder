@@ -80,6 +80,8 @@ export async function runRunScripts(
     all?: boolean;
     includeFailed?: boolean;
     jobListSourceId?: string;
+    /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+    suppressNothingToDoLog?: boolean;
   }
 ): Promise<{ processed: number }> {
   if (opts.jobListSourceId) {
@@ -128,9 +130,12 @@ export async function runRunScripts(
     : await query.execute();
 
   if (targets.length === 0) {
-    terminal.log(
-      'No JobListSource rows with a validated parserScript. Nothing to do.'
-    );
+    if (!opts.suppressNothingToDoLog) {
+      terminal.log(
+        'No JobListSource rows with a validated parserScript. Nothing to do.'
+      );
+    }
+
     return { processed: 0 };
   }
 
@@ -167,7 +172,10 @@ export async function runRunScripts(
     0
   );
 
-  terminal.log(`Inserted ${jobPostInserted} rows into JobPost\n`);
+  if (jobPostInserted > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(`Inserted ${jobPostInserted} rows into JobPost\n`);
+  }
+
   return { processed: targets.length };
 }
 

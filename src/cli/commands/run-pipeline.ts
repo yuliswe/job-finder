@@ -13,7 +13,10 @@ import { terminal } from 'src/utils/terminal.js';
 /** Per-task opts forwarded to each runX. We only thread the bits run-pipeline
  * cares about; runX functions accept additional task-specific fields
  * (division/location/jobSourceId/etc.) that we never set here. */
-type IterationOpts = { includeFailed?: boolean };
+type IterationOpts = {
+  includeFailed?: boolean;
+  suppressNothingToDoLog?: boolean;
+};
 
 /** Idle-poll interval applied only when a task's previous iteration found
  * nothing to do. Iterations that processed >0 items re-loop immediately. */
@@ -97,13 +100,18 @@ async function runAllLoops(opts: RunPipelineOptions): Promise<void> {
     `Starting run-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
   );
 
-  // First-iteration opts each task consumes. After the first call, every
-  // task drops back to default queued-only opts. This routes through each
-  // task's existing `includeFailed` plumbing — no separate bulk-requeue
-  // implementation to keep in sync.
+  // Every iteration runs with suppressNothingToDoLog so tasks don't
+  // spam "Nothing to do" / "Inserted 0 rows" every 5s. Individual
+  // `jobfinder pipeline <task>` invocations leave the flag false so the
+  // user still gets actionable feedback there.
+  //
+  // First-iteration ALSO carries `includeFailed` when the orchestrator
+  // was launched with --include-failed. After the first call, each task
+  // drops to plain `{ suppressNothingToDoLog: true }` for the rest of
+  // the run — same queued-only picker semantics as the normal default.
   const firstOpts: IterationOpts = opts.includeFailed
-    ? { includeFailed: true }
-    : {};
+    ? { includeFailed: true, suppressNothingToDoLog: true }
+    : { suppressNothingToDoLog: true };
 
   await Promise.all([
     runLoopWithBrowser(orchestrator, 'sourcing', firstOpts, (ctx, iterOpts) =>
@@ -153,16 +161,18 @@ async function runLoop(
   fn: (iterOpts: IterationOpts) => Promise<{ processed: number }>
 ): Promise<void> {
   const slot = orchestrator.state[name];
-  // `firstOpts` (e.g. {includeFailed:true} from --include-failed) is
-  // consumed on iteration 1 only; subsequent iterations get `{}` so a
-  // failure inside the run doesn't keep retrying forever.
+  // `firstOpts` (e.g. {includeFailed:true, suppressNothingToDoLog:true}
+  // from --include-failed) is consumed on iteration 1 only; subsequent
+  // iterations get `{ suppressNothingToDoLog: true }` so a failure
+  // inside the run doesn't keep retrying forever AND the per-poll spam
+  // stays suppressed.
   let nextOpts: IterationOpts = firstOpts;
 
   while (!orchestrator.shutdown) {
     slot.running = true;
     let processed = 0;
     const iterOpts = nextOpts;
-    nextOpts = {};
+    nextOpts = { suppressNothingToDoLog: true };
     try {
       ({ processed } = await fn(iterOpts));
     } catch (err) {

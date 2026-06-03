@@ -31,6 +31,8 @@ type ScriptingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobListSourceId?: string;
+  /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
+  suppressNothingToDoLog?: boolean;
 };
 
 export function createScriptingCommand(): Command {
@@ -117,9 +119,12 @@ export async function runScripting(
     0
   );
 
-  terminal.log(
-    `Updated ${jobListSourceUpdated} JobListSource rows with parser scripts\n`
-  );
+  if (jobListSourceUpdated > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(
+      `Updated ${jobListSourceUpdated} JobListSource rows with parser scripts\n`
+    );
+  }
+
   return { processed: targets.length };
 }
 

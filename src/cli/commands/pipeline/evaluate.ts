@@ -30,6 +30,8 @@ type EvaluateOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
+  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  suppressNothingToDoLog?: boolean;
 };
 
 export function createEvaluateCommand(): Command {
@@ -128,9 +130,12 @@ export async function runEvaluate(
     : await query.execute();
 
   if (targets.length === 0) {
-    terminal.log(
-      'No viewed JobPost rows with a description. Run `pipeline viewing` first.'
-    );
+    if (!opts.suppressNothingToDoLog) {
+      terminal.log(
+        'No viewed JobPost rows with a description. Run `pipeline viewing` first.'
+      );
+    }
+
     return { processed: 0 };
   }
 
@@ -143,7 +148,12 @@ export async function runEvaluate(
     0
   );
 
-  terminal.log(`Evaluated ${jobPostEvaluated}/${targets.length} JobPost rows`);
+  if (jobPostEvaluated > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(
+      `Evaluated ${jobPostEvaluated}/${targets.length} JobPost rows`
+    );
+  }
+
   return { processed: targets.length };
 }
 

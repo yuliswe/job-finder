@@ -28,6 +28,8 @@ type ViewingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
+  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  suppressNothingToDoLog?: boolean;
 };
 
 export function createViewingCommand(): Command {
@@ -108,7 +110,10 @@ export async function runViewing(
     : await query.execute();
 
   if (targets.length === 0) {
-    terminal.log('No unprocessed JobPost rows. Nothing to do.');
+    if (!opts.suppressNothingToDoLog) {
+      terminal.log('No unprocessed JobPost rows. Nothing to do.');
+    }
+
     return { processed: 0 };
   }
 
@@ -121,7 +126,10 @@ export async function runViewing(
     0
   );
 
-  terminal.log(`Viewed and updated ${jobPostUpdated} JobPost rows\n`);
+  if (jobPostUpdated > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(`Viewed and updated ${jobPostUpdated} JobPost rows\n`);
+  }
+
   return { processed: targets.length };
 }
 

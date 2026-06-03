@@ -28,6 +28,8 @@ type ListingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobSourceId?: string;
+  /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
+  suppressNothingToDoLog?: boolean;
 };
 
 export function createListingCommand(): Command {
@@ -122,7 +124,10 @@ export async function runListing(
     0
   );
 
-  terminal.log(`Inserted ${jobListSourceInserted} rows into JobListSource\n`);
+  if (jobListSourceInserted > 0 || !opts.suppressNothingToDoLog) {
+    terminal.log(`Inserted ${jobListSourceInserted} rows into JobListSource\n`);
+  }
+
   return { processed: sources.length };
 }
 
