@@ -69,7 +69,7 @@ export async function webSearchBySerper<
   /** Maximum tool-use rounds (search + open + answer combined). */
   maxAttempts: number;
   logger: Terminal;
-  model: string;
+  models: string[];
   validate: (
     parsed: v.InferOutput<S>
   ) => Promise<ValidateResult<R>> | ValidateResult<R>;
@@ -84,7 +84,7 @@ export async function webSearchBySerper<
     schema,
     maxAttempts,
     logger,
-    model,
+    models,
     validate,
     reasoningEffort,
     metadata,
@@ -141,7 +141,7 @@ export async function webSearchBySerper<
     initialPrompt: `${initialPrompt}\n\n${AGENT_INSTRUCTIONS}`,
     schema: stepSchema,
     maxAttempts,
-    model,
+    models,
     logger,
     reasoningEffort,
     metadata,

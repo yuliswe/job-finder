@@ -27,7 +27,7 @@ export async function webSearchByGoogle<
   schema: S;
   /** System prompt describing what the LLM should extract from the page. */
   systemPrompt: string;
-  model: string;
+  models: string[];
   maxAttempts?: number;
   reasoningEffort?: LlmReasoningEffort;
   /** Forwarded verbatim to OpenRouter's `metadata` for cost analytics. */
@@ -42,7 +42,7 @@ export async function webSearchByGoogle<
     query,
     schema,
     systemPrompt,
-    model,
+    models,
     validate,
     maxAttempts = 3,
     reasoningEffort,
@@ -69,7 +69,7 @@ Search results page text (may include ads, snippets, and link text):
 ${pageText}`,
     schema,
     maxAttempts,
-    model,
+    models,
     logger: terminal,
     reasoningEffort,
     metadata,

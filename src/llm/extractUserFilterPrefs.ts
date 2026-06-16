@@ -53,7 +53,7 @@ Extract \`division\` and \`location\` per the schema.`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    model: LLM_LISTING_MODEL,
+    models: LLM_LISTING_MODEL,
     metadata: { configKey: 'LLM_LISTING_MODEL' },
     logger: terminal,
     validate: parsed => {

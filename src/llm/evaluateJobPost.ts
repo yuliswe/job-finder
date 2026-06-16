@@ -134,7 +134,7 @@ Score this posting and return the structured evaluation. For skillScores, return
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    model: LLM_EVALUATION_MODEL,
+    models: LLM_EVALUATION_MODEL,
     metadata: { configKey: 'LLM_EVALUATION_MODEL' },
     logger: terminal,
     validate: parsed => {

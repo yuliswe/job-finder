@@ -56,8 +56,10 @@ export function createSeedingCommand(): Command {
 }
 
 async function runSeeding(): Promise<void> {
-  if (!LLM_SEEDING_MODEL) {
-    throw new Error('LLM_SEEDING_MODEL is empty — set it in src/llm/config.ts');
+  if (LLM_SEEDING_MODEL.length === 0) {
+    throw new Error(
+      'LLM_SEEDING_MODEL is empty — set it in jobfinder.config.js'
+    );
   }
 
   const interests = await readSeedFile(join(SEEDS_DIR, 'interests.md'));
@@ -165,7 +167,7 @@ async function printLlmSummary(inserted: JobResult[]): Promise<void> {
       ),
     }),
     maxAttempts: 3,
-    model: LLM_SEEDING_MODEL,
+    models: LLM_SEEDING_MODEL,
     metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),
@@ -258,7 +260,7 @@ async function discoverSeedJobs(args: {
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    model: LLM_SEEDING_MODEL,
+    models: LLM_SEEDING_MODEL,
     metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
     validate: args => runAttempt(args, state, accumulated, inserted),
@@ -420,7 +422,7 @@ async function checkInterestsLocation(interests: string): Promise<{
       ),
     }),
     maxAttempts: 2,
-    model: LLM_SEEDING_MODEL,
+    models: LLM_SEEDING_MODEL,
     metadata: { configKey: 'LLM_SEEDING_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),

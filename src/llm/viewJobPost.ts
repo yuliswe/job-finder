@@ -180,7 +180,7 @@ Extract the fields. Return null for anything the page does not actually state.`,
           ),
         }),
         maxAttempts: 3,
-        model: LLM_VIEWING_MODEL,
+        models: LLM_VIEWING_MODEL,
         metadata: { configKey: 'LLM_VIEWING_MODEL' },
         logger: terminal,
         validate: parsed => {

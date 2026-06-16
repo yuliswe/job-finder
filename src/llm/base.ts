@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { toJsonSchema } from '@valibot/to-json-schema';
+import { AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS } from 'jobfinder.config.js';
 import pLimit, { type LimitFunction } from 'p-limit';
 import * as v from 'valibot';
 
@@ -225,7 +226,9 @@ async function llmSend<S extends v.GenericSchema>(args: {
     // Annotate JSON.parse failures with the raw payload (and a window around
     // the reported position) so the retry log shows what came back, not just
     // "Unterminated string at position N". The SyntaxError keeps its name +
-    // message so the upstream `isSchemaError` retry path still fires.
+    // message so the upstream `isSchemaError` retry path still fires, and
+    // the `window` field is what the retry-feedback memo includes for the
+    // model so it can see exactly where its output went wrong.
     if (err instanceof SyntaxError) {
       const e = err as SyntaxError & {
         rawContent?: string;
@@ -271,7 +274,10 @@ function windowAroundPosition(text: string, message: string): string {
  * If none of those match, return the content as-is and let `JSON.parse` throw
  * with a meaningful error. The schema is an object at the root, so first-`{`
  * to last-`}` is a safe slice — escaped `}` inside string values still leaves
- * the very last `}` as the document terminator. */
+ * the very last `}` as the document terminator. When the model closes early
+ * and appends extra fields outside the close, JSON.parse fails at a precise
+ * position; the caller annotates that with a window and feeds it back to the
+ * model so it can see exactly where its output went wrong. */
 function extractJson(content: string): string {
   const trimmed = content.trim();
 
@@ -314,13 +320,15 @@ function appendToLastSystemMessage(
   );
 }
 
-const MAX_SEND_RETRIES = 5;
-
-/** Send with retries on transient/validation failures. Returns parsed result. */
+/** Send with retries on transient/validation failures. Cycles through
+ * `models` in order: each model gets up to
+ * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` attempts before falling back
+ * to the next model in the array. When every model is exhausted, the
+ * last error is thrown. */
 async function sendWithRetry<S extends v.GenericSchema>(args: {
   memory: Memory;
   schema: S;
-  model: string;
+  models: string[];
   logger: Terminal;
   reasoningEffort?: LlmReasoningEffort;
   metadata?: Record<string, string>;
@@ -329,66 +337,119 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
   const {
     memory,
     schema,
-    model,
+    models,
     logger,
     reasoningEffort,
     metadata,
     enableWebSearch,
   } = args;
 
+  if (models.length === 0) {
+    throw new Error('sendWithRetry: models array is empty');
+  }
+
+  const perModel = AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS;
   let totalTokens = 0;
-  for (let retry = 0; retry < MAX_SEND_RETRIES; retry++) {
-    try {
-      const sendResult = await llmSend({
-        schema,
-        model,
-        messages: memory.toMessages(),
-        reasoningEffort,
-        metadata,
-        enableWebSearch,
-      });
+  let lastError: unknown;
 
-      totalTokens += sendResult.totalTokens;
-      return { result: sendResult.result, totalTokens };
-    } catch (error) {
-      const isSchemaError =
-        error instanceof Error &&
-        (error.name === 'ResponseValidationError' ||
-          error instanceof v.ValiError ||
-          error instanceof SyntaxError);
+  for (let modelIdx = 0; modelIdx < models.length; modelIdx++) {
+    const model = models[modelIdx]!;
+    const isLastModel = modelIdx === models.length - 1;
 
-      const isNetworkError =
-        error instanceof TypeError && error.message === 'terminated';
+    for (let attempt = 0; attempt < perModel; attempt++) {
+      try {
+        const sendResult = await llmSend({
+          schema,
+          model,
+          messages: memory.toMessages(),
+          reasoningEffort,
+          metadata,
+          enableWebSearch,
+        });
 
-      const isEmptyResponse = error instanceof LlmEmptyResponseError;
+        totalTokens += sendResult.totalTokens;
+        return { result: sendResult.result, totalTokens };
+      } catch (error) {
+        lastError = error;
 
-      const isRetryable = isSchemaError || isNetworkError || isEmptyResponse;
+        const isSchemaError =
+          error instanceof Error &&
+          (error.name === 'ResponseValidationError' ||
+            error instanceof v.ValiError ||
+            error instanceof SyntaxError);
 
-      if (isRetryable && retry < MAX_SEND_RETRIES - 1) {
+        const isNetworkError =
+          error instanceof TypeError && error.message === 'terminated';
+
+        const isEmptyResponse = error instanceof LlmEmptyResponseError;
+
+        const isRetryable = isSchemaError || isNetworkError || isEmptyResponse;
+        const isLastAttemptForModel = attempt === perModel - 1;
+
+        // Non-retryable failures don't benefit from more attempts on the
+        // same model — skip straight to the next fallback model (or throw
+        // if this was the last one).
+        if (!isRetryable) {
+          logger.error(
+            `LLM request failed (model=${model}): ${formatLlmError(error)}`
+          );
+          if (isLastModel) throw error;
+
+          logger.warn(
+            `Switching to next model: ${models[modelIdx + 1]}`,
+            COLOURS.gray
+          );
+          break;
+        }
+
+        if (isLastAttemptForModel) {
+          if (isLastModel) {
+            logger.error(
+              `LLM request failed (model=${model}) after ${perModel} attempts: ${formatLlmError(error)}`
+            );
+            throw error;
+          }
+
+          logger.error(
+            `LLM request failed (model=${model}) after ${perModel} attempts: ${formatLlmError(error)}`
+          );
+
+          logger.warn(
+            `Switching to next model: ${models[modelIdx + 1]}`,
+            COLOURS.gray
+          );
+          break;
+        }
+
         logger.error(
-          `LLM request failed (model=${model}), retrying (${retry + 1}/${MAX_SEND_RETRIES}): ${formatLlmError(error)}`
+          `LLM request failed (model=${model}), retrying (${attempt + 1}/${perModel}): ${formatLlmError(error)}`
         );
         if (isSchemaError) {
+          // Surface the actual validation/parse message so the model knows
+          // what was wrong, not just that "something" was wrong. For
+          // JSON.parse SyntaxErrors the `window` annotation (set in
+          // `llmSend`) shows a ± 120 char slice around the failure
+          // position with a ◆ marker — far more steerable than a generic
+          // "please respond with valid JSON" hint.
+          const detail = error instanceof Error ? error.message : String(error);
+          const window = (error as { window?: string } | undefined)?.window;
+          const positionHint = window
+            ? `\n\nThe parse failed here (◆ marks the offending position):\n${window}`
+            : '';
+
           memory.add(
-            'Your previous response was not valid or did not match the expected schema. Please respond with valid JSON only, matching the required schema exactly.'
+            `Your previous response failed validation: ${detail}${positionHint}\nRespond again with a single JSON object matching the schema. Emit only the JSON object — no preamble, no trailing content, no extra fields outside the closing brace.`
           );
         } else if (isEmptyResponse) {
           memory.add(
             'Your previous response was empty. Please reply now with the required JSON object.'
           );
         }
-
-        continue;
       }
-
-      logger.error(
-        `LLM request failed (model=${model}): ${formatLlmError(error)}`
-      );
-      throw error;
     }
   }
 
-  throw new Error('Unreachable');
+  throw lastError ?? new Error('Unreachable');
 }
 
 /** Surface as much of the underlying provider's error as we can. SDK errors
@@ -443,7 +504,10 @@ export async function feedbackLoop<
   schema: S;
   maxAttempts: number;
   logger: Terminal;
-  model: string;
+  /** Fallback chain of model IDs. `llmSend` always tries index 0 first
+   * and only advances when the current model has failed
+   * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. */
+  models: string[];
   validate: (
     parsed: v.InferOutput<S>
   ) => Promise<ValidateResult<R>> | ValidateResult<R>;
@@ -462,7 +526,7 @@ export async function feedbackLoop<
     validate,
     maxAttempts,
     logger,
-    model,
+    models,
     reasoningEffort,
     metadata,
     enableWebSearch,
@@ -475,7 +539,7 @@ export async function feedbackLoop<
     const sendResult = await sendWithRetry({
       memory,
       schema,
-      model,
+      models,
       logger,
       reasoningEffort,
       metadata,

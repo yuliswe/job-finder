@@ -37,7 +37,7 @@ export const SERPER_API_KEY = process.env.SERPER_API_KEY;
  *
  * This is a global switch — all pipeline tasks use the same provider.
  */
-export const LLM_PLUGIN = 'openrouter';
+export const LLM_PLUGIN = 'ollama';
 
 /**
  * Base URL of the local Ollama daemon, consulted when `LLM_PLUGIN ===
@@ -45,6 +45,14 @@ export const LLM_PLUGIN = 'openrouter';
  * Override via `OLLAMA_HOST` env var to point at a remote daemon.
  */
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
+
+/**
+ * Per-model attempt budget inside `llmSend`. Each `LLM_*_MODEL` value is
+ * an array; `llmSend` retries the current model up to this many times
+ * before advancing to the next model in the array. When every model is
+ * exhausted, `llmSend` throws the last error.
+ */
+export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
 
 /**
  * Cap on simultaneous in-flight LLM requests across the whole process.
@@ -61,7 +69,7 @@ export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
  * memory. Set this explicitly to override that default (e.g. set to 2 if
  * you have enough VRAM for two simultaneous loads).
  */
-export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
+export const LLM_REQUEST_CONCURRENCY_MAX = 1;
 
 /**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
@@ -69,19 +77,27 @@ export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './seeds.local';
+export const SEEDS_DIR = './jin-seeds.local';
 
 /**
  * Path to the SQLite database file. May be relative (to the CWD where you
  * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
  * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
  */
-export const DB_PATH = './jobs.db';
+export const DB_PATH = './jin-jobs.db';
+
+/**
+ * Each `LLM_*_MODEL` is an array of model IDs in fallback order. `llmSend`
+ * always tries index 0 first and only advances to index 1 (then 2, ...)
+ * after the current model has failed
+ * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. When every
+ * model in the array is exhausted, `llmSend` throws.
+ */
 
 /**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = 'openai/gpt-5-nano';
+export const LLM_SEEDING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * The model used by the sourcing process.
@@ -95,7 +111,7 @@ export const LLM_SEEDING_MODEL = 'openai/gpt-5-nano';
  * company, and assign an interest score to the company based on the interest.md
  * file.
  */
-export const LLM_SOURCING_MODEL = 'openai/gpt-5-nano';
+export const LLM_SOURCING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -108,7 +124,7 @@ export const LLM_SOURCING_MODEL = 'openai/gpt-5-nano';
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
+export const LLM_LISTING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -118,8 +134,8 @@ export const LLM_LISTING_MODEL = 'openai/gpt-5-nano';
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = 'openai/gpt-5-nano';
-export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
+export const LLM_CODING_MODEL_CHEAPER = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_CODING_MODEL_SMARTER = ['qwen3.6:35b-mlx-mlx'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -130,7 +146,7 @@ export const LLM_CODING_MODEL_SMARTER = 'openai/gpt-5-mini';
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
+export const LLM_VIEWING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -142,7 +158,7 @@ export const LLM_VIEWING_MODEL = 'openai/gpt-5-nano';
  * - low input cost
  * - low input cost
  */
-export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
+export const LLM_EVALUATION_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
@@ -155,7 +171,7 @@ export const LLM_EVALUATION_MODEL = 'openai/gpt-5-nano';
  * - >=200K context window (template + cv + JD all fit)
  * - moderate output cost (the whole filled HTML comes back)
  */
-export const LLM_CV_TEMPLATE_MODEL = 'openai/gpt-5-nano';
+export const LLM_CV_TEMPLATE_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
 
 /**
  * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut
@@ -175,7 +191,7 @@ export const USE_HEADLESS_BROWSER = true;
  * websites. Set this to a larger number to speed up scraping, at the cost of
  * higher CPU and memory.
  */
-export const MAX_CONCURRENT_BROWSER_TABS = 10;
+export const MAX_CONCURRENT_BROWSER_TABS = 1;
 
 /**
  * The maximum time to wait for a page to load in the browser when scraping

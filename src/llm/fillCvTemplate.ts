@@ -102,7 +102,7 @@ Fill the template now and return { "html": "..." }.`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    model: LLM_CV_TEMPLATE_MODEL,
+    models: LLM_CV_TEMPLATE_MODEL,
     metadata: { configKey: 'LLM_CV_TEMPLATE_MODEL' },
     logger,
     validate: parsed => {

@@ -27,7 +27,7 @@ export async function webSearchByOpenRouter<
    * search. Should make clear that the LLM may invoke its web_search tool
    * as many times as needed before answering. */
   systemPrompt: string;
-  model: string;
+  models: string[];
   maxAttempts?: number;
   reasoningEffort?: LlmReasoningEffort;
   /** Forwarded verbatim to OpenRouter's `metadata` for cost analytics. */
@@ -41,7 +41,7 @@ export async function webSearchByOpenRouter<
     query,
     schema,
     systemPrompt,
-    model,
+    models,
     validate,
     maxAttempts = 3,
     reasoningEffort,
@@ -58,7 +58,7 @@ export async function webSearchByOpenRouter<
 Use the web_search tool as many times as you need, then answer per the schema.`,
     schema,
     maxAttempts,
-    model,
+    models,
     logger: terminal,
     reasoningEffort,
     metadata,

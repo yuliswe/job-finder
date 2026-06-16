@@ -56,6 +56,14 @@ export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
 
 /**
+ * Per-model attempt budget inside `llmSend`. Each `LLM_*_MODEL` value is
+ * an array; `llmSend` retries the current model up to this many times
+ * before advancing to the next model in the array. When every model is
+ * exhausted, `llmSend` throws the last error.
+ */
+export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
@@ -71,9 +79,17 @@ export const SEEDS_DIR = './seeds.local/';
 export const DB_PATH = './jobs.db';
 
 /**
+ * Each `LLM_*_MODEL` is an array of model IDs in fallback order. `llmSend`
+ * always tries index 0 first and only advances to index 1 (then 2, ...)
+ * after the current model has failed
+ * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. When every
+ * model in the array is exhausted, `llmSend` throws.
+ */
+
+/**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = 'qwen3.6:35b';
+export const LLM_SEEDING_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used by the sourcing process.
@@ -87,7 +103,7 @@ export const LLM_SEEDING_MODEL = 'qwen3.6:35b';
  * company, and assign an interest score to the company based on the interest.md
  * file.
  */
-export const LLM_SOURCING_MODEL = 'qwen3.6:35b';
+export const LLM_SOURCING_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -100,7 +116,7 @@ export const LLM_SOURCING_MODEL = 'qwen3.6:35b';
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = 'qwen3.6:35b';
+export const LLM_LISTING_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -110,8 +126,8 @@ export const LLM_LISTING_MODEL = 'qwen3.6:35b';
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = 'qwen3.6:35b';
-export const LLM_CODING_MODEL_SMARTER = 'qwen3.6:35b';
+export const LLM_CODING_MODEL_CHEAPER = ['qwen3.6:35b'];
+export const LLM_CODING_MODEL_SMARTER = ['qwen3.6:35b'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -122,7 +138,7 @@ export const LLM_CODING_MODEL_SMARTER = 'qwen3.6:35b';
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = 'qwen3.6:35b';
+export const LLM_VIEWING_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -134,7 +150,7 @@ export const LLM_VIEWING_MODEL = 'qwen3.6:35b';
  * - low input cost
  * - low input cost
  */
-export const LLM_EVALUATION_MODEL = 'qwen3.6:35b';
+export const LLM_EVALUATION_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
@@ -147,7 +163,7 @@ export const LLM_EVALUATION_MODEL = 'qwen3.6:35b';
  * - >=200K context window (template + cv + JD all fit)
  * - moderate output cost (the whole filled HTML comes back)
  */
-export const LLM_CV_TEMPLATE_MODEL = 'qwen3.6:35b';
+export const LLM_CV_TEMPLATE_MODEL = ['qwen3.6:35b'];
 
 /**
  * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut

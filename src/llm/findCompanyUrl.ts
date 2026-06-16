@@ -77,7 +77,7 @@ Company name: ${name}`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    model: LLM_SOURCING_MODEL,
+    models: LLM_SOURCING_MODEL,
     metadata: { configKey: 'LLM_SOURCING_MODEL' },
     logger: terminal,
     validate: async parsed => {

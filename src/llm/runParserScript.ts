@@ -222,7 +222,7 @@ Pick the best-matching options for each axis.`,
       ),
     }),
     maxAttempts: MAX_PICK_ATTEMPTS,
-    model: LLM_LISTING_MODEL,
+    models: LLM_LISTING_MODEL,
     metadata: { configKey: 'LLM_LISTING_MODEL' },
     logger: terminal,
     validate: parsed => {

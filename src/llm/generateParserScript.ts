@@ -27,16 +27,16 @@ export type GeneratedParserScript = {
  * job list. Returns the validated script + the captured location/division
  * options, or null if all attempts fail.
  *
- * `model` is the LLM model ID (e.g. `LLM_CODING_MODEL_BASE` or
- * `LLM_CODING_MODEL_SMARTER`). Callers can retry with a smarter model when
- * the base one returns null.
+ * `models` is the LLM fallback chain (e.g. `LLM_CODING_MODEL_CHEAPER` or
+ * `LLM_CODING_MODEL_SMARTER`). Callers can call again with a smarter
+ * chain when the cheaper one returns null.
  */
 export async function generateParserScript(args: {
   context: BrowserContext;
   listingUrl: string;
-  model: string;
+  models: string[];
 }): Promise<GeneratedParserScript | null> {
-  const { context, listingUrl, model } = args;
+  const { context, listingUrl, models } = args;
 
   return withBrowserTab(context, async page => {
     let snapshot: { title: string; html: string };
@@ -118,7 +118,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
           ),
         }),
         maxAttempts: MAX_SCRIPT_ATTEMPTS,
-        model,
+        models,
         metadata: { configKey: 'LLM_CODING_MODEL' },
         logger: terminal,
         reasoningEffort: LlmReasoningEffort.High,

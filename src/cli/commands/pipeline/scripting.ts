@@ -139,24 +139,24 @@ async function scriptOneTarget(args: {
     label: target.url,
     work: async (): Promise<{ jobListSourceUpdated: number }> => {
       terminal.log(
-        `Scripting JobListSource ${target.url} (model=${LLM_CODING_MODEL_CHEAPER})`
+        `Scripting JobListSource ${target.url} (models=${LLM_CODING_MODEL_CHEAPER.join(',')})`
       );
 
       let generated = await generateParserScript({
         context,
         listingUrl: target.url,
-        model: LLM_CODING_MODEL_CHEAPER,
+        models: LLM_CODING_MODEL_CHEAPER,
       });
 
       if (!generated) {
         terminal.warn(
-          `Base model (${LLM_CODING_MODEL_CHEAPER}) could not produce a validated script for ${target.url}. Retrying with smarter model (${LLM_CODING_MODEL_SMARTER}).`
+          `Base models (${LLM_CODING_MODEL_CHEAPER.join(',')}) could not produce a validated script for ${target.url}. Retrying with smarter models (${LLM_CODING_MODEL_SMARTER.join(',')}).`
         );
 
         generated = await generateParserScript({
           context,
           listingUrl: target.url,
-          model: LLM_CODING_MODEL_SMARTER,
+          models: LLM_CODING_MODEL_SMARTER,
         });
       }
 
