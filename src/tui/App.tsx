@@ -1,5 +1,5 @@
 import { Box, useApp, useInput } from 'ink';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { ActivityFeed } from 'src/tui/components/ActivityFeed.js';
 import { Footer } from 'src/tui/components/Footer.js';
@@ -7,7 +7,7 @@ import { JobPostDetailScreen } from 'src/tui/components/JobPostDetailScreen.js';
 import { PipelineHeader } from 'src/tui/components/PipelineHeader.js';
 import { SourceJobsScreen } from 'src/tui/components/SourceJobsScreen.js';
 import { TabBar } from 'src/tui/components/TabBar.js';
-import { TabView } from 'src/tui/components/TabView.js';
+import { TabView, type TagPickerMode } from 'src/tui/components/TabView.js';
 import {
   getPipelineStats,
   getRecentActivity,
@@ -61,6 +61,19 @@ export function App({ initial }: { initial: AppOptions }) {
   // Sources tab.
   const [sourceJobsCursor, setSourceJobsCursor] = useState(0);
   const [sourceJobsSort, setSourceJobsSort] = useState<JobPostSortKey>(sort);
+  // TabView cursor lives here for the same reason: drilling into a
+  // JobPostDetailScreen unmounts TabView, and an internal `useState(0)`
+  // would lose the highlight on return. Reset to 0 when the tab changes.
+  const [tabCursor, setTabCursor] = useState(0);
+
+  useEffect(() => {
+    setTabCursor(0);
+  }, [tab]);
+
+  // Tag picker mode is also lifted so App's outer `useInput` can disable
+  // itself while the picker is open — otherwise Esc would exit the whole
+  // TUI instead of just dismissing the picker.
+  const [tagPickerMode, setTagPickerMode] = useState<TagPickerMode>(null);
 
   const stats = useLiveData(useCallback(() => getPipelineStats(), []));
   const activity = useLiveData(
@@ -181,8 +194,10 @@ export function App({ initial }: { initial: AppOptions }) {
       }
     },
     // App-level keys go silent while a layered screen (JobPost detail or
-    // SourceJobs) is open — those screens own all input.
-    { isActive: openJob == null && openSource == null }
+    // SourceJobs) is open — those screens own all input. Also silent
+    // while TabView's tag picker is open so Esc / q route to the picker
+    // instead of quitting the whole TUI.
+    { isActive: openJob == null && openSource == null && tagPickerMode == null }
   );
 
   if (openJob) {
@@ -223,12 +238,7 @@ export function App({ initial }: { initial: AppOptions }) {
           sources: sources?.length ?? 0,
         }}
       />
-      {/*
-        key={tab} forces TabView to remount on tab switch — resets the cursor
-        to 0 without App having to manage that state.
-      */}
       <TabView
-        key={tab}
         tab={tab}
         jobPosts={jobPosts}
         sources={sources}
@@ -236,6 +246,10 @@ export function App({ initial }: { initial: AppOptions }) {
         stagesCount={stats?.length ?? 0}
         activityCount={activity?.length ?? 0}
         active={focus === 'table'}
+        cursor={tabCursor}
+        setCursor={setTabCursor}
+        tagPickerMode={tagPickerMode}
+        setTagPickerMode={setTagPickerMode}
         onOpenJob={id => setOpenJobId(id)}
         onOpenSource={id => {
           // Fresh source session: reset cursor + seed sort from the Jobs

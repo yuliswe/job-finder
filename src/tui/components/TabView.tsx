@@ -1,5 +1,5 @@
 import { Box, useInput } from 'ink';
-import { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 
 import { JobPostDetail } from 'src/tui/components/JobPostDetail.js';
 import { JobPostList } from 'src/tui/components/JobPostList.js';
@@ -18,6 +18,8 @@ import { listTagOptions, tagOption } from 'src/tui/utils/tags.js';
 import type { AppTab } from 'src/tui/utils/types.js';
 import type { JobPostSortKey } from 'src/tui/queries.js';
 
+export type TagPickerMode = 'add' | 'remove' | null;
+
 export function TabView({
   tab,
   jobPosts,
@@ -26,6 +28,10 @@ export function TabView({
   stagesCount,
   activityCount,
   active = true,
+  cursor,
+  setCursor,
+  tagPickerMode,
+  setTagPickerMode,
   onOpenJob,
   onOpenSource,
 }: {
@@ -38,21 +44,23 @@ export function TabView({
   stagesCount: number;
   activityCount: number;
   active?: boolean;
+  /** Lifted to App so the Jobs-tab cursor survives drilling into a
+   * JobPostDetailScreen and back out (TabView would otherwise reset on
+   * remount). App resets it to 0 when switching tabs. */
+  cursor: number;
+  setCursor: React.Dispatch<React.SetStateAction<number>>;
+  /** Lifted to App so App's outer `useInput` can deactivate while the
+   * picker is open — otherwise Esc on the picker would exit the whole
+   * TUI before TabView gets to handle it. `t` opens 'add' mode (every
+   * configured tag), Shift+T opens 'remove' mode (only the row's
+   * currently-applied tags). Jobs tab only. */
+  tagPickerMode: TagPickerMode;
+  setTagPickerMode: React.Dispatch<React.SetStateAction<TagPickerMode>>;
   /** Open the full-screen detail view for the given JobPost id. */
   onOpenJob?: (id: string) => void;
   /** Open the full-screen "jobs from this source" view. */
   onOpenSource?: (sourceId: string) => void;
 }) {
-  const [cursor, setCursor] = useState(0);
-  // `t` opens an "add" tag picker (every configured tag), Shift+T opens a
-  // "remove" picker (only the row's currently-applied tags). The next
-  // keypress (the shortcut letter for a color) toggles that tag and
-  // dismisses the picker. Esc cancels without changing anything. Jobs tab
-  // only — pressing `t` on the Sources tab is a no-op.
-  const [tagPickerMode, setTagPickerMode] = useState<'add' | 'remove' | null>(
-    null
-  );
-
   const { rows: terminalRows, cols: terminalCols } = useTerminalSize();
 
   // Count what we render so the table fits the viewport.
