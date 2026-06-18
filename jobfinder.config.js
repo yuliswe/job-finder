@@ -72,6 +72,16 @@ export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
 export const LLM_REQUEST_CONCURRENCY_MAX = 1;
 
 /**
+ * When true, stream the model's output (and `thinking` field, when the
+ * model supports it) to stdout as it arrives. Useful for watching what
+ * the model is doing in real time on slow local backends.
+ *
+ * Currently honored only by the Ollama plugin — OpenRouter and
+ * Anthropic plugins don't expose the stream to user code in this repo.
+ */
+export const LLM_LOG_STREAM = false;
+
+/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the

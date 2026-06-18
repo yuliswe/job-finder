@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
   DB_PATH,
+  LLM_LOG_STREAM,
   LLM_PLUGIN,
   LLM_REQUEST_CONCURRENCY_MAX,
   OLLAMA_HOST,
@@ -82,6 +83,20 @@ export const Env = {
    * display labels. Defaults to the five Ink-friendly colors. */
   get TAGS(): Record<string, string> {
     return TAGS ?? {};
+  },
+
+  /** When true, plugins that support streaming write the response (and
+   * any `thinking` field) to stdout as it arrives. See
+   * `jobfinder.config.js#LLM_LOG_STREAM`. Env-var override accepts
+   * "true"/"1" or "false"/"0"; anything else throws. */
+  get LLM_LOG_STREAM(): boolean {
+    const raw = process.env.LLM_LOG_STREAM;
+    if (raw === undefined || raw === '') return LLM_LOG_STREAM ?? false;
+    if (raw === 'true' || raw === '1') return true;
+    if (raw === 'false' || raw === '0') return false;
+    throw new Error(
+      `LLM_LOG_STREAM=${JSON.stringify(raw)} must be one of true / false / 1 / 0.`
+    );
   },
 
   /** User-configured cap on simultaneous LLM requests, or `undefined`

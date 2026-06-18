@@ -63,12 +63,47 @@ export class OllamaPlugin {
       throw new Error(`OllamaPlugin: ${url} returned no response body`);
     }
 
+    const logStream = Env.LLM_LOG_STREAM;
+    if (logStream) {
+      process.stdout.write(`\n--- LLM stream (${args.model}) ---\n`);
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let content = '';
     let promptEvalCount = 0;
     let evalCount = 0;
+
+    type Chunk = {
+      message?: { content?: string; thinking?: string };
+      done?: boolean;
+      prompt_eval_count?: number;
+      eval_count?: number;
+      error?: string;
+    };
+
+    const handleChunk = (chunk: Chunk): void => {
+      if (chunk.error) {
+        throw new Error(`OllamaPlugin: ${chunk.error}`);
+      }
+
+      if (logStream) {
+        if (chunk.message?.thinking) {
+          process.stdout.write(chunk.message.thinking);
+        }
+
+        if (chunk.message?.content) {
+          process.stdout.write(chunk.message.content);
+        }
+      }
+
+      if (chunk.message?.content) content += chunk.message.content;
+      if (chunk.done) {
+        promptEvalCount = chunk.prompt_eval_count ?? 0;
+        evalCount = chunk.eval_count ?? 0;
+      }
+    };
 
     while (true) {
       const { value, done } = await reader.read();
@@ -79,45 +114,17 @@ export class OllamaPlugin {
         const line = buffer.slice(0, nl).trim();
         buffer = buffer.slice(nl + 1);
         if (!line) continue;
-        const chunk = JSON.parse(line) as {
-          message?: { content?: string };
-          done?: boolean;
-          prompt_eval_count?: number;
-          eval_count?: number;
-          error?: string;
-        };
-
-        if (chunk.error) {
-          throw new Error(`OllamaPlugin: ${chunk.error}`);
-        }
-
-        if (chunk.message?.content) content += chunk.message.content;
-        if (chunk.done) {
-          promptEvalCount = chunk.prompt_eval_count ?? 0;
-          evalCount = chunk.eval_count ?? 0;
-        }
+        handleChunk(JSON.parse(line) as Chunk);
       }
     }
 
     const trailing = buffer.trim();
     if (trailing) {
-      const chunk = JSON.parse(trailing) as {
-        message?: { content?: string };
-        done?: boolean;
-        prompt_eval_count?: number;
-        eval_count?: number;
-        error?: string;
-      };
+      handleChunk(JSON.parse(trailing) as Chunk);
+    }
 
-      if (chunk.error) {
-        throw new Error(`OllamaPlugin: ${chunk.error}`);
-      }
-
-      if (chunk.message?.content) content += chunk.message.content;
-      if (chunk.done) {
-        promptEvalCount = chunk.prompt_eval_count ?? 0;
-        evalCount = chunk.eval_count ?? 0;
-      }
+    if (logStream) {
+      process.stdout.write('\n--- end stream ---\n');
     }
 
     return { content, totalTokens: promptEvalCount + evalCount };

@@ -56,6 +56,15 @@ export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
 
 /**
+ * When true, stream the model's output (and `thinking` field, when the
+ * model supports it) to stdout as it arrives. Useful for watching what
+ * the model is doing in real time on slow local backends.
+ *
+ * Currently honored only by the Ollama plugin.
+ */
+export const LLM_LOG_STREAM = false;
+
+/**
  * Per-model attempt budget inside `llmSend`. Each `LLM_*_MODEL` value is
  * an array; `llmSend` retries the current model up to this many times
  * before advancing to the next model in the array. When every model is
