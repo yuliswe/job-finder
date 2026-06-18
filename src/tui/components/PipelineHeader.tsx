@@ -1,8 +1,8 @@
 import { Box, Text } from 'ink';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
-import type { PipelineStageStats } from 'src/tui/queries.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
+import type { PipelineStageStats } from 'src/tui/queries.js';
 
 const PULSE_MS = 500;
 /** Truecolor orange; falls back to bright yellow on 256-color terminals. */
@@ -46,9 +46,7 @@ export function PipelineHeader({
   }
 
   const labelWidth = Math.max(...stats.map(s => s.label.length));
-  // Pipeline rows visual width: dot + space + label + space + 18-char bar +
-  // space + counts.
-  const rowsWidth = 2 + labelWidth + 1 + 18 + 1 + 16;
+  const rowsWidth = 2 + labelWidth + 1 + 18 + 1 + 22;
   const infoWidth = Math.max(20, cols - rowsWidth - 4);
   const selected = stats[cursor] ?? null;
   return (
@@ -167,10 +165,11 @@ function progressSegments(
 }
 
 function countSummary(s: PipelineStageStats): string {
+  const inScope = s.total - s.outOfScope;
   const parts = [`${s.done}✓`];
   if (s.noResult > 0) parts.push(`${s.noResult}∅`);
   if (s.failed > 0) parts.push(`${s.failed}✗`);
-  return `${parts.join(' ')} / ${s.total - s.outOfScope}`;
+  return `${s.queued} / ${parts.join(' ')} / ${inScope}`;
 }
 
 /** Returns a boolean that flips every PULSE_MS while `active`. When inactive,
