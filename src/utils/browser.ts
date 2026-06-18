@@ -121,6 +121,13 @@ export async function goToPage(
  * note that the page is no longer usable after a timeout. Omit `timeoutMs`
  * (or set it to 0) to keep the original wait-forever behavior.
  */
+export class PageEvalTimeoutError extends Error {
+  override name = 'PageEvalTimeoutError';
+  constructor(public readonly timeoutMs: number) {
+    super(`pageEval timed out after ${timeoutMs}ms`);
+  }
+}
+
 export async function pageEval<T, A = undefined>(
   page: Page,
   fn: (arg: A) => T | Promise<T>,
@@ -142,7 +149,7 @@ export async function pageEval<T, A = undefined>(
       void page.close().catch(() => {
         // ignore — page may already be closing
       });
-      reject(new Error(`pageEval timed out after ${timeoutMs}ms`));
+      reject(new PageEvalTimeoutError(timeoutMs));
     }, timeoutMs);
   });
 

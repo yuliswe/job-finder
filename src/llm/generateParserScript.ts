@@ -4,7 +4,12 @@ import * as v from 'valibot';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
 import { GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT } from 'src/prompts/generateParserScript.js';
-import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
+import {
+  goToPage,
+  pageEval,
+  PageEvalTimeoutError,
+  withBrowserTab,
+} from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { COLOURS, terminal } from 'src/utils/terminal';
 
@@ -401,78 +406,96 @@ async function runSearchJobs(
     keywords: [],
   });
 
-  const run = await pageEval(
-    page,
-    async ({
-      s,
-      a,
-    }: {
-      s: string;
-      a: { locations: string[]; divisions: string[]; keywords: string[] };
-    }) => {
-      return await runWithConsoleCapture(async () => {
-        const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
-        return await fn(a);
-      });
+  let run:
+    | { ok: true; value: unknown; logs: string[] }
+    | { ok: false; error: string; logs: string[] };
 
-      function runWithConsoleCapture<R>(
-        body: () => Promise<R>
-      ): Promise<
-        | { ok: true; value: R; logs: string[] }
-        | { ok: false; error: string; logs: string[] }
-      > {
-        const logs: string[] = [];
-        const fmt = (v: unknown): string => {
-          if (typeof v === 'string') return v;
-          try {
-            return JSON.stringify(v);
-          } catch {
-            return String(v);
-          }
-        };
+  try {
+    run = await pageEval(
+      page,
+      async ({
+        s,
+        a,
+      }: {
+        s: string;
+        a: { locations: string[]; divisions: string[]; keywords: string[] };
+      }) => {
+        return await runWithConsoleCapture(async () => {
+          const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
+          return await fn(a);
+        });
 
-        const wrap =
-          (level: string) =>
-          (...xs: unknown[]) => {
-            logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
+        function runWithConsoleCapture<R>(
+          body: () => Promise<R>
+        ): Promise<
+          | { ok: true; value: R; logs: string[] }
+          | { ok: false; error: string; logs: string[] }
+        > {
+          const logs: string[] = [];
+          const fmt = (v: unknown): string => {
+            if (typeof v === 'string') return v;
+            try {
+              return JSON.stringify(v);
+            } catch {
+              return String(v);
+            }
           };
 
-        const orig = {
-          log: console.log,
-          warn: console.warn,
-          error: console.error,
-          info: console.info,
-        };
+          const wrap =
+            (level: string) =>
+            (...xs: unknown[]) => {
+              logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
+            };
 
-        console.log = wrap('log');
-        console.warn = wrap('warn');
-        console.error = wrap('error');
-        console.info = wrap('info');
-        return body()
-          .then(value => ({ ok: true as const, value, logs }))
-          .catch(err => ({
-            ok: false as const,
-            error: String((err && (err.stack || err.message)) || err),
-            logs,
-          }))
-          .finally(() => {
-            console.log = orig.log;
-            console.warn = orig.warn;
-            console.error = orig.error;
-            console.info = orig.info;
-          });
-      }
-    },
-    {
-      s: script,
-      a: {
-        locations: shape.locations,
-        divisions: shape.divisions,
-        keywords: [],
+          const orig = {
+            log: console.log,
+            warn: console.warn,
+            error: console.error,
+            info: console.info,
+          };
+
+          console.log = wrap('log');
+          console.warn = wrap('warn');
+          console.error = wrap('error');
+          console.info = wrap('info');
+          return body()
+            .then(value => ({ ok: true as const, value, logs }))
+            .catch(err => ({
+              ok: false as const,
+              error: String((err && (err.stack || err.message)) || err),
+              logs,
+            }))
+            .finally(() => {
+              console.log = orig.log;
+              console.warn = orig.warn;
+              console.error = orig.error;
+              console.info = orig.info;
+            });
+        }
       },
-    },
-    { timeoutMs: 60_000 }
-  );
+      {
+        s: script,
+        a: {
+          locations: shape.locations,
+          divisions: shape.divisions,
+          keywords: [],
+        },
+      },
+      { timeoutMs: 60_000 }
+    );
+  } catch (err) {
+    if (err instanceof PageEvalTimeoutError) {
+      return {
+        ok: false,
+        feedback:
+          `searchJobs(${argsForLog}) timed out after ${Math.round(err.timeoutMs / 1000)}s and never returned. ` +
+          'Likely causes: an unresolved promise, an infinite wait for a selector / network response, or a runaway loop. ' +
+          'Make sure searchJobs returns promptly — bound any waitForSelector / setTimeout, resolve every awaited promise, and return as soon as the listing is captured.',
+      };
+    }
+
+    throw err;
+  }
 
   if (!run.ok) {
     return {
@@ -621,60 +644,78 @@ async function probeListFn(
   script: string,
   fnName: 'listLocations' | 'listDivisions'
 ): Promise<ListFnProbe> {
-  const run = await pageEval(
-    page,
-    ({ s, name }: { s: string; name: string }) => {
-      const logs: string[] = [];
-      const fmt = (v: unknown): string => {
-        if (typeof v === 'string') return v;
+  let run:
+    | { ok: true; value: unknown; logs: string[] }
+    | { ok: false; error: string; logs: string[] };
+
+  try {
+    run = await pageEval(
+      page,
+      ({ s, name }: { s: string; name: string }) => {
+        const logs: string[] = [];
+        const fmt = (v: unknown): string => {
+          if (typeof v === 'string') return v;
+          try {
+            return JSON.stringify(v);
+          } catch {
+            return String(v);
+          }
+        };
+
+        const wrap =
+          (level: string) =>
+          (...xs: unknown[]) => {
+            logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
+          };
+
+        const orig = {
+          log: console.log,
+          warn: console.warn,
+          error: console.error,
+          info: console.info,
+        };
+
+        console.log = wrap('log');
+        console.warn = wrap('warn');
+        console.error = wrap('error');
+        console.info = wrap('info');
         try {
-          return JSON.stringify(v);
-        } catch {
-          return String(v);
+          const fn = new Function(
+            `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
+          );
+
+          const value = fn();
+          return { ok: true as const, value, logs };
+        } catch (err) {
+          const e = err as { stack?: string; message?: string } | undefined;
+          return {
+            ok: false as const,
+            error: String(e?.stack ?? e?.message ?? err),
+            logs,
+          };
+        } finally {
+          console.log = orig.log;
+          console.warn = orig.warn;
+          console.error = orig.error;
+          console.info = orig.info;
         }
+      },
+      { s: script, name: fnName },
+      { timeoutMs: 60_000 }
+    );
+  } catch (err) {
+    if (err instanceof PageEvalTimeoutError) {
+      return {
+        ok: false,
+        feedback:
+          `${fnName}() timed out after ${Math.round(err.timeoutMs / 1000)}s and never returned. ` +
+          'Likely causes: an unresolved promise, an infinite wait for a selector, or a runaway loop. ' +
+          `Make sure ${fnName}() returns synchronously (or resolves promptly) — bound any waitForSelector / setTimeout and return as soon as the values are collected.`,
       };
+    }
 
-      const wrap =
-        (level: string) =>
-        (...xs: unknown[]) => {
-          logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
-        };
-
-      const orig = {
-        log: console.log,
-        warn: console.warn,
-        error: console.error,
-        info: console.info,
-      };
-
-      console.log = wrap('log');
-      console.warn = wrap('warn');
-      console.error = wrap('error');
-      console.info = wrap('info');
-      try {
-        const fn = new Function(
-          `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
-        );
-
-        const value = fn();
-        return { ok: true as const, value, logs };
-      } catch (err) {
-        const e = err as { stack?: string; message?: string } | undefined;
-        return {
-          ok: false as const,
-          error: String(e?.stack ?? e?.message ?? err),
-          logs,
-        };
-      } finally {
-        console.log = orig.log;
-        console.warn = orig.warn;
-        console.error = orig.error;
-        console.info = orig.info;
-      }
-    },
-    { s: script, name: fnName },
-    { timeoutMs: 60_000 }
-  );
+    throw err;
+  }
 
   if (!run.ok) {
     return {
