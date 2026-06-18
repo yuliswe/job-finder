@@ -320,6 +320,34 @@ function appendToLastSystemMessage(
   );
 }
 
+class ModelInterator {
+  private index = 0;
+  constructor(public models: string[]) {
+    if (models.length === 0) {
+      throw new Error('ModelInterator: models array is empty');
+    }
+  }
+
+  current(): string {
+    return this.models[this.index]!;
+  }
+
+  isLast(): boolean {
+    return this.index >= this.models.length - 1;
+  }
+
+  /** Name of the model we'd advance to. Caller must check !isLastModel() first. */
+  peekNext(): string {
+    return this.models[this.index + 1]!;
+  }
+
+  next(): void {
+    if (!this.isLast()) {
+      this.index++;
+    }
+  }
+}
+
 /** Send with retries on transient/validation failures. Cycles through
  * `models` in order: each model gets up to
  * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` attempts before falling back
@@ -328,33 +356,32 @@ function appendToLastSystemMessage(
 async function sendWithRetry<S extends v.GenericSchema>(args: {
   memory: Memory;
   schema: S;
-  models: string[];
+  modelIterator: ModelInterator;
   logger: Terminal;
   reasoningEffort?: LlmReasoningEffort;
   metadata?: Record<string, string>;
   enableWebSearch?: boolean;
-}): Promise<{ result: v.InferOutput<S>; totalTokens: number }> {
+}): Promise<{
+  result: v.InferOutput<S>;
+  totalTokens: number;
+  model: string;
+}> {
   const {
     memory,
     schema,
-    models,
+    modelIterator,
     logger,
     reasoningEffort,
     metadata,
     enableWebSearch,
   } = args;
 
-  if (models.length === 0) {
-    throw new Error('sendWithRetry: models array is empty');
-  }
-
   const perModel = AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS;
   let totalTokens = 0;
-  let lastError: unknown;
 
-  for (let modelIdx = 0; modelIdx < models.length; modelIdx++) {
-    const model = models[modelIdx]!;
-    const isLastModel = modelIdx === models.length - 1;
+  while (true) {
+    const model = modelIterator.current();
+    const isLastModel = modelIterator.isLast();
 
     for (let attempt = 0; attempt < perModel; attempt++) {
       try {
@@ -368,10 +395,12 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
         });
 
         totalTokens += sendResult.totalTokens;
-        return { result: sendResult.result, totalTokens };
+        return {
+          result: sendResult.result,
+          totalTokens,
+          model,
+        };
       } catch (error) {
-        lastError = error;
-
         const isSchemaError =
           error instanceof Error &&
           (error.name === 'ResponseValidationError' ||
@@ -396,34 +425,33 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
           if (isLastModel) throw error;
 
           logger.warn(
-            `Switching to next model: ${models[modelIdx + 1]}`,
+            `Switching to next model: ${modelIterator.peekNext()}`,
             COLOURS.gray
           );
+
+          modelIterator.next();
           break;
         }
 
         if (isLastAttemptForModel) {
-          if (isLastModel) {
-            logger.error(
-              `LLM request failed (model=${model}) after ${perModel} attempts: ${formatLlmError(error)}`
-            );
-            throw error;
-          }
-
           logger.error(
             `LLM request failed (model=${model}) after ${perModel} attempts: ${formatLlmError(error)}`
           );
+          if (isLastModel) throw error;
 
           logger.warn(
-            `Switching to next model: ${models[modelIdx + 1]}`,
+            `Switching to next model: ${modelIterator.peekNext()}`,
             COLOURS.gray
           );
+
+          modelIterator.next();
           break;
         }
 
         logger.error(
           `LLM request failed (model=${model}), retrying (${attempt + 1}/${perModel}): ${formatLlmError(error)}`
         );
+
         if (isSchemaError) {
           // Surface the actual validation/parse message so the model knows
           // what was wrong, not just that "something" was wrong. For
@@ -448,8 +476,6 @@ async function sendWithRetry<S extends v.GenericSchema>(args: {
       }
     }
   }
-
-  throw lastError ?? new Error('Unreachable');
 }
 
 /** Surface as much of the underlying provider's error as we can. SDK errors
@@ -509,7 +535,11 @@ export async function feedbackLoop<
    * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. */
   models: string[];
   validate: (
-    parsed: v.InferOutput<S>
+    parsed: v.InferOutput<S>,
+    context: {
+      iteration: number;
+      model: string;
+    }
   ) => Promise<ValidateResult<R>> | ValidateResult<R>;
   reasoningEffort?: LlmReasoningEffort;
   /** Free-form tags forwarded to the OpenRouter `metadata` field on every
@@ -535,11 +565,12 @@ export async function feedbackLoop<
   memory.add(initialPrompt);
 
   let totalTokens = 0;
+  const modelIterator = new ModelInterator(models);
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const sendResult = await sendWithRetry({
       memory,
       schema,
-      models,
+      modelIterator,
       logger,
       reasoningEffort,
       metadata,
@@ -550,7 +581,10 @@ export async function feedbackLoop<
 
     memory.addAssistant(JSON.stringify(sendResult.result));
 
-    const validateResult = await validate(sendResult.result);
+    const validateResult = await validate(sendResult.result, {
+      iteration: attempt,
+      model: sendResult.model,
+    });
 
     if (validateResult.valid) {
       return { result: validateResult.result, totalTokens };

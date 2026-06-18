@@ -77,14 +77,14 @@ export const LLM_REQUEST_CONCURRENCY_MAX = 1;
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './jin-seeds.local';
+export const SEEDS_DIR = './seeds';
 
 /**
  * Path to the SQLite database file. May be relative (to the CWD where you
  * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
  * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
  */
-export const DB_PATH = './jin-jobs.db';
+export const DB_PATH = './jobs-new.db';
 
 /**
  * Each `LLM_*_MODEL` is an array of model IDs in fallback order. `llmSend`
@@ -97,7 +97,11 @@ export const DB_PATH = './jin-jobs.db';
 /**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_SEEDING_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * The model used by the sourcing process.
@@ -111,7 +115,11 @@ export const LLM_SEEDING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
  * company, and assign an interest score to the company based on the interest.md
  * file.
  */
-export const LLM_SOURCING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_SOURCING_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -124,7 +132,11 @@ export const LLM_SOURCING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_LISTING_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -134,8 +146,7 @@ export const LLM_LISTING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
-export const LLM_CODING_MODEL_SMARTER = ['qwen3.6:35b-mlx-mlx'];
+export const LLM_CODING_MODEL = ['qwen3.6:35b-mlx', 'gemma4:31b-mlx'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -146,7 +157,11 @@ export const LLM_CODING_MODEL_SMARTER = ['qwen3.6:35b-mlx-mlx'];
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_VIEWING_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -158,7 +173,11 @@ export const LLM_VIEWING_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
  * - low input cost
  * - low input cost
  */
-export const LLM_EVALUATION_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_EVALUATION_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
@@ -171,7 +190,11 @@ export const LLM_EVALUATION_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
  * - >=200K context window (template + cv + JD all fit)
  * - moderate output cost (the whole filled HTML comes back)
  */
-export const LLM_CV_TEMPLATE_MODEL = ['gemma4:e4b-mlx', 'qwen3.6:35b-mlx'];
+export const LLM_CV_TEMPLATE_MODEL = [
+  'gemma4:e4b-mlx',
+  'qwen3.6:35b-mlx',
+  'gemma4:31b-mlx',
+];
 
 /**
  * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut

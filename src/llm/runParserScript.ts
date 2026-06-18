@@ -1,7 +1,7 @@
 import { type BrowserContext, type Page } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_LISTING_MODEL } from 'jobfinder.config.js';
+import { LLM_CODING_MODEL } from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { PICK_FILTER_OPTIONS_SYSTEM_PROMPT } from 'src/prompts/pickFilterOptions.js';
 import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
@@ -57,33 +57,14 @@ export async function runParserScript(args: {
       };
     }
 
-    const picked = await pickFilterOptions({
+    const { jobs, picked } = await pickFilterOptions({
+      page,
+      script,
       userLocation,
       userDivision,
       availableLocations,
       availableDivisions,
     });
-
-    let jobs: { jobTitle: string; url: string }[];
-    try {
-      terminal.log(
-        `Searching jobs with the picked filters (locations: ${picked.locations.join(', ') || '(none)'}, divisions: ${picked.divisions.join(', ') || '(none)'})...`
-      );
-
-      jobs = await callSearchJobs(page, script, {
-        locations: picked.locations,
-        divisions: picked.divisions,
-        keywords: [],
-      });
-    } catch (err) {
-      terminal.error(`searchJobs threw: ${String(err)}`);
-
-      return {
-        ok: false,
-        reason: 'script_error',
-        error: `searchJobs threw: ${String(err).slice(0, 500)}`,
-      };
-    }
 
     if (jobs.length === 0) {
       terminal.log('No jobs found.');
@@ -169,18 +150,24 @@ async function callSearchJobs(
 }
 
 async function pickFilterOptions(args: {
+  page: Page;
+  script: string;
   userLocation: string;
   userDivision: string;
   availableLocations: string[];
   availableDivisions: string[];
-}): Promise<{ locations: string[]; divisions: string[] }> {
-  const { userLocation, userDivision, availableLocations, availableDivisions } =
-    args;
-
-  // Short-circuit: if both axes have no options, no LLM call needed.
-  if (availableLocations.length === 0 && availableDivisions.length === 0) {
-    return { locations: [], divisions: [] };
-  }
+}): Promise<{
+  jobs: { jobTitle: string; url: string }[];
+  picked: { locations: string[]; divisions: string[] };
+}> {
+  const {
+    page,
+    script,
+    userLocation,
+    userDivision,
+    availableLocations,
+    availableDivisions,
+  } = args;
 
   const locSet = new Set(availableLocations);
   const divSet = new Set(availableDivisions);
@@ -222,10 +209,10 @@ Pick the best-matching options for each axis.`,
       ),
     }),
     maxAttempts: MAX_PICK_ATTEMPTS,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_CODING_MODEL,
+    metadata: { configKey: 'LLM_CODING_MODEL' },
     logger: terminal,
-    validate: parsed => {
+    validate: async (parsed, ctx) => {
       const badLoc = parsed.pickedLocations.filter(l => !locSet.has(l));
       const badDiv = parsed.pickedDivisions.filter(d => !divSet.has(d));
       if (badLoc.length > 0 || badDiv.length > 0) {
@@ -236,14 +223,36 @@ Pick the best-matching options for each axis.`,
       }
 
       terminal.llmResponse(
-        `LLM: I've picked location(s): ${parsed.pickedLocations.join(', ') || '(none)'} | division(s): ${parsed.pickedDivisions.join(', ') || '(none)'}\nExplanation: ${parsed.reason}`
+        `LLM (${ctx.model}): I've picked location(s): ${parsed.pickedLocations.join(', ') || '(none)'} | division(s): ${parsed.pickedDivisions.join(', ') || '(none)'}\nExplanation: ${parsed.reason}`
       );
+
+      // Reload before each attempt so the script's prior DOM mutations,
+      // scroll position, or backend pagination state can't leak into the
+      // next call — repeated searchJobs() on the same page is not idempotent
+      // for many real-world listing implementations (Workday, etc.).
+      await goToPage(page, page.url());
+      const jobs = await callSearchJobs(page, script, {
+        locations: parsed.pickedLocations,
+        divisions: parsed.pickedDivisions,
+        keywords: [],
+      });
+
+      if (jobs.length > 100) {
+        return {
+          valid: false,
+          feedback:
+            'Too many jobs returned (more than 100). Please refine your filters.',
+        };
+      }
 
       return {
         valid: true,
         result: {
-          locations: parsed.pickedLocations,
-          divisions: parsed.pickedDivisions,
+          jobs,
+          picked: {
+            locations: parsed.pickedLocations,
+            divisions: parsed.pickedDivisions,
+          },
         },
       };
     },

@@ -32,9 +32,9 @@ export type GeneratedParserScript = {
  * job list. Returns the validated script + the captured location/division
  * options, or null if all attempts fail.
  *
- * `models` is the LLM fallback chain (e.g. `LLM_CODING_MODEL_CHEAPER` or
- * `LLM_CODING_MODEL_SMARTER`). Callers can call again with a smarter
- * chain when the cheaper one returns null.
+ * `models` is the LLM fallback chain (e.g. `LLM_CODING_MODEL`) —
+ * cheaper-to-smarter ordering; `sendWithRetry` advances automatically
+ * when a model exhausts its attempt budget.
  */
 export async function generateParserScript(args: {
   context: BrowserContext;
@@ -127,9 +127,9 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
         metadata: { configKey: 'LLM_CODING_MODEL' },
         logger: terminal,
         reasoningEffort: LlmReasoningEffort.High,
-        validate: async parsed => {
+        validate: async (parsed, ctx) => {
           terminal.log(
-            `LLM (${parsed.state}): ${parsed.currentAction}\nReason: ${parsed.reason}\nScript size: ${parsed.parserScript.length}`,
+            `LLM (${ctx.model}): state=${parsed.state} | ${parsed.currentAction}\nReason: ${parsed.reason}\nScript size: ${parsed.parserScript.length}`,
             COLOURS.cyan
           );
 
@@ -144,7 +144,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
             });
 
             terminal.log(
-              `Exploration pass: ${explore.logs.length} console log line(s) captured`
+              `LLM (${ctx.model}): Exploration pass: ${explore.logs.length} console log line(s) captured`
             );
             return {
               valid: false,
@@ -158,7 +158,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
           }
 
           terminal.log(
-            `Filters — hasLocationFilter=${parsed.hasLocationFilter} (${parsed.hasLocationFilterReason}); hasDivisionFilter=${parsed.hasDivisionFilter} (${parsed.hasDivisionFilterReason})`,
+            `LLM (${ctx.model}): Filters — hasLocationFilter=${parsed.hasLocationFilter} (${parsed.hasLocationFilterReason}); hasDivisionFilter=${parsed.hasDivisionFilter} (${parsed.hasDivisionFilterReason})`,
             COLOURS.cyan
           );
 
@@ -186,7 +186,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
             }
 
             terminal.log(
-              `Script validated: ${probe.jobs.length} jobs returned (probe shape: ${JSON.stringify(probe.probed)}; ${probe.logs.length} console log line(s) captured)`,
+              `LLM (${ctx.model}): Script validated: ${probe.jobs.length} jobs returned (probe shape: ${JSON.stringify(probe.probed)}; ${probe.logs.length} console log line(s) captured)`,
               COLOURS.green
             );
             return {

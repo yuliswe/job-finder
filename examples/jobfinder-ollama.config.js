@@ -126,8 +126,7 @@ export const LLM_LISTING_MODEL = ['qwen3.6:35b'];
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = ['qwen3.6:35b'];
-export const LLM_CODING_MODEL_SMARTER = ['qwen3.6:35b'];
+export const LLM_CODING_MODEL = ['qwen3.6:35b'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from

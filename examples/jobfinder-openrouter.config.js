@@ -126,8 +126,7 @@ export const LLM_LISTING_MODEL = ['openai/gpt-5-nano'];
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL_CHEAPER = ['openai/gpt-5-nano'];
-export const LLM_CODING_MODEL_SMARTER = ['openai/gpt-5-mini'];
+export const LLM_CODING_MODEL = ['openai/gpt-5-nano', 'openai/gpt-5-mini'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from

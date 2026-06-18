@@ -3,8 +3,7 @@ import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
 import {
-  LLM_CODING_MODEL_CHEAPER,
-  LLM_CODING_MODEL_SMARTER,
+  LLM_CODING_MODEL,
   MAX_CONCURRENT_BROWSER_TABS,
 } from 'jobfinder.config.js';
 import { db } from 'src/db/index.js';
@@ -139,37 +138,25 @@ async function scriptOneTarget(args: {
     label: target.url,
     work: async (): Promise<{ jobListSourceUpdated: number }> => {
       terminal.log(
-        `Scripting JobListSource ${target.url} (models=${LLM_CODING_MODEL_CHEAPER.join(',')})`
+        `Scripting JobListSource ${target.url} (models=${LLM_CODING_MODEL.join(',')})`
       );
 
-      let generated = await generateParserScript({
+      const generated = await generateParserScript({
         context,
         listingUrl: target.url,
-        models: LLM_CODING_MODEL_CHEAPER,
+        models: LLM_CODING_MODEL,
       });
 
       if (!generated) {
         terminal.warn(
-          `Base models (${LLM_CODING_MODEL_CHEAPER.join(',')}) could not produce a validated script for ${target.url}. Retrying with smarter models (${LLM_CODING_MODEL_SMARTER.join(',')}).`
-        );
-
-        generated = await generateParserScript({
-          context,
-          listingUrl: target.url,
-          models: LLM_CODING_MODEL_SMARTER,
-        });
-      }
-
-      if (!generated) {
-        terminal.warn(
-          `Neither base nor smarter model produced a validated script for ${target.url} — leaving unprocessed for retry`
+          `LLM_CODING_MODEL (${LLM_CODING_MODEL.join(',')}) could not produce a validated script for ${target.url} — leaving unprocessed for retry`
         );
 
         await recordPipelineState({
           task: 'scripting',
           state: PIPELINE_STATE.ABORTED,
           reason:
-            'generateParserScript returned null with both LLM_CODING_MODEL_BASE and LLM_CODING_MODEL_SMARTER (LLM aborted or exhausted attempts)',
+            'generateParserScript returned null with LLM_CODING_MODEL (LLM aborted or exhausted attempts)',
           entity: { ofJobListSourceId: target.id },
         });
         return { jobListSourceUpdated: 0 };
