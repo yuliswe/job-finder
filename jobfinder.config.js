@@ -156,7 +156,7 @@ export const LLM_LISTING_MODEL = [
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL = ['qwen3.6:35b-mlx', 'gemma4:31b-mlx'];
+export const LLM_CODING_MODEL = ['gemma4:31b-mlx'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from

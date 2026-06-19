@@ -3,6 +3,7 @@ import * as v from 'valibot';
 
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { LlmReasoningEffort } from 'src/llm/plugins/interface.js';
+import { verifyFilterValues } from 'src/llm/verifyFilterValues.js';
 import { GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT } from 'src/prompts/generateParserScript.js';
 import {
   goToPage,
@@ -322,6 +323,31 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
   const divisionsProbe = await probeListFn(page, script, 'listDivisions');
   if (!divisionsProbe.ok) return divisionsProbe;
   const { values: divisions } = divisionsProbe;
+
+  // Stage 2.5: LLM sanity check on the extracted values. A buggy selector
+  // can grab nav chrome, headings, or generic UI labels instead of real
+  // filter options; surface that as feedback so the script LLM fixes the
+  // selector before we run the more expensive Stage-3 search probes.
+  if (locations.length > 0 || divisions.length > 0) {
+    const verdict = await verifyFilterValues({ locations, divisions });
+
+    if (!verdict.locationsArePlausible || !verdict.divisionsArePlausible) {
+      const parts: string[] = [];
+      if (!verdict.locationsArePlausible) {
+        parts.push(
+          `listLocations() returned ${locations.length} values that don't look like locations: ${JSON.stringify(locations.slice(0, 10))}. Verifier reason: ${verdict.locationsReason}. Fix the selector to grab the real location filter options, or set hasLocationFilter=false and return [] if no location filter actually exists.`
+        );
+      }
+
+      if (!verdict.divisionsArePlausible) {
+        parts.push(
+          `listDivisions() returned ${divisions.length} values that don't look like divisions: ${JSON.stringify(divisions.slice(0, 10))}. Verifier reason: ${verdict.divisionsReason}. Fix the selector to grab the real department/division filter options, or set hasDivisionFilter=false and return [] if no division filter actually exists.`
+        );
+      }
+
+      return { ok: false, feedback: parts.join('\n\n') };
+    }
+  }
 
   // Stage 3a: baseline — searchJobs with empty filters. This is the page's
   // unfiltered listing; we use it as the reference set for filter-effectiveness.
@@ -651,7 +677,7 @@ async function probeListFn(
   try {
     run = await pageEval(
       page,
-      ({ s, name }: { s: string; name: string }) => {
+      async ({ s, name }: { s: string; name: string }) => {
         const logs: string[] = [];
         const fmt = (v: unknown): string => {
           if (typeof v === 'string') return v;
@@ -684,7 +710,7 @@ async function probeListFn(
             `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
           );
 
-          const value = fn();
+          const value = await fn();
           return { ok: true as const, value, logs };
         } catch (err) {
           const e = err as { stack?: string; message?: string } | undefined;
@@ -708,9 +734,9 @@ async function probeListFn(
       return {
         ok: false,
         feedback:
-          `${fnName}() timed out after ${Math.round(err.timeoutMs / 1000)}s and never returned. ` +
+          `${fnName}() timed out after ${Math.round(err.timeoutMs / 1000)}s and never resolved. ` +
           'Likely causes: an unresolved promise, an infinite wait for a selector, or a runaway loop. ' +
-          `Make sure ${fnName}() returns synchronously (or resolves promptly) — bound any waitForSelector / setTimeout and return as soon as the values are collected.`,
+          `Make sure ${fnName}() resolves promptly — bound any waitForSelector / setTimeout and return as soon as the values are collected.`,
       };
     }
 

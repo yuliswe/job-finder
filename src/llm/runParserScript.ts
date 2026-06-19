@@ -86,12 +86,12 @@ async function callListFn(
 ): Promise<string[]> {
   const value = await pageEval(
     page,
-    ({ s, name }: { s: string; name: string }) => {
+    async ({ s, name }: { s: string; name: string }) => {
       const fn = new Function(
         `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
       );
 
-      return fn();
+      return await fn();
     },
     { s: script, name: fnName },
     { timeoutMs: 60_000 }

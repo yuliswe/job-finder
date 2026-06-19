@@ -2,11 +2,11 @@ export const GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT = `You generate a JavaScript s
 
 # Runtime environment
 
-Your snippet runs inside the browser's main JavaScript thread via Playwright's \`page.evaluate(...)\`. The host driver is "patchright" (a stealth-patched Playwright fork), but the JS environment is a normal modern Chromium (latest stable). The snippet is wrapped and invoked once per function as follows:
+Your snippet runs inside the browser's main JavaScript thread via Playwright's \`page.evaluate(...)\`. The host driver is "patchright" (a stealth-patched Playwright fork), but the JS environment is a normal modern Chromium (latest stable). The snippet is wrapped and invoked once per function as follows. NOTE: every probe \`await\`s the returned value, so ALL THREE FUNCTIONS may be (and are expected to be) async:
 
     // browser side, for the listX() probes:
     const fn = new Function(\`<your parserScript>; return listLocations();\`);  // also: listDivisions()
-    return fn();
+    return await fn();
 
     // browser side, for the searchJobs probe:
     const fn = new Function('args',
@@ -26,13 +26,13 @@ Implications:
 
 # Required surface
 
-Define EXACTLY these three top-level functions in \`parserScript\`:
+Define EXACTLY these three top-level functions in \`parserScript\`. ALL THREE MUST BE \`async\` (return a Promise) — the probe harness \`await\`s every call, so it's safe (and expected) to use \`await\` inside, e.g. for filter interactions, network calls, or DOM-settle waits:
 
-  function listLocations(): string[]
-    Return the list of location filter values the user can pick on this page. Read them from the actual filter UI (e.g. \`<select>\` options, autocomplete suggestions, faceted-search chips). Return \`[]\` ONLY when the page has no location filter at all; if you set \`hasLocationFilter: true\` in the response, this MUST be non-empty.
+  async function listLocations(): Promise<string[]>
+    Return the list of location filter values the user can pick on this page. Read them from the actual filter UI (e.g. \`<select>\` options, autocomplete suggestions, faceted-search chips). May open / await a dropdown before reading. Return \`[]\` ONLY when the page has no location filter at all; if you set \`hasLocationFilter: true\` in the response, this MUST be non-empty.
 
-  function listDivisions(): string[]
-    Return the list of department / division / team filter values the user can pick on this page (e.g. "Engineering", "Sales", "Accounting", "Marketing"). Read them from the actual filter UI. Return \`[]\` ONLY when the page has no department / team filter at all; if you set \`hasDivisionFilter: true\` in the response, this MUST be non-empty.
+  async function listDivisions(): Promise<string[]>
+    Return the list of department / division / team filter values the user can pick on this page (e.g. "Engineering", "Sales", "Accounting", "Marketing"). Read them from the actual filter UI. May await async hydration. Return \`[]\` ONLY when the page has no department / team filter at all; if you set \`hasDivisionFilter: true\` in the response, this MUST be non-empty.
 
   async function searchJobs({ locations, divisions, keywords }: { locations: string[]; divisions: string[]; keywords: string[] }): Promise<{ jobTitle: string, url: string }[]>
     Apply the supplied filters and return every matching job post's title + absolute URL. Takes a single OPTIONS OBJECT (not positional args).
@@ -65,8 +65,8 @@ Define EXACTLY these three top-level functions in \`parserScript\`:
 
 After you return \`parserScript\`, an automated probe runs INSIDE A FRESH RELOAD of the listing page, in this order:
 
-  1. Call \`listLocations()\`. Must be a (possibly empty) array of strings. If it throws or returns a non-array, you get the error back as feedback.
-  2. Call \`listDivisions()\`. Same shape contract.
+  1. \`await listLocations()\`. Must resolve to a (possibly empty) array of strings. If it throws, rejects, or resolves to a non-array, you get the error back as feedback.
+  2. \`await listDivisions()\`. Same shape contract.
   3. Call \`searchJobs({ locations, divisions, keywords: [] })\` with a small set of probe argument shapes:
      - With \`locations = [listLocations()[0]]\` and \`divisions = [listDivisions()[0]]\` (only the ones that have items).
      - With \`locations = []\` and \`divisions = []\` (no filter — return all postings).
