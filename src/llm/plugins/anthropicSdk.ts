@@ -8,7 +8,7 @@ import type {
 } from 'src/llm/plugins/interface.js';
 import { Env } from 'src/utils/env.js';
 
-const DEFAULT_MAX_TOKENS = 200_000;
+const DEFAULT_MAX_TOKENS = 128_000;
 
 /** Effort values accepted by `output_config.effort` on the Anthropic API.
  * `xhigh` is Opus 4.7-only; `max` is Opus-tier (4.6+). The harness's
@@ -27,22 +27,30 @@ const EFFORT_MAP: Record<
 
 export class AnthropicSdkPlugin {
   private readonly apiKeyOverride: string | undefined;
+  private readonly authTokenOverride: string | undefined;
   private client: Anthropic | null = null;
 
-  constructor(args: { apiKey?: string } = {}) {
+  constructor(args: { apiKey?: string; authToken?: string } = {}) {
     this.apiKeyOverride = args.apiKey;
+    this.authTokenOverride = args.authToken;
   }
 
   private getClient(): Anthropic {
     if (!this.client) {
       const apiKey = this.apiKeyOverride ?? Env.ANTHROPIC_API_KEY;
-      if (!apiKey) {
+      const authToken = this.authTokenOverride ?? Env.ANTHROPIC_AUTH_TOKEN;
+      if (!apiKey && !authToken) {
         throw new Error(
-          'Anthropic API key not provided (set ANTHROPIC_API_KEY)'
+          'Anthropic credentials not provided. Set ANTHROPIC_API_KEY for a regular API key, or ANTHROPIC_AUTH_TOKEN for a Claude Pro/Max subscription OAuth token (mint one with `claude setup-token`).'
         );
       }
 
-      this.client = new Anthropic({ apiKey });
+      // `authToken` takes precedence when both are set — it's the more
+      // specific opt-in (subscription users often still have an old
+      // `sk-ant-…` lying around in their env).
+      this.client = authToken
+        ? new Anthropic({ authToken })
+        : new Anthropic({ apiKey });
     }
 
     return this.client;

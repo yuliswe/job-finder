@@ -3,6 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
+  ANTHROPIC_AUTH_TOKEN,
   DB_PATH,
   LLM_LOG_STREAM,
   LLM_REQUEST_CONCURRENCY_MAX,
@@ -38,8 +39,25 @@ export const Env = {
     return requiredEnvVar('OPENROUTER_API_KEY', OPENROUTER_API_KEY);
   },
 
-  get ANTHROPIC_API_KEY() {
-    return requiredEnvVar('ANTHROPIC_API_KEY', ANTHROPIC_API_KEY);
+  /** Optional — only required by features that hit the Anthropic API
+   * (i.e. any `LLM_*_MODEL` entry prefixed `anthropic-plugin/`). Returns
+   * `undefined` if neither `.env.local` nor `jobfinder.config.js`
+   * populated it; `AnthropicSdkPlugin.getClient` throws on first use if
+   * `ANTHROPIC_AUTH_TOKEN` is also unset. */
+  get ANTHROPIC_API_KEY(): string | undefined {
+    return process.env.ANTHROPIC_API_KEY || ANTHROPIC_API_KEY || undefined;
+  },
+
+  /** Optional OAuth bearer token, used as an alternative to
+   * `ANTHROPIC_API_KEY` for Claude Pro/Max subscription access. Mint
+   * one with `claude setup-token`. The SDK sends it as
+   * `Authorization: Bearer …` instead of `x-api-key`. Returns
+   * `undefined` if neither `.env.local` nor `jobfinder.config.js`
+   * populated it. */
+  get ANTHROPIC_AUTH_TOKEN(): string | undefined {
+    return (
+      process.env.ANTHROPIC_AUTH_TOKEN || ANTHROPIC_AUTH_TOKEN || undefined
+    );
   },
 
   get DB_PATH() {

@@ -42,6 +42,26 @@ export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
 /**
+ * Cap on simultaneous in-flight LLM requests, applied per plugin.
+ * `undefined` (default) = unlimited; Anthropic's own rate limits are the
+ * only cap. Set to a small integer if you're hitting 429s during
+ * run-pipeline (free-tier / low-tier Anthropic accounts hit RPM limits
+ * quickly when the 6-stage pipeline fans out).
+ */
+export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
+
+/**
+ * When true, stream the model's output (and `thinking` field, when the
+ * model supports it) to stdout as it arrives. Useful for watching what
+ * the model is doing in real time on slow local backends.
+ *
+ * Currently honored only by the Ollama plugin — the Anthropic plugin
+ * streams internally to bypass the SDK's 10-min non-streaming cap, but
+ * doesn't surface the stream to user code.
+ */
+export const LLM_LOG_STREAM = false;
+
+/**
  * Per-model attempt budget inside `llmSend`. Each `LLM_*_MODEL` value is
  * an array; `llmSend` retries the current model up to this many times
  * before advancing to the next model in the array. When every model is
@@ -50,47 +70,19 @@ export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
 
 /**
- * Cap on simultaneous in-flight LLM requests across the whole process.
- * Wraps `plugin.send()` in a pLimit so the run-pipeline orchestrator
- * (6 task loops × per-task concurrency) doesn't fan out to the LLM
- * provider unboundedly.
- *
- * Applies per plugin (each plugin has its own pLimit). `undefined`
- * (default for OpenRouter / Anthropic) = unlimited; the provider's own
- * rate limits are the only cap.
- *
- * For `ollama-plugin/*` models the effective cap defaults to **1** when
- * this value is not explicitly set — a local Ollama daemon serializes
- * inference internally and parallel requests just thrash GPU memory.
- * Set this explicitly to override that default (e.g. set to 2 if you
- * have enough VRAM for two simultaneous loads).
- */
-export const LLM_REQUEST_CONCURRENCY_MAX = 1;
-
-/**
- * When true, stream the model's output (and `thinking` field, when the
- * model supports it) to stdout as it arrives. Useful for watching what
- * the model is doing in real time on slow local backends.
- *
- * Currently honored only by the Ollama plugin — OpenRouter and
- * Anthropic plugins don't expose the stream to user code in this repo.
- */
-export const LLM_LOG_STREAM = false;
-
-/**
  * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
  * their gitignored `*.local.md` overrides. May be relative (resolved against
  * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './seeds';
+export const SEEDS_DIR = './seeds.local';
 
 /**
  * Path to the SQLite database file. May be relative (to the CWD where you
  * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
  * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
  */
-export const DB_PATH = './jobs-new.db';
+export const DB_PATH = './jobs.db';
 
 /**
  * Each `LLM_*_MODEL` is an array of model IDs in fallback order. `llmSend`
@@ -99,22 +91,23 @@ export const DB_PATH = './jobs-new.db';
  * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. When every
  * model in the array is exhausted, `llmSend` throws.
  *
- * EVERY model id must be prefixed with `<plugin>-plugin/`, where plugin
- * is one of `ollama`, `openrouter`, `anthropic`. The dispatcher in
- * `src/llm/base.ts` strips the prefix and routes the call to the
- * matching plugin instance. Arrays can freely mix plugins, e.g.
- *   ['openrouter-plugin/openai/gpt-5-nano', 'ollama-plugin/qwen3.6:35b-mlx']
- * to fall back to a local model when the remote call fails.
+ * Notes on the Anthropic plugin:
+ * - `anthropic-plugin/<model>` routes via the official Anthropic SDK
+ *   (see `src/llm/plugins/anthropicSdk.ts`). System + tools are auto
+ *   cached with `cache_control: ephemeral`, so repeated calls with the
+ *   same prompt prefix hit the prompt cache.
+ * - Adaptive thinking turns on automatically whenever the stage's
+ *   `reasoningEffort` is set. Adaptive is supported by Opus 4.6/4.7 and
+ *   Sonnet 4.6 — pair the right model with the right stage.
+ * - `enableWebSearch` is NOT wired up. The sourcing stage requests it,
+ *   so it will throw when run against this config — swap in an
+ *   OpenRouter / Ollama model for sourcing, or skip the sourcing stage.
  */
 
 /**
  * The model used by the seeding process.
  */
-export const LLM_SEEDING_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
-];
+export const LLM_SEEDING_MODEL = ['anthropic-plugin/claude-haiku-4-5'];
 
 /**
  * The model used by the sourcing process.
@@ -127,12 +120,13 @@ export const LLM_SEEDING_MODEL = [
  * The model is asked to find a company URL from name, write a summary of the
  * company, and assign an interest score to the company based on the interest.md
  * file.
+ *
+ * Note: the Anthropic plugin throws on `enableWebSearch`, so this stage
+ * will fail at runtime against an anthropic-only config. Override
+ * `LLM_SOURCING_MODEL` with an OpenRouter or Ollama model if you need
+ * to run the sourcing stage.
  */
-export const LLM_SOURCING_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
-];
+export const LLM_SOURCING_MODEL = ['anthropic-plugin/claude-haiku-4-5'];
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -146,9 +140,8 @@ export const LLM_SOURCING_MODEL = [
  *
  */
 export const LLM_LISTING_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
+  'anthropic-plugin/claude-sonnet-4-6',
+  'anthropic-plugin/claude-haiku-4-5',
 ];
 
 /**
@@ -159,7 +152,10 @@ export const LLM_LISTING_MODEL = [
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL = ['anthropic-plugin/claude-opus-4-8'];
+export const LLM_CODING_MODEL = [
+  'anthropic-plugin/claude-opus-4-7',
+  'anthropic-plugin/claude-sonnet-4-6',
+];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -170,11 +166,7 @@ export const LLM_CODING_MODEL = ['anthropic-plugin/claude-opus-4-8'];
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
-];
+export const LLM_VIEWING_MODEL = ['anthropic-plugin/claude-haiku-4-5'];
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -187,9 +179,8 @@ export const LLM_VIEWING_MODEL = [
  * - low input cost
  */
 export const LLM_EVALUATION_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
+  'anthropic-plugin/claude-opus-4-7',
+  'anthropic-plugin/claude-sonnet-4-6',
 ];
 
 /**
@@ -204,9 +195,8 @@ export const LLM_EVALUATION_MODEL = [
  * - moderate output cost (the whole filled HTML comes back)
  */
 export const LLM_CV_TEMPLATE_MODEL = [
-  'ollama-plugin/gemma4:e4b-mlx',
-  'ollama-plugin/qwen3.6:35b-mlx',
-  'ollama-plugin/gemma4:31b-mlx',
+  'anthropic-plugin/claude-opus-4-7',
+  'anthropic-plugin/claude-sonnet-4-6',
 ];
 
 /**
@@ -227,7 +217,7 @@ export const USE_HEADLESS_BROWSER = true;
  * websites. Set this to a larger number to speed up scraping, at the cost of
  * higher CPU and memory.
  */
-export const MAX_CONCURRENT_BROWSER_TABS = 1;
+export const MAX_CONCURRENT_BROWSER_TABS = 10;
 
 /**
  * The maximum time to wait for a page to load in the browser when scraping
@@ -299,10 +289,6 @@ export const PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS = 50;
  * tag-picker menu. The first letter of each key becomes its keyboard
  * shortcut after pressing `t` (e.g. `t+r` toggles "red"), so keep the
  * first letters unique.
- *
- * Defaults cover the five Ink-friendly colors. Add / remove freely — keys
- * that no longer exist in this map render as a fallback white dot when
- * surfaced from existing rows.
  */
 export const TAGS = {
   red: 'Red',

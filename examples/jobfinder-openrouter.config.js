@@ -19,6 +19,15 @@ export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 /**
+ * OAuth bearer token for Claude Pro/Max subscription access (mint one
+ * with `claude setup-token`). Used as an alternative to
+ * `ANTHROPIC_API_KEY` — the SDK sends it as `Authorization: Bearer …`
+ * instead of `x-api-key`. Takes precedence over `ANTHROPIC_API_KEY`
+ * when both are set. If not set, will fall back to env var.
+ */
+export const ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN;
+
+/**
  * Serper API key (https://serper.dev). Used by `webSearchBySerper` to fetch
  * Google search results as structured JSON without driving a browser tab.
  */
