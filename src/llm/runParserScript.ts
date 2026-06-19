@@ -1,7 +1,10 @@
 import { type BrowserContext, type Page } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_CODING_MODEL } from 'jobfinder.config.js';
+import {
+  LLM_CODING_MODEL,
+  PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS,
+} from 'jobfinder.config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { PICK_FILTER_OPTIONS_SYSTEM_PROMPT } from 'src/prompts/pickFilterOptions.js';
 import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';
@@ -191,10 +194,10 @@ ${availableDivisions.map(s => `- ${s}`).join('\n') || '(none — the page has no
 
 Pick the best-matching options for each axis.`,
     schema: v.object({
-      pickedLocations: v.pipe(
-        v.array(v.string()),
+      locationTiers: v.pipe(
+        v.array(v.array(v.string())),
         v.description(
-          'Subset of the available locations that best match the user-supplied location string. Must be entries copied verbatim from the available list. Empty if the available list is empty, the user string is blank, or no option is a plausible match.'
+          'Tiered location candidates, ordered narrowest-to-broadest. Each tier is one search attempt — the runner walks EVERY tier and accumulates the union of results (deduped by URL), stopping only when the spam cap is reached. Tiers are additive scopes, not fallbacks. Entries must be copied verbatim from the available list. Use [] (an empty outer array) when the user string is blank, the page has no location filter, or no option is a plausible match.'
         )
       ),
       pickedDivisions: v.pipe(
@@ -213,7 +216,8 @@ Pick the best-matching options for each axis.`,
     metadata: { configKey: 'LLM_CODING_MODEL' },
     logger: terminal,
     validate: async (parsed, ctx) => {
-      const badLoc = parsed.pickedLocations.filter(l => !locSet.has(l));
+      const badLoc = parsed.locationTiers.flat().filter(l => !locSet.has(l));
+
       const badDiv = parsed.pickedDivisions.filter(d => !divSet.has(d));
       if (badLoc.length > 0 || badDiv.length > 0) {
         return {
@@ -222,35 +226,85 @@ Pick the best-matching options for each axis.`,
         };
       }
 
+      // Always run at least one search — even if the LLM returned no tiers
+      // (e.g. blank user location, or the page has no location filter), we
+      // still want to try once with no locations applied.
+      const tiers =
+        parsed.locationTiers.length > 0 ? parsed.locationTiers : [[]];
+
+      const tierSummary = tiers
+        .map(t => (t.length === 0 ? '(no filter)' : t.join(', ')))
+        .join(' → ');
+
       terminal.llmResponse(
-        `LLM (${ctx.model}): I've picked location(s): ${parsed.pickedLocations.join(', ') || '(none)'} | division(s): ${parsed.pickedDivisions.join(', ') || '(none)'}\nExplanation: ${parsed.reason}`
+        `LLM (${ctx.model}): location tiers: ${tierSummary} | division(s): ${parsed.pickedDivisions.join(', ') || '(none)'}\nExplanation: ${parsed.reason}`
       );
 
-      // Reload before each attempt so the script's prior DOM mutations,
-      // scroll position, or backend pagination state can't leak into the
-      // next call — repeated searchJobs() on the same page is not idempotent
-      // for many real-world listing implementations (Workday, etc.).
-      await goToPage(page, page.url());
-      const jobs = await callSearchJobs(page, script, {
-        locations: parsed.pickedLocations,
-        divisions: parsed.pickedDivisions,
-        keywords: [],
-      });
+      const spamCap = PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS;
+      const accumulated = new Map<string, { jobTitle: string; url: string }>();
+      const contributingTiers: string[][] = [];
 
-      if (jobs.length > 100) {
-        return {
-          valid: false,
-          feedback:
-            'Too many jobs returned (more than 100). Please refine your filters.',
-        };
+      for (let i = 0; i < tiers.length; i++) {
+        const tier = tiers[i];
+        const label = tier.length === 0 ? '(no filter)' : tier.join(', ');
+
+        terminal.log(`Trying location tier ${i + 1}/${tiers.length}: ${label}`);
+
+        // Reload before each attempt so the script's prior DOM mutations,
+        // scroll position, or backend pagination state can't leak into the
+        // next call — repeated searchJobs() on the same page is not
+        // idempotent for many real-world listing implementations (Workday,
+        // etc.).
+        await goToPage(page, page.url());
+        const jobs = await callSearchJobs(page, script, {
+          locations: tier,
+          divisions: parsed.pickedDivisions,
+          keywords: [],
+        });
+
+        // Catch malformed tiers up front: if the narrowest tier alone is
+        // already pouring out 2× the spam cap, the LLM's tiering was off
+        // (e.g. tier 0 included an entire country). Ask it to refine.
+        if (i === 0 && jobs.length > spamCap * 2) {
+          return {
+            valid: false,
+            feedback: `Tier 1 (${label}) returned ${jobs.length} jobs — too broad for the narrowest tier. Use a more specific city / metro at tier 0 and push the country / region picks to later tiers.`,
+          };
+        }
+
+        const before = accumulated.size;
+        for (const j of jobs) {
+          if (!accumulated.has(j.url)) accumulated.set(j.url, j);
+        }
+
+        const added = accumulated.size - before;
+        if (added > 0) contributingTiers.push(tier);
+
+        const existing = jobs.length - added;
+
+        terminal.log(
+          `  ${jobs.length} returned (+${added} new, ${existing} already seen) — ${accumulated.size} total across tiers`
+        );
+
+        if (accumulated.size >= spamCap) {
+          terminal.log(
+            `Reached spam cap (${spamCap}) after tier ${i + 1}; stopping.`
+          );
+          break;
+        }
       }
 
+      // `picked.locations` is the union of every tier that actually
+      // contributed jobs, so downstream logs reflect what was effectively
+      // applied. Surface empty result to the caller as-is — run-pipeline
+      // records `no_result_found` when there are zero jobs across every
+      // tier the LLM thought worth trying.
       return {
         valid: true,
         result: {
-          jobs,
+          jobs: Array.from(accumulated.values()),
           picked: {
-            locations: parsed.pickedLocations,
+            locations: Array.from(new Set(contributingTiers.flat())),
             divisions: parsed.pickedDivisions,
           },
         },
