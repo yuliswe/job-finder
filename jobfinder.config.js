@@ -25,24 +25,10 @@ export const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 
 /**
- * Which LLM provider every `LLM_*_MODEL` model name is sent to.
- *   - `'openrouter'`  → OpenRouter API (default; supports the full model
- *                       catalogue + web-search). Requires OPENROUTER_API_KEY.
- *   - `'anthropic'`   → Anthropic SDK direct. Requires ANTHROPIC_API_KEY.
- *                       Note: enableWebSearch is not yet wired up.
- *   - `'ollama'`      → Local Ollama daemon. Requires Ollama installed and
- *                       the chosen model pulled (`ollama pull <tag>`). The
- *                       `LLM_*_MODEL` values become bare Ollama tags
- *                       (e.g. `'llama3.1'`, `'qwen2.5:14b'`).
- *
- * This is a global switch — all pipeline tasks use the same provider.
- */
-export const LLM_PLUGIN = 'ollama';
-
-/**
- * Base URL of the local Ollama daemon, consulted when `LLM_PLUGIN ===
- * 'ollama'`. Default: `'http://localhost:11434'` (Ollama's default port).
- * Override via `OLLAMA_HOST` env var to point at a remote daemon.
+ * Base URL of the local Ollama daemon, consulted by any model prefixed
+ * with `ollama-plugin/`. Default: `'http://localhost:11434'` (Ollama's
+ * default port). Override via `OLLAMA_HOST` env var to point at a
+ * remote daemon.
  */
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
@@ -60,14 +46,15 @@ export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
  * (6 task loops × per-task concurrency) doesn't fan out to the LLM
  * provider unboundedly.
  *
- * `undefined` (default for `openrouter` / `anthropic`) = unlimited; the
- *  provider's own rate limits are the only cap.
+ * Applies per plugin (each plugin has its own pLimit). `undefined`
+ * (default for OpenRouter / Anthropic) = unlimited; the provider's own
+ * rate limits are the only cap.
  *
- * When `LLM_PLUGIN === 'ollama'` and this value is not explicitly set,
- * the effective cap is forced to **1** — a local Ollama daemon
- * serializes inference internally and parallel requests just thrash GPU
- * memory. Set this explicitly to override that default (e.g. set to 2 if
- * you have enough VRAM for two simultaneous loads).
+ * For `ollama-plugin/*` models the effective cap defaults to **1** when
+ * this value is not explicitly set — a local Ollama daemon serializes
+ * inference internally and parallel requests just thrash GPU memory.
+ * Set this explicitly to override that default (e.g. set to 2 if you
+ * have enough VRAM for two simultaneous loads).
  */
 export const LLM_REQUEST_CONCURRENCY_MAX = 1;
 
@@ -102,15 +89,22 @@ export const DB_PATH = './jobs-new.db';
  * after the current model has failed
  * `AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS` times in a row. When every
  * model in the array is exhausted, `llmSend` throws.
+ *
+ * EVERY model id must be prefixed with `<plugin>-plugin/`, where plugin
+ * is one of `ollama`, `openrouter`, `anthropic`. The dispatcher in
+ * `src/llm/base.ts` strips the prefix and routes the call to the
+ * matching plugin instance. Arrays can freely mix plugins, e.g.
+ *   ['openrouter-plugin/openai/gpt-5-nano', 'ollama-plugin/qwen3.6:35b-mlx']
+ * to fall back to a local model when the remote call fails.
  */
 
 /**
  * The model used by the seeding process.
  */
 export const LLM_SEEDING_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**
@@ -126,9 +120,9 @@ export const LLM_SEEDING_MODEL = [
  * file.
  */
 export const LLM_SOURCING_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**
@@ -143,9 +137,9 @@ export const LLM_SOURCING_MODEL = [
  *
  */
 export const LLM_LISTING_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**
@@ -156,7 +150,7 @@ export const LLM_LISTING_MODEL = [
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL = ['gemma4:31b-mlx'];
+export const LLM_CODING_MODEL = ['ollama-plugin/gemma4:31b-mlx'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -168,9 +162,9 @@ export const LLM_CODING_MODEL = ['gemma4:31b-mlx'];
  * - low output cost
  */
 export const LLM_VIEWING_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**
@@ -184,9 +178,9 @@ export const LLM_VIEWING_MODEL = [
  * - low input cost
  */
 export const LLM_EVALUATION_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**
@@ -201,9 +195,9 @@ export const LLM_EVALUATION_MODEL = [
  * - moderate output cost (the whole filled HTML comes back)
  */
 export const LLM_CV_TEMPLATE_MODEL = [
-  'gemma4:e4b-mlx',
-  'qwen3.6:35b-mlx',
-  'gemma4:31b-mlx',
+  'ollama-plugin/gemma4:e4b-mlx',
+  'ollama-plugin/qwen3.6:35b-mlx',
+  'ollama-plugin/gemma4:31b-mlx',
 ];
 
 /**

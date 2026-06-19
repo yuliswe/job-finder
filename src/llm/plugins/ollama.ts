@@ -6,9 +6,9 @@ import { fetchWithTimeout } from 'src/utils/fetchWithTimeout.js';
  * `chat` shape as OpenAI, but with structured output via the `format`
  * field (a literal JSON Schema object, supported since Ollama v0.5).
  *
- * Selected globally by setting `LLM_PLUGIN = 'ollama'` in
- * `jobfinder.config.js`. Model strings then become bare Ollama tags
- * (e.g. `LLM_VIEWING_MODEL = 'llama3.1'`).
+ * Selected per model by prefixing the model id with `ollama-plugin/`,
+ * e.g. `LLM_VIEWING_MODEL = ['ollama-plugin/llama3.1']`. The dispatcher
+ * in `src/llm/base.ts` strips the prefix before calling `send`.
  *
  * Unsupported features (currently):
  *   - `enableWebSearch` — Ollama has no native web-search tool. Throws.

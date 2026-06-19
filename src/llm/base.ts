@@ -13,50 +13,81 @@ import { AnthropicSdkPlugin } from 'src/llm/plugins/anthropicSdk.js';
 import type { LlmPlugin } from 'src/llm/plugins/interface.js';
 import { OllamaPlugin } from 'src/llm/plugins/ollama.js';
 import { OpenRouterPlugin } from 'src/llm/plugins/openRouter.js';
-import { Env, type LlmPluginName } from 'src/utils/env.js';
+import { Env } from 'src/utils/env.js';
 import { COLOURS, type Terminal } from 'src/utils/terminal';
 
-// Single plugin instance picked at module load based on
-// `jobfinder.config.js#LLM_PLUGIN`. Provider switch is global — all
-// pipeline tasks talk to the same backend.
-const plugin: LlmPlugin = createPlugin(Env.LLM_PLUGIN);
+/** Plugin registry: every model string passed to `llmSend` is prefixed
+ * with `<name>-plugin/`, which selects the entry here. There is no
+ * global plugin switch — different `LLM_*_MODEL` arrays can mix
+ * providers freely. */
+type PluginName = keyof typeof plugins;
 
-function createPlugin(name: LlmPluginName): LlmPlugin {
-  switch (name) {
-    case 'openrouter':
-      return new OpenRouterPlugin();
-    case 'anthropic':
-      return new AnthropicSdkPlugin();
-    case 'ollama':
-      return new OllamaPlugin();
-  }
-}
+const plugins = {
+  openrouter: new OpenRouterPlugin(),
+  anthropic: new AnthropicSdkPlugin(),
+  ollama: new OllamaPlugin(),
+} as const satisfies Record<string, LlmPlugin>;
 
-/** Process-wide cap on simultaneous `plugin.send(...)` calls. `null` =
+const PLUGIN_NAMES = Object.keys(plugins) as PluginName[];
+
+/** Per-plugin cap on simultaneous `plugin.send(...)` calls. `null` =
  * unlimited (the limit fn is just bypassed in `llmSend`). See
  * `resolveLlmConcurrency` for the resolution order. */
-const sendLimit: LimitFunction | null = (() => {
-  const cap = resolveLlmConcurrency(
-    Env.LLM_PLUGIN,
-    Env.LLM_REQUEST_CONCURRENCY_MAX
-  );
+const sendLimits: Record<PluginName, LimitFunction | null> = Object.fromEntries(
+  PLUGIN_NAMES.map(name => {
+    const cap = resolveLlmConcurrency(name, Env.LLM_REQUEST_CONCURRENCY_MAX);
+    return [name, cap == null ? null : pLimit(cap)];
+  })
+) as Record<PluginName, LimitFunction | null>;
 
-  return cap == null ? null : pLimit(cap);
-})();
-
-/** Resolve the effective concurrency cap for `plugin.send(...)`:
- *  1. Explicit `LLM_REQUEST_CONCURRENCY_MAX` always wins.
+/** Resolve the effective concurrency cap for a plugin:
+ *  1. Explicit `LLM_REQUEST_CONCURRENCY_MAX` always wins (applies per plugin).
  *  2. Otherwise, Ollama defaults to 1 — local daemons serialize
  *     inference anyway and parallel requests just thrash GPU memory.
  *  3. Otherwise, `null` (unlimited; the provider's own rate limits
  *     are the only cap). */
 function resolveLlmConcurrency(
-  pluginName: LlmPluginName,
+  pluginName: PluginName,
   explicit: number | undefined
 ): number | null {
   if (explicit !== undefined) return explicit;
   if (pluginName === 'ollama') return 1;
   return null;
+}
+
+/** Parse `<name>-plugin/<model>` into the plugin and the bare model id
+ * the plugin should receive. The model portion may itself contain `/`
+ * (e.g. `openrouter-plugin/openai/gpt-5-nano`) — we split only on the
+ * first separator. */
+function resolvePluginAndModel(qualifiedModel: string): {
+  plugin: LlmPlugin;
+  pluginName: PluginName;
+  model: string;
+} {
+  const sep = qualifiedModel.indexOf('/');
+  if (sep === -1) {
+    throw new Error(
+      `LLM model "${qualifiedModel}" must be prefixed with a plugin (e.g. "ollama-plugin/gemma4:31b-mlx", "openrouter-plugin/openai/gpt-5-nano", "anthropic-plugin/claude-3-5-sonnet-latest").`
+    );
+  }
+
+  const prefix = qualifiedModel.slice(0, sep);
+  const model = qualifiedModel.slice(sep + 1);
+  const match = /^([a-z]+)-plugin$/.exec(prefix);
+  if (!match) {
+    throw new Error(
+      `LLM model "${qualifiedModel}" has malformed plugin prefix "${prefix}" — expected "<name>-plugin/<model>" where <name> is one of: ${PLUGIN_NAMES.join(', ')}.`
+    );
+  }
+
+  const name = match[1] as PluginName;
+  if (!(name in plugins)) {
+    throw new Error(
+      `Unknown plugin "${name}" in model "${qualifiedModel}". Valid plugins: ${PLUGIN_NAMES.join(', ')}.`
+    );
+  }
+
+  return { plugin: plugins[name], pluginName: name, model };
 }
 
 /** Thrown when the provider returns a successful HTTP response with no content
@@ -203,9 +234,11 @@ async function llmSend<S extends v.GenericSchema>(args: {
 
   const schemaBlock = `\n\n# Required response format\n\nYour response MUST be a single JSON object validating against this schema (descriptions explain each field; read them carefully):\n\n\`\`\`json\n${JSON.stringify(responseFormat.schema, null, 2)}\n\`\`\``;
   const messagesWithSchema = appendToLastSystemMessage(messages, schemaBlock);
+  const { plugin, pluginName, model: bareModel } = resolvePluginAndModel(model);
+
   const doSend = (): Promise<{ content: string; totalTokens: number }> =>
     plugin.send({
-      model,
+      model: bareModel,
       messages: messagesWithSchema,
       reasoningEffort,
       responseFormat,
@@ -213,6 +246,7 @@ async function llmSend<S extends v.GenericSchema>(args: {
       enableWebSearch,
     });
 
+  const sendLimit = sendLimits[pluginName];
   const { content, totalTokens } = sendLimit
     ? await sendLimit(doSend)
     : await doSend();
