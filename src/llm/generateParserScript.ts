@@ -14,7 +14,7 @@ import {
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { COLOURS, terminal } from 'src/utils/terminal';
 
-const MAX_SCRIPT_ATTEMPTS = 15;
+const MAX_SCRIPT_ATTEMPTS = 5;
 
 class ParserScriptAbort extends Error {
   override name = 'ParserScriptAbort';
@@ -433,8 +433,8 @@ async function runSearchJobs(
   });
 
   let run:
-    | { ok: true; value: unknown; logs: string[] }
-    | { ok: false; error: string; logs: string[] };
+    | { ok: true; value: unknown; logs: string[]; fetches: string[] }
+    | { ok: false; error: string; logs: string[]; fetches: string[] };
 
   try {
     run = await pageEval(
@@ -446,16 +446,24 @@ async function runSearchJobs(
         s: string;
         a: { locations: string[]; divisions: string[]; keywords: string[] };
       }) => {
-        return await runWithConsoleCapture(async () => {
+        return await runWithCapture(async () => {
           const fn = new Function('args', `${s}\nreturn searchJobs(args);`);
           return await fn(a);
         });
 
-        function runWithConsoleCapture<R>(
-          body: () => Promise<R>
-        ): Promise<
-          | { ok: true; value: R; logs: string[] }
-          | { ok: false; error: string; logs: string[] }
+        function runWithCapture<R>(body: () => Promise<R>): Promise<
+          | {
+              ok: true;
+              value: R;
+              logs: string[];
+              fetches: string[];
+            }
+          | {
+              ok: false;
+              error: string;
+              logs: string[];
+              fetches: string[];
+            }
         > {
           const logs: string[] = [];
           const fmt = (v: unknown): string => {
@@ -484,18 +492,84 @@ async function runSearchJobs(
           console.warn = wrap('warn');
           console.error = wrap('error');
           console.info = wrap('info');
+
+          // Capture every outbound `fetch` the script makes — URL, method,
+          // request body (truncated), HTTP status, and a preview of the
+          // response body. On failure feedback we surface the last few so
+          // the LLM can see what request triggered an error like a 400 /
+          // 500 (without having to re-discover it via still_exploring).
+          const fetches: string[] = [];
+          const origFetch = window.fetch;
+          const trunc = (s: string, n: number) =>
+            s.length > n ? s.slice(0, n) + `…(+${s.length - n}b)` : s;
+
+          window.fetch = async function patchedFetch(
+            input: RequestInfo | URL,
+            init?: RequestInit
+          ): Promise<Response> {
+            const url =
+              typeof input === 'string'
+                ? input
+                : input instanceof URL
+                  ? input.toString()
+                  : input.url;
+
+            const method =
+              (init && init.method) ||
+              (input instanceof Request ? input.method : 'GET');
+
+            const reqBody =
+              init && init.body
+                ? typeof init.body === 'string'
+                  ? init.body
+                  : '[non-string body]'
+                : '';
+
+            try {
+              const res = await origFetch.call(
+                this,
+                input as RequestInfo,
+                init
+              );
+
+              let preview = '';
+              try {
+                preview = await res.clone().text();
+              } catch {
+                preview = '[unreadable]';
+              }
+
+              fetches.push(
+                `${method} ${url} → ${res.status}${reqBody ? ` | body: ${trunc(reqBody, 400)}` : ''} | response: ${trunc(preview, 400)}`
+              );
+              return res;
+            } catch (err) {
+              fetches.push(
+                `${method} ${url} → THREW ${String((err as Error)?.message ?? err)}${reqBody ? ` | body: ${trunc(reqBody, 400)}` : ''}`
+              );
+              throw err;
+            }
+          };
+
           return body()
-            .then(value => ({ ok: true as const, value, logs }))
+            .then(value => ({
+              ok: true as const,
+              value,
+              logs,
+              fetches,
+            }))
             .catch(err => ({
               ok: false as const,
               error: String((err && (err.stack || err.message)) || err),
               logs,
+              fetches,
             }))
             .finally(() => {
               console.log = orig.log;
               console.warn = orig.warn;
               console.error = orig.error;
               console.info = orig.info;
+              window.fetch = origFetch;
             });
         }
       },
@@ -529,7 +603,8 @@ async function runSearchJobs(
       feedback:
         `searchJobs(${argsForLog}) threw an error: ${run.error}. ` +
         'Inspect the DOM and fix the selectors / event handling.' +
-        formatLogs(run.logs),
+        formatLogs(run.logs) +
+        formatFetches(run.fetches),
     };
   }
 
@@ -539,7 +614,8 @@ async function runSearchJobs(
       ok: false,
       feedback:
         `searchJobs(${argsForLog}) must return an array of { jobTitle, url } objects; got: ${JSON.stringify(jobs).slice(0, 200)}` +
-        formatLogs(run.logs),
+        formatLogs(run.logs) +
+        formatFetches(run.fetches),
     };
   }
 
@@ -549,7 +625,8 @@ async function runSearchJobs(
         ok: false,
         feedback:
           `searchJobs returned non-object item: ${JSON.stringify(j)}. Each item must be { jobTitle: string, url: string }.` +
-          formatLogs(run.logs),
+          formatLogs(run.logs) +
+          formatFetches(run.fetches),
       };
     }
 
@@ -559,7 +636,8 @@ async function runSearchJobs(
         ok: false,
         feedback:
           `searchJobs item missing required keys jobTitle/url (got: ${JSON.stringify(obj).slice(0, 200)}). Both must be strings; "url" must be absolute.` +
-          formatLogs(run.logs),
+          formatLogs(run.logs) +
+          formatFetches(run.fetches),
       };
     }
   }
@@ -659,6 +737,17 @@ function formatLogs(logs: string[]): string {
   }
 
   return `\n\nCaptured console output from your script (${logs.length} line(s)):\n${logs.join('\n')}`;
+}
+
+/** Surface the last few outbound `fetch` calls so the LLM can see what
+ * its script actually sent that triggered a failure — e.g., the body of
+ * the POST that came back as a 400. The browser-side capture is in the
+ * runWithCapture helper inside the page.evaluate IIFE; this just formats
+ * the resulting strings for inclusion in the feedback message. */
+function formatFetches(fetches: string[]): string {
+  if (fetches.length === 0) return '';
+  const tail = fetches.slice(-3);
+  return `\n\nRecent outbound fetch calls from your script (last ${tail.length} of ${fetches.length}):\n${tail.map((f, i) => `  [${fetches.length - tail.length + i + 1}] ${f}`).join('\n')}`;
 }
 
 type ListFnProbe =
