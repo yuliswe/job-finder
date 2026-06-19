@@ -55,7 +55,7 @@ export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
  * model supports it) to stdout as it arrives. Useful for watching what
  * the model is doing in real time on slow local backends.
  *
- * Currently honored only by the Ollama plugin.
+ * Honored by all three plugins (Ollama / OpenRouter / Anthropic).
  */
 export const LLM_LOG_STREAM = false;
 

@@ -55,9 +55,9 @@ export const LLM_REQUEST_CONCURRENCY_MAX = undefined;
  * model supports it) to stdout as it arrives. Useful for watching what
  * the model is doing in real time on slow local backends.
  *
- * Currently honored only by the Ollama plugin — the Anthropic plugin
- * streams internally to bypass the SDK's 10-min non-streaming cap, but
- * doesn't surface the stream to user code.
+ * Honored by all three plugins. Anthropic surfaces `thinking` deltas
+ * (Opus 4.6/4.7 + Sonnet 4.6 when adaptive thinking is on) plus the
+ * final text.
  */
 export const LLM_LOG_STREAM = false;
 

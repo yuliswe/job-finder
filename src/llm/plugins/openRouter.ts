@@ -36,10 +36,13 @@ export class OpenRouterPlugin {
       enableWebSearch,
     } = args;
 
-    const response = await this.getClient().chat.send({
+    // Always stream — mirrors the Ollama plugin and lets us surface
+    // deltas under `LLM_LOG_STREAM` without a parallel code path. Usage
+    // is included in the final chunk by the OpenRouter API.
+    const stream = await this.getClient().chat.send({
       chatRequest: {
         model,
-        stream: false,
+        stream: true,
         responseFormat: {
           type: 'json_schema',
           jsonSchema: {
@@ -64,7 +67,40 @@ export class OpenRouterPlugin {
       },
     });
 
-    const content = (response.choices[0]?.message?.content ?? '') as string;
-    return { content, totalTokens: response.usage?.totalTokens ?? 0 };
+    const logStream = Env.LLM_LOG_STREAM;
+    if (logStream) {
+      process.stdout.write(`\n--- LLM stream (${model}) ---\n`);
+    }
+
+    let content = '';
+    let totalTokens = 0;
+    for await (const chunk of stream) {
+      if (chunk.error) {
+        throw new Error(
+          `OpenRouterPlugin: stream error ${chunk.error.code}: ${chunk.error.message}`
+        );
+      }
+
+      const delta = chunk.choices[0]?.delta;
+      if (delta?.reasoning && logStream) {
+        process.stdout.write(delta.reasoning);
+      }
+
+      if (delta?.content) {
+        if (logStream) process.stdout.write(delta.content);
+        content += delta.content;
+      }
+
+      // OpenRouter only emits `usage` on the terminal chunk; the loop
+      // ends naturally after it, so just overwrite as we go.
+      const chunkTotalTokens = chunk.usage?.totalTokens;
+      if (chunkTotalTokens) totalTokens = chunkTotalTokens;
+    }
+
+    if (logStream) {
+      process.stdout.write('\n--- end stream ---\n');
+    }
+
+    return { content, totalTokens };
   }
 }

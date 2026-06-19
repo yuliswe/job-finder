@@ -106,6 +106,14 @@ export class AnthropicSdkPlugin {
     };
 
     const stream = this.getClient().messages.stream(params);
+
+    if (Env.LLM_LOG_STREAM) {
+      process.stdout.write(`\n--- LLM stream (${args.model}) ---\n`);
+      stream.on('thinking', delta => process.stdout.write(delta));
+      stream.on('text', delta => process.stdout.write(delta));
+      stream.on('end', () => process.stdout.write('\n--- end stream ---\n'));
+    }
+
     const response = await stream.finalMessage();
 
     const content = response.content

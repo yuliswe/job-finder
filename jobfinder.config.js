@@ -72,8 +72,9 @@ export const LLM_REQUEST_CONCURRENCY_MAX = 1;
  * model supports it) to stdout as it arrives. Useful for watching what
  * the model is doing in real time on slow local backends.
  *
- * Currently honored only by the Ollama plugin — OpenRouter and
- * Anthropic plugins don't expose the stream to user code in this repo.
+ * Honored by all three plugins. Ollama + Anthropic surface both the
+ * `thinking` deltas (when the model emits them) and the final text;
+ * OpenRouter surfaces the `reasoning` deltas it forwards plus the text.
  */
 export const LLM_LOG_STREAM = false;
 
