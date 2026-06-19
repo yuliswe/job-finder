@@ -46,8 +46,9 @@ export async function runParserScript(args: {
     let availableLocations: string[];
     let availableDivisions: string[];
     try {
-      availableLocations = await callListFn(page, script, 'listLocations');
-      availableDivisions = await callListFn(page, script, 'listDivisions');
+      const { locations, divisions } = await callDiscover(page, script);
+      availableLocations = locations;
+      availableDivisions = divisions;
 
       terminal.log(
         `This company hires from ${availableLocations.length} locations and ${availableDivisions.length} divisions`
@@ -56,7 +57,7 @@ export async function runParserScript(args: {
       return {
         ok: false,
         reason: 'script_error',
-        error: `listLocations/listDivisions threw: ${String(err).slice(0, 500)}`,
+        error: `discover() threw: ${String(err).slice(0, 500)}`,
       };
     }
 
@@ -82,31 +83,46 @@ export async function runParserScript(args: {
   });
 }
 
-async function callListFn(
+async function callDiscover(
   page: Page,
-  script: string,
-  fnName: 'listLocations' | 'listDivisions'
-): Promise<string[]> {
+  script: string
+): Promise<{ locations: string[]; divisions: string[] }> {
   const value = await pageEval(
     page,
-    async ({ s, name }: { s: string; name: string }) => {
+    async ({ s }: { s: string }) => {
       const fn = new Function(
-        `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
+        `${s}\nreturn typeof discover === 'function' ? discover() : null;`
       );
 
       return await fn();
     },
-    { s: script, name: fnName },
+    { s: script },
     { timeoutMs: 60_000 }
   );
 
-  if (!Array.isArray(value)) {
+  if (value === null) {
     throw new Error(
-      `${fnName}() did not return an array (got ${typeof value})`
+      'Script does not define a top-level `discover` function. (The stored parserScript was generated against an older contract — regenerate via `jobfinder pipeline scripting --job-list-source-id <id>`.)'
     );
   }
 
-  return value.filter((x): x is string => typeof x === 'string');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(
+      `discover() did not return an object (got ${value === null ? 'null' : typeof value})`
+    );
+  }
+
+  const v = value as Record<string, unknown>;
+  if (!Array.isArray(v.locations) || !Array.isArray(v.divisions)) {
+    throw new Error(
+      `discover() must return { locations: string[], divisions: string[], ... }; got: ${JSON.stringify(v).slice(0, 200)}`
+    );
+  }
+
+  return {
+    locations: v.locations.filter((x): x is string => typeof x === 'string'),
+    divisions: v.divisions.filter((x): x is string => typeof x === 'string'),
+  };
 }
 
 async function callSearchJobs(
