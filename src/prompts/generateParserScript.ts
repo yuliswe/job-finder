@@ -80,8 +80,8 @@ export const GENERATE_PARSER_SCRIPT_SYSTEM_PROMPT = `You generate a JavaScript s
 
 Your snippet runs inside the browser's main JavaScript thread via Playwright's \`page.evaluate(...)\`. The host driver is "patchright" (a stealth-patched Playwright fork), but the JS environment is a normal modern Chromium (latest stable). The snippet is wrapped and invoked once per function as follows. NOTE: every probe \`await\`s the returned value, so ALL THREE FUNCTIONS may be (and are expected to be) async:
 
-    // browser side, for the listX() probes:
-    const fn = new Function(\`<your parserScript>; return listLocations();\`);  // also: listDivisions()
+    // browser side, for the discover() probe:
+    const fn = new Function(\`<your parserScript>; return discover();\`);
     return await fn();
 
     // browser side, for the searchJobs probe:
@@ -107,17 +107,22 @@ Implications:
 
 # Required surface
 
-Define EXACTLY these three top-level functions in \`parserScript\`. ALL THREE MUST BE \`async\` (return a Promise) — the probe harness \`await\`s every call, so it's safe (and expected) to use \`await\` inside, e.g. for filter interactions, network calls, or DOM-settle waits:
+Define EXACTLY these two top-level functions in \`parserScript\`. BOTH MUST BE \`async\` (return a Promise) — the probe harness \`await\`s every call, so it's safe (and expected) to use \`await\` inside, e.g. for filter interactions, network calls, or DOM-settle waits:
 
-  async function listLocations(): Promise<string[]>
-    Return the list of location filter values the user can pick on this page. Read them from the actual filter UI (e.g. \`<select>\` options, autocomplete suggestions, faceted-search chips). May open / await a dropdown before reading. Return \`[]\` ONLY when the page has no location filter at all; if you set \`hasLocationFilter: true\` in the response, this MUST be non-empty.
-
-  async function listDivisions(): Promise<string[]>
-    Return the list of department / division / team filter values the user can pick on this page (e.g. "Engineering", "Sales", "Accounting", "Marketing"). Read them from the actual filter UI. May await async hydration. Return \`[]\` ONLY when the page has no department / team filter at all; if you set \`hasDivisionFilter: true\` in the response, this MUST be non-empty.
+  async function discover(): Promise<{
+    locations: string[];
+    divisions: string[];
+    sampleJobs: { jobTitle: string, url: string }[];
+  }>
+    Single discovery call that returns everything the harness needs to validate the script before issuing filtered searches. Run on a fresh page reload.
+    - \`locations\`: every selectable LOCATION filter option (city / region / country / "Remote"). Empty array iff the page has no location filter at all; if you set \`hasLocationFilter: true\`, this MUST be non-empty.
+    - \`divisions\`: every selectable DEPARTMENT / DIVISION / TEAM / JOB-FAMILY filter option. Empty array iff the page has no division filter; if you set \`hasDivisionFilter: true\`, this MUST be non-empty.
+    - \`sampleJobs\`: the unfiltered job listing — same shape as searchJobs's return. Include EVERY posting (paginate fully). The harness uses this both as the "all postings" baseline AND to verify your filter actually filters by comparing it against a filtered searchJobs() call.
+    - Because this is one function, you can cache the underlying API response once and derive all three values from it (e.g. one POST to a tenant's jobs endpoint returns \`facets\` for locations + divisions AND a paginated postings list). The locations / divisions descriptors you return here are the exact strings the harness will pass back to searchJobs — keep extraction symmetric.
 
   async function searchJobs({ locations, divisions, keywords }: { locations: string[]; divisions: string[]; keywords: string[] }): Promise<{ jobTitle: string, url: string }[]>
     Apply the supplied filters and return every matching job post's title + absolute URL. Takes a single OPTIONS OBJECT (not positional args).
-    - Any of \`locations\`, \`divisions\`, \`keywords\` may be empty arrays. When all three are empty, return ALL postings on the page (no filter).
+    - Any of \`locations\`, \`divisions\`, \`keywords\` may be empty arrays. When all three are empty, return ALL postings (same as \`discover().sampleJobs\`).
     - When a filter array is non-empty, treat its entries as OR (a posting matches if it matches any provided location, any provided division, any provided keyword); the three categories are AND'd together (a posting must satisfy each non-empty category).
     - "Apply the supplied filters" means ACTUALLY APPLY THEM — either via the page's internal jobs API (preferred) or by interacting with the page's filter controls (clicking checkboxes, selecting <select> options, then waiting for results to refresh). DO NOT substring-grep the already-rendered cards: pagination means most postings aren't in the DOM yet, and the filter token often appears in unrelated card text (causing both false negatives and false positives).
     - Pagination is required: return EVERY matching posting across all pages, not just what the first render shows. Drive the page's pagination control, scroll-loop, or API offset/limit until the result set is fully exhausted.
@@ -141,9 +146,10 @@ Define EXACTLY these three top-level functions in \`parserScript\`. ALL THREE MU
 - Resolve every returned URL to an absolute URL with \`new URL(href, location.href).toString()\`.
 - Do not call \`window.location = ...\` or any other navigation API — the scraper must stay on the listing page.
 - Do not throw on missing optional fields; just skip the bad posting. This guidance is PER-RECORD — a per-posting try/catch around \`{ extract title; extract url; push }\` that \`continue\`s on failure is fine and encouraged.
-- DO NOT wrap \`listLocations\` / \`listDivisions\` / \`searchJobs\` ENTIRE BODY in a try/catch that returns \`[]\` (or any default) on error. Whole-function error swallowing defeats the validation harness: the probe relies on errors propagating so the failure message ("CORS blocked", "JSON parse failed at X", "selector matched 0 nodes") reaches you VERBATIM in the next iteration's feedback. A function that silently returns \`[]\` instead surfaces only as "every probe returned an empty array," which you cannot debug. Let unexpected errors bubble up — the harness will catch them and show you what broke.
+- DO NOT wrap \`discover\` / \`searchJobs\` ENTIRE BODY in a try/catch that returns \`[]\` (or any default) on error. Whole-function error swallowing defeats the validation harness: the probe relies on errors propagating so the failure message ("CORS blocked", "JSON parse failed at X", "selector matched 0 nodes") reaches you VERBATIM in the next iteration's feedback. A function that silently returns \`[]\` instead surfaces only as "every probe returned an empty array," which you cannot debug. Let unexpected errors bubble up — the harness will catch them and show you what broke.
 - Be defensive: a missing \`<a>\` or empty text is normal — guard with \`?.\` and \`??\`.
-- The location/division filter values returned by \`listLocations\`/\`listDivisions\` MUST be valid inputs to \`searchJobs\` — i.e. running \`searchJobs({ locations: [listLocations()[0]], divisions: [], keywords: [] })\` must work.
+- The location/division filter values returned by \`discover()\` MUST be valid inputs to \`searchJobs\` — i.e. running \`searchJobs({ locations: [discover().locations[0]], divisions: [], keywords: [] })\` must work. Keep the descriptor strings symmetric across the two functions (don't normalize, lowercase, or trim differently between them).
+- Keep \`still_exploring\` scripts SMALL — ideally ≤2 kB. Discovery is one or two focused probes (POST to candidate URL, log status + response shape) plus a console.log. If your discovery script grows past ~3 kB you're building infrastructure (multi-step monkey-patches, elaborate fallback chains) instead of iterating. Split it across multiple still_exploring rounds.
 - If you intend to call an internal JSON API (Workday, Greenhouse, Lever, SmartRecruiters, Ashby, iCIMS, Taleo, BambooHR, or any other ATS that exposes one), you MUST first run at least one \`state='still_exploring'\` round THAT ACTUALLY POSTS TO THE CANDIDATE ENDPOINT and logs:
   (a) the HTTP status,
   (b) \`Object.keys(response)\` of the JSON body,
@@ -155,22 +161,19 @@ Define EXACTLY these three top-level functions in \`parserScript\`. ALL THREE MU
 
 # How your script is validated
 
-After you return \`parserScript\`, an automated probe runs INSIDE A FRESH RELOAD of the listing page, in this order:
+After you return \`parserScript\`, an automated probe runs in two FRESH page reloads:
 
-  1. \`await listLocations()\`. Must resolve to a (possibly empty) array of strings. If it throws, rejects, or resolves to a non-array, you get the error back as feedback.
-  2. \`await listDivisions()\`. Same shape contract.
-  3. Call \`searchJobs({ locations, divisions, keywords: [] })\` with a small set of probe argument shapes:
-     - With \`locations = [listLocations()[0]]\` and \`divisions = [listDivisions()[0]]\` (only the ones that have items).
-     - With \`locations = []\` and \`divisions = []\` (no filter — return all postings).
-  4. The first probe that returns a non-empty \`Array<{ jobTitle: string, url: string }>\` wins; validation passes.
+  1. RELOAD then \`await discover()\`. Must resolve to \`{ locations: string[], divisions: string[], sampleJobs: { jobTitle: string, url: string }[] }\`. Used both as the unfiltered baseline AND as the input to filter validation.
+  2. RELOAD then \`await searchJobs({ locations: [discover.locations[0]], divisions: [discover.divisions[0]], keywords: [] })\` (only with items that have entries). The result MUST differ from \`discover.sampleJobs\` — same-set means your filter is a no-op (you're returning the page's default listing regardless of args).
+  3. The harness compares the filtered result against \`discover.sampleJobs\`. Validation passes when filter actually narrows the result (or, if neither filter has options, when discover.sampleJobs is non-empty).
 
 Validation FAILS if:
-  - Any of the three functions is missing or not callable.
-  - \`listLocations\`/\`listDivisions\` returns a non-array.
+  - Either of the two functions is missing or not callable.
+  - \`discover()\` returns a non-object, missing keys, or non-array values.
   - \`searchJobs\` throws.
   - \`searchJobs\` returns a non-array, or items missing \`jobTitle\`/\`url\` (or with non-string values).
   - Every probe shape returns an empty array (likely cause: wrong selectors, or filters not actually applied before reading results).
-  - You set \`hasLocationFilter: true\` but \`listLocations()\` returned \`[]\` (or the same for divisions). Either implement the enumerator or flip the flag to \`false\`.
+  - You set \`hasLocationFilter: true\` but \`discover().locations\` came back \`[]\` (or the same for divisions). Either implement the enumerator or flip the flag to \`false\`.
 
 On failure, you'll get a feedback message describing the failure and the inputs that were tried. Use it to fix the script.
 
@@ -182,13 +185,13 @@ MyWorkdayJobs: ${MY_WORKDAY_SKILL}
 
 Return a JSON object:
 - "state": one of \`'validate'\`, \`'still_exploring'\`, or \`'abort'\`.
-  - Use \`'still_exploring'\` when you want to RUN your script PURELY FOR ITS CONSOLE OUTPUT — typically a short snippet that logs the DOM structure, an internal API response, or the shape of a candidate element. The validator will EXECUTE THE SCRIPT BODY ONCE on the page (top-level code runs; the three required functions do NOT need to be implemented yet) and send the captured console output back to you as feedback. Iterate until you understand the page.
-  - Use \`'validate'\` when you believe \`listLocations\`, \`listDivisions\`, and \`searchJobs\` are correctly implemented and you want the full probe to run (see "How your script is validated" below).
+  - Use \`'still_exploring'\` when you want to RUN your script PURELY FOR ITS CONSOLE OUTPUT — typically a short snippet that logs the DOM structure, an internal API response, or the shape of a candidate element. The validator will EXECUTE THE SCRIPT BODY ONCE on the page (top-level code runs; the two required functions do NOT need to be implemented yet) and send the captured console output back to you as feedback. Iterate until you understand the page.
+  - Use \`'validate'\` when you believe \`discover\` and \`searchJobs\` are correctly implemented and you want the full probe to run (see "How your script is validated" below).
   - Use \`'abort'\` ONLY when you have concluded the task cannot be completed. Two valid reasons: (a) the current URL is not actually a job listing page (marketing page, single job-detail page, sign-in wall, or contains no enumerable list of postings); or (b) the task is logically impossible (content gated behind authentication we don't have, anti-bot block, captcha, deprecated/empty page, or the listing requires interactions a parser script cannot perform). \`parserScript\` is ignored when aborting — put the specific explanation in \`reason\`.
 - "currentAction": One sentence stating what you are doing in this step, for debugging purposes. Start the sentence with "I\'m...".
 - "parserScript": the JavaScript source.
   - When \`state === 'still_exploring'\`: any code you want to execute. Function declarations are optional. Use \`console.log\`/\`info\`/\`warn\`/\`error\` freely — that's the whole point.
-  - When \`state === 'validate'\`: the full script defining \`listLocations\`, \`listDivisions\`, and \`searchJobs\` exactly as described above. NO module syntax, NO surrounding wrapper — just the three function declarations (plus any internal helpers).
+  - When \`state === 'validate'\`: the full script defining \`discover\` and \`searchJobs\` exactly as described above. NO module syntax, NO surrounding wrapper — just the two function declarations (plus any internal helpers).
   - When \`state === 'abort'\`: ignored.
 - "hasLocationFilter": boolean. True if the listing page exposes a location / city / region / country filter. When true, \`listLocations()\` MUST return a non-empty array of every selectable option; when false, \`listLocations()\` should return \`[]\`.
 - "hasDivisionFilter": boolean. True if the listing page exposes a department / division / team / job-family filter. When true, \`listDivisions()\` MUST return a non-empty array of every selectable option; when false, \`listDivisions()\` should return \`[]\`.

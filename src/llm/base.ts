@@ -627,7 +627,7 @@ export async function feedbackLoop<
     const { feedback } = validateResult;
 
     logger.warn(
-      `Attempt ${attempt}/${maxAttempts} failed. Telling LLM to revise: "${feedback}"`,
+      `[HARNESS] Attempt ${attempt}/${maxAttempts} failed. Telling LLM to revise: "${feedback}"`,
       COLOURS.gray
     );
 

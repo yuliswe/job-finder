@@ -28,10 +28,10 @@ export type GeneratedParserScript = {
 
 /**
  * Load `listingUrl`, ask the LLM to emit a parser script defining
- * `listLocations()`, `listDivisions()` and `searchJobs({locations, divisions, keywords})`,
- * and run it inside the page in a feedback loop until it returns a non-empty
- * job list. Returns the validated script + the captured location/division
- * options, or null if all attempts fail.
+ * `discover()` and `searchJobs({locations, divisions, keywords})`, and
+ * run it inside the page in a feedback loop until validation passes.
+ * Returns the validated script + the captured location/division options,
+ * or null if all attempts fail.
  *
  * `models` is the LLM fallback chain (e.g. `LLM_CODING_MODEL`) —
  * cheaper-to-smarter ordering; `sendWithRetry` advances automatically
@@ -54,7 +54,7 @@ export async function generateParserScript(args: {
     }
 
     terminal.log(
-      `Sending the page content to the LLM to generate a parser script. Page title: ${snapshot.title} | Page HTML length: ${snapshot.html.length}`
+      `[HARNESS] Sending the page content to the LLM to generate a parser script. Page title: ${snapshot.title} | Page HTML length: ${snapshot.html.length}`
     );
 
     try {
@@ -67,7 +67,7 @@ Page title: ${snapshot.title}
 Page HTML:
 ${snapshot.html}
 
-Generate the parser script with listLocations(), listDivisions(), and searchJobs({ locations, divisions, keywords }).
+Generate the parser script with discover() and searchJobs({ locations, divisions, keywords }).
 `,
         schema: v.object({
           state: v.pipe(
@@ -77,19 +77,19 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
             // anyOf-without-type form with `invalid_json_schema`.
             v.picklist(['validate', 'still_exploring', 'abort']),
             v.description(
-              "Set to 'still_exploring' to have your script executed only for its console.log output (returned as feedback). Set to 'validate' when listLocations / listDivisions / searchJobs are ready for the full probe. Set to 'abort' ONLY if you have concluded the task cannot be completed — either the current URL is not actually a job listing page (e.g. it's a marketing page, a single job-detail page, a sign-in wall, or contains no enumerable list of postings) OR the task is logically impossible (e.g. content is behind authentication we don't have, an anti-bot block, a captcha, a deprecated/empty page, or the listing requires interactions Playwright can't perform from a parser script). Use the `reason` field to explain specifically why."
+              "Set to 'still_exploring' to have your script executed only for its console.log output (returned as feedback). Set to 'validate' when discover and searchJobs are ready for the full probe. Set to 'abort' ONLY if you have concluded the task cannot be completed — either the current URL is not actually a job listing page (e.g. it's a marketing page, a single job-detail page, a sign-in wall, or contains no enumerable list of postings) OR the task is logically impossible (e.g. content is behind authentication we don't have, an anti-bot block, a captcha, a deprecated/empty page, or the listing requires interactions Playwright can't perform from a parser script). Use the `reason` field to explain specifically why."
             )
           ),
           parserScript: v.pipe(
             v.string(),
             v.description(
-              "Browser-side JavaScript source. When state='validate' it must define top-level listLocations(), listDivisions(), and async searchJobs({locations,divisions,keywords}). If hasLocationFilter is true, listLocations() must return a non-empty array of every selectable location option; same for hasDivisionFilter and listDivisions(). When state='still_exploring' any code is allowed; only console output matters. Ignored when state='abort'."
+              "Browser-side JavaScript source. When state='validate' it must define top-level async discover() returning { locations: string[], divisions: string[], sampleJobs: { jobTitle: string, url: string }[] } and async searchJobs({locations,divisions,keywords}). If hasLocationFilter is true, discover().locations must be non-empty; same for hasDivisionFilter and discover().divisions. When state='still_exploring' any code is allowed; only console output matters. Ignored when state='abort'."
             )
           ),
           hasLocationFilter: v.pipe(
             v.boolean(),
             v.description(
-              "True if the listing page exposes a location / city / region / country filter the user can use to narrow postings. When true, listLocations() MUST return a non-empty array of every selectable option (e.g. ['Toronto', 'New York', 'Remote'])."
+              "True if the listing page exposes a location / city / region / country filter the user can use to narrow postings. When true, discover().locations MUST be a non-empty array of every selectable option (e.g. ['Toronto', 'New York', 'Remote'])."
             )
           ),
           hasLocationFilterReason: v.pipe(
@@ -101,7 +101,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
           hasDivisionFilter: v.pipe(
             v.boolean(),
             v.description(
-              "True if the listing page exposes a department / division / team / job-family filter the user can use to narrow postings. When true, listDivisions() MUST return a non-empty array of every selectable option (e.g. ['Engineering', 'Sales', 'Design'])."
+              "True if the listing page exposes a department / division / team / job-family filter the user can use to narrow postings. When true, discover().divisions MUST be a non-empty array of every selectable option (e.g. ['Engineering', 'Sales', 'Design'])."
             )
           ),
           hasDivisionFilterReason: v.pipe(
@@ -130,7 +130,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
         reasoningEffort: LlmReasoningEffort.High,
         validate: async (parsed, ctx) => {
           terminal.log(
-            `LLM (${ctx.model}): state=${parsed.state} | ${parsed.currentAction}\nReason: ${parsed.reason}\nScript size: ${parsed.parserScript.length}`,
+            `[HARNESS] LLM (${ctx.model}): state=${parsed.state} | ${parsed.currentAction}\n[HARNESS] Reason: ${parsed.reason}\n[HARNESS] Script size: ${parsed.parserScript.length}`,
             COLOURS.cyan
           );
 
@@ -145,7 +145,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
             });
 
             terminal.log(
-              `LLM (${ctx.model}): Exploration pass: ${explore.logs.length} console log line(s) captured`
+              `[HARNESS] LLM (${ctx.model}): Exploration pass: ${explore.logs.length} console log line(s) captured`
             );
             return {
               valid: false,
@@ -159,7 +159,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
           }
 
           terminal.log(
-            `LLM (${ctx.model}): Filters — hasLocationFilter=${parsed.hasLocationFilter} (${parsed.hasLocationFilterReason}); hasDivisionFilter=${parsed.hasDivisionFilter} (${parsed.hasDivisionFilterReason})`,
+            `[HARNESS] LLM (${ctx.model}): Filters — hasLocationFilter=${parsed.hasLocationFilter} (${parsed.hasLocationFilterReason}); hasDivisionFilter=${parsed.hasDivisionFilter} (${parsed.hasDivisionFilterReason})`,
             COLOURS.cyan
           );
 
@@ -174,7 +174,7 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
               return {
                 valid: false,
                 feedback:
-                  'You set hasLocationFilter=true, but listLocations() returned an empty array. Either implement listLocations() so it enumerates every selectable location option visible in the page filter, or set hasLocationFilter=false if no such filter actually exists.',
+                  'You set hasLocationFilter=true, but discover().locations came back empty. Either implement discover() so its `locations` enumerates every selectable location option visible in the page filter, or set hasLocationFilter=false if no such filter actually exists.',
               };
             }
 
@@ -182,12 +182,12 @@ Generate the parser script with listLocations(), listDivisions(), and searchJobs
               return {
                 valid: false,
                 feedback:
-                  'You set hasDivisionFilter=true, but listDivisions() returned an empty array. Either implement listDivisions() so it enumerates every selectable department/division option visible in the page filter, or set hasDivisionFilter=false if no such filter actually exists.',
+                  'You set hasDivisionFilter=true, but discover().divisions came back empty. Either implement discover() so its `divisions` enumerates every selectable department/division option visible in the page filter, or set hasDivisionFilter=false if no such filter actually exists.',
               };
             }
 
             terminal.log(
-              `LLM (${ctx.model}): Script validated: ${probe.jobs.length} jobs returned (probe shape: ${JSON.stringify(probe.probed)}; ${probe.logs.length} console log line(s) captured)`,
+              `[HARNESS] LLM (${ctx.model}): Script validated: ${probe.jobs.length} jobs returned (probe shape: ${JSON.stringify(probe.probed)}; ${probe.logs.length} console log line(s) captured)`,
               COLOURS.green
             );
             return {
@@ -269,7 +269,7 @@ async function validateScriptBestOf3(args: {
       if (!firstSuccess) firstSuccess = result;
 
       terminal.log(
-        `Validation attempt ${i}/${ATTEMPTS}: PASS (${successes}/${NEEDED} passes so far)`,
+        `[HARNESS] Validation attempt ${i}/${ATTEMPTS}: PASS (${successes}/${NEEDED} passes so far)`,
         COLOURS.green
       );
       if (successes >= NEEDED) return firstSuccess;
@@ -278,7 +278,7 @@ async function validateScriptBestOf3(args: {
       if (!firstFailure) firstFailure = result;
 
       terminal.log(
-        `Validation attempt ${i}/${ATTEMPTS}: FAIL (${failures}/${NEEDED} failures so far)`,
+        `[HARNESS] Validation attempt ${i}/${ATTEMPTS}: FAIL (${failures}/${NEEDED} failures so far)`,
         COLOURS.yellow
       );
       if (failures >= NEEDED) return firstFailure;
@@ -314,20 +314,19 @@ async function validateScript(args: {
 }
 
 async function runProbes(page: Page, script: string): Promise<ProbeResult> {
-  // Stage 1: listLocations()
-  const locationsProbe = await probeListFn(page, script, 'listLocations');
-  if (!locationsProbe.ok) return locationsProbe;
-  const { values: locations } = locationsProbe;
+  // Stage 1: discover() — single call returns locations + divisions + the
+  // unfiltered sampleJobs baseline. Halves the per-attempt probe time vs.
+  // the previous three-call layout (listLocations + listDivisions +
+  // searchJobs(empty)) and lets the script cache its underlying API
+  // response once instead of refetching across three separate reloads.
+  const discoverResult = await probeDiscover(page, script);
+  if (!discoverResult.ok) return discoverResult;
+  const { locations, divisions, sampleJobs } = discoverResult;
 
-  // Stage 2: listDivisions()
-  const divisionsProbe = await probeListFn(page, script, 'listDivisions');
-  if (!divisionsProbe.ok) return divisionsProbe;
-  const { values: divisions } = divisionsProbe;
-
-  // Stage 2.5: LLM sanity check on the extracted values. A buggy selector
+  // Stage 1.5: LLM sanity check on the extracted values. A buggy selector
   // can grab nav chrome, headings, or generic UI labels instead of real
   // filter options; surface that as feedback so the script LLM fixes the
-  // selector before we run the more expensive Stage-3 search probes.
+  // selector before we run the more expensive filter probe.
   if (locations.length > 0 || divisions.length > 0) {
     const verdict = await verifyFilterValues({ locations, divisions });
 
@@ -335,13 +334,13 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
       const parts: string[] = [];
       if (!verdict.locationsArePlausible) {
         parts.push(
-          `listLocations() returned ${locations.length} values that don't look like locations: ${JSON.stringify(locations.slice(0, 10))}. Verifier reason: ${verdict.locationsReason}. Fix the selector to grab the real location filter options, or set hasLocationFilter=false and return [] if no location filter actually exists.`
+          `discover().locations returned ${locations.length} values that don't look like locations: ${JSON.stringify(locations.slice(0, 10))}. Verifier reason: ${verdict.locationsReason}. Fix the descriptor extraction (walk to leaves, drop group headers) or set hasLocationFilter=false and return [] if no location filter actually exists.`
         );
       }
 
       if (!verdict.divisionsArePlausible) {
         parts.push(
-          `listDivisions() returned ${divisions.length} values that don't look like divisions: ${JSON.stringify(divisions.slice(0, 10))}. Verifier reason: ${verdict.divisionsReason}. Fix the selector to grab the real department/division filter options, or set hasDivisionFilter=false and return [] if no division filter actually exists.`
+          `discover().divisions returned ${divisions.length} values that don't look like divisions: ${JSON.stringify(divisions.slice(0, 10))}. Verifier reason: ${verdict.divisionsReason}. Fix the descriptor extraction or set hasDivisionFilter=false and return [] if no division filter actually exists.`
         );
       }
 
@@ -349,16 +348,30 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
     }
   }
 
-  // Stage 3a: baseline — searchJobs with empty filters. This is the page's
-  // unfiltered listing; we use it as the reference set for filter-effectiveness.
-  const baselineShape: ProbeShape = { locations: [], divisions: [] };
-  const baseline = await runSearchJobs(page, script, baselineShape);
-  if (!baseline.ok) return baseline;
+  if (sampleJobs.length === 0) {
+    // Empty baseline + no error reached us = the script may be swallowing
+    // errors in a whole-function try/catch. Surface the hint so the LLM
+    // doesn't iterate blind. (When the function did throw, the throw path
+    // in probeDiscover handles its own feedback.)
+    const swallowedHint =
+      discoverResult.fetches.length === 0
+        ? '\n\nNo fetch calls were captured AND no error reached the harness. If your discover() body is wrapped in `try { ... } catch { return {locations:[], divisions:[], sampleJobs:[]} }`, REMOVE THAT WRAPPER — it silences the real failure (CORS, 403, JSON parse, wrong selector) and leaves you with no clue what broke. Let the error throw.'
+        : '';
 
-  // Stage 3b: filtered probe — only meaningful if either filter has options.
-  // We compare against the baseline to make sure the script's filter logic
-  // actually changes the result set rather than ignoring its arguments and
-  // returning the page's default listing.
+    return {
+      ok: false,
+      feedback:
+        `discover().sampleJobs is empty. Locations: ${JSON.stringify(locations.slice(0, 10))}. Divisions: ${JSON.stringify(divisions.slice(0, 10))}. Either the page has no postings, your selector matched no cards, or you exited early before walking pagination.` +
+        formatLogs(discoverResult.logs) +
+        formatFetches(discoverResult.fetches) +
+        swallowedHint,
+    };
+  }
+
+  // Stage 2: filtered probe — only meaningful if either filter has options.
+  // We compare against discover().sampleJobs to make sure the script's
+  // filter logic actually changes the result set rather than ignoring its
+  // arguments and returning the page's default listing.
   const canFilter = locations.length > 0 || divisions.length > 0;
   if (canFilter) {
     const filterShape: ProbeShape = {
@@ -369,11 +382,11 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
     const filtered = await runSearchJobs(page, script, filterShape);
     if (!filtered.ok) return filtered;
 
-    if (sameJobSet(baseline.jobs, filtered.jobs)) {
+    if (sameJobSet(sampleJobs, filtered.jobs)) {
       return {
         ok: false,
         feedback:
-          `searchJobs returned the same ${baseline.jobs.length} jobs for empty filters ${JSON.stringify({ ...baselineShape, keywords: [] })} AND for ${JSON.stringify({ ...filterShape, keywords: [] })}. ` +
+          `searchJobs returned the same ${sampleJobs.length} jobs as discover().sampleJobs when called with ${JSON.stringify({ ...filterShape, keywords: [] })}. ` +
           "Your filter logic is a no-op — it returns the page's initial listing regardless of the locations/divisions arguments. " +
           'Drive the actual filter UI (click the option, await the DOM update, then read the filtered results), or call the underlying search/XHR endpoint with the filter applied.' +
           formatLogs(filtered.logs),
@@ -390,26 +403,18 @@ async function runProbes(page: Page, script: string): Promise<ProbeResult> {
         logs: filtered.logs,
       };
     }
-    // Filtered probe came back empty but differs from baseline — fall through
-    // to the baseline result so we still surface a usable job list.
-  }
-
-  if (baseline.jobs.length === 0) {
-    return {
-      ok: false,
-      feedback:
-        `searchJobs(${JSON.stringify({ ...baselineShape, keywords: [] })}) returned an empty array. Available locations: ${JSON.stringify(locations)}. Available divisions: ${JSON.stringify(divisions)}. Either widen the result selectors or wait longer for results to render.` +
-        formatLogs(baseline.logs),
-    };
+    // Filtered probe came back empty but differs from sampleJobs — fall
+    // through to the sampleJobs result so we still surface a usable job
+    // list.
   }
 
   return {
     ok: true,
-    jobs: baseline.jobs,
-    probed: baselineShape,
+    jobs: sampleJobs,
+    probed: { locations: [], divisions: [] },
     locations,
     divisions,
-    logs: baseline.logs,
+    logs: discoverResult.logs,
   };
 }
 
@@ -750,72 +755,155 @@ function formatFetches(fetches: string[]): string {
   return `\n\nRecent outbound fetch calls from your script (last ${tail.length} of ${fetches.length}):\n${tail.map((f, i) => `  [${fetches.length - tail.length + i + 1}] ${f}`).join('\n')}`;
 }
 
-type ListFnProbe =
-  | { ok: true; values: string[] }
+type DiscoverProbe =
+  | {
+      ok: true;
+      locations: string[];
+      divisions: string[];
+      sampleJobs: { jobTitle: string; url: string }[];
+      logs: string[];
+      fetches: string[];
+    }
   | { ok: false; feedback: string };
 
-async function probeListFn(
+async function probeDiscover(
   page: import('patchright').Page,
-  script: string,
-  fnName: 'listLocations' | 'listDivisions'
-): Promise<ListFnProbe> {
+  script: string
+): Promise<DiscoverProbe> {
   let run:
-    | { ok: true; value: unknown; logs: string[] }
-    | { ok: false; error: string; logs: string[] };
+    | { ok: true; value: unknown; logs: string[]; fetches: string[] }
+    | { ok: false; error: string; logs: string[]; fetches: string[] };
 
   try {
     run = await pageEval(
       page,
-      async ({ s, name }: { s: string; name: string }) => {
-        const logs: string[] = [];
-        const fmt = (v: unknown): string => {
-          if (typeof v === 'string') return v;
-          try {
-            return JSON.stringify(v);
-          } catch {
-            return String(v);
-          }
-        };
-
-        const wrap =
-          (level: string) =>
-          (...xs: unknown[]) => {
-            logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
-          };
-
-        const orig = {
-          log: console.log,
-          warn: console.warn,
-          error: console.error,
-          info: console.info,
-        };
-
-        console.log = wrap('log');
-        console.warn = wrap('warn');
-        console.error = wrap('error');
-        console.info = wrap('info');
-        try {
+      async ({ s }: { s: string }) => {
+        return await runWithCapture(async () => {
           const fn = new Function(
-            `${s}\nreturn typeof ${name} === 'function' ? ${name}() : null;`
+            `${s}\nreturn typeof discover === 'function' ? discover() : null;`
           );
 
-          const value = await fn();
-          return { ok: true as const, value, logs };
-        } catch (err) {
-          const e = err as { stack?: string; message?: string } | undefined;
-          return {
-            ok: false as const,
-            error: String(e?.stack ?? e?.message ?? err),
-            logs,
+          return await fn();
+        });
+
+        function runWithCapture<R>(body: () => Promise<R>): Promise<
+          | {
+              ok: true;
+              value: R;
+              logs: string[];
+              fetches: string[];
+            }
+          | {
+              ok: false;
+              error: string;
+              logs: string[];
+              fetches: string[];
+            }
+        > {
+          const logs: string[] = [];
+          const fmt = (v: unknown): string => {
+            if (typeof v === 'string') return v;
+            try {
+              return JSON.stringify(v);
+            } catch {
+              return String(v);
+            }
           };
-        } finally {
-          console.log = orig.log;
-          console.warn = orig.warn;
-          console.error = orig.error;
-          console.info = orig.info;
+
+          const wrap =
+            (level: string) =>
+            (...xs: unknown[]) => {
+              logs.push(`${level}: ${xs.map(fmt).join(' ')}`);
+            };
+
+          const orig = {
+            log: console.log,
+            warn: console.warn,
+            error: console.error,
+            info: console.info,
+          };
+
+          console.log = wrap('log');
+          console.warn = wrap('warn');
+          console.error = wrap('error');
+          console.info = wrap('info');
+
+          const fetches: string[] = [];
+          const origFetch = window.fetch;
+          const trunc = (s: string, n: number) =>
+            s.length > n ? s.slice(0, n) + `…(+${s.length - n}b)` : s;
+
+          window.fetch = async function patchedFetch(
+            input: RequestInfo | URL,
+            init?: RequestInit
+          ): Promise<Response> {
+            const url =
+              typeof input === 'string'
+                ? input
+                : input instanceof URL
+                  ? input.toString()
+                  : input.url;
+
+            const method =
+              (init && init.method) ||
+              (input instanceof Request ? input.method : 'GET');
+
+            const reqBody =
+              init && init.body
+                ? typeof init.body === 'string'
+                  ? init.body
+                  : '[non-string body]'
+                : '';
+
+            try {
+              const res = await origFetch.call(
+                this,
+                input as RequestInfo,
+                init
+              );
+
+              let preview = '';
+              try {
+                preview = await res.clone().text();
+              } catch {
+                preview = '[unreadable]';
+              }
+
+              fetches.push(
+                `${method} ${url} → ${res.status}${reqBody ? ` | body: ${trunc(reqBody, 400)}` : ''} | response: ${trunc(preview, 400)}`
+              );
+              return res;
+            } catch (err) {
+              fetches.push(
+                `${method} ${url} → THREW ${String((err as Error)?.message ?? err)}${reqBody ? ` | body: ${trunc(reqBody, 400)}` : ''}`
+              );
+              throw err;
+            }
+          };
+
+          return body()
+            .then(value => ({
+              ok: true as const,
+              value,
+              logs,
+              fetches,
+            }))
+            .catch(err => ({
+              ok: false as const,
+              error: String((err && (err.stack || err.message)) || err),
+              logs,
+              fetches,
+            }))
+            .finally(() => {
+              console.log = orig.log;
+              console.warn = orig.warn;
+              console.error = orig.error;
+              console.info = orig.info;
+              window.fetch = origFetch;
+            });
         }
       },
-      { s: script, name: fnName },
+      { s: script },
       { timeoutMs: 60_000 }
     );
   } catch (err) {
@@ -823,9 +911,9 @@ async function probeListFn(
       return {
         ok: false,
         feedback:
-          `${fnName}() timed out after ${Math.round(err.timeoutMs / 1000)}s and never resolved. ` +
+          `discover() timed out after ${Math.round(err.timeoutMs / 1000)}s and never resolved. ` +
           'Likely causes: an unresolved promise, an infinite wait for a selector, or a runaway loop. ' +
-          `Make sure ${fnName}() resolves promptly — bound any waitForSelector / setTimeout and return as soon as the values are collected.`,
+          'Bound any waitForSelector / setTimeout and return as soon as the descriptors + sampleJobs are collected. Note that sampleJobs requires walking ALL pagination — if the site has thousands of postings, the timeout may be legitimate; in that case slim sampleJobs to a representative subset (e.g. the first 200) and document why.',
       };
     }
 
@@ -836,8 +924,9 @@ async function probeListFn(
     return {
       ok: false,
       feedback:
-        `${fnName}() threw an error: ${run.error}. Fix the function definition or the DOM queries inside it.` +
-        formatLogs(run.logs),
+        `discover() threw an error: ${run.error}. Fix the function definition or the DOM/network access inside it.` +
+        formatLogs(run.logs) +
+        formatFetches(run.fetches),
     };
   }
 
@@ -845,19 +934,65 @@ async function probeListFn(
     return {
       ok: false,
       feedback:
-        `Your script did not define a top-level function called ${fnName}. Define it at the top scope (not inside another function).` +
+        'Your script did not define a top-level function called `discover`. Define it at the top scope (not inside another function) as `async function discover() { ... }` returning `{ locations: string[], divisions: string[], sampleJobs: { jobTitle: string, url: string }[] }`.' +
         formatLogs(run.logs),
     };
   }
 
-  if (!Array.isArray(run.value)) {
+  if (!run.value || typeof run.value !== 'object' || Array.isArray(run.value)) {
     return {
       ok: false,
       feedback:
-        `${fnName}() must return an array of strings; got: ${JSON.stringify(run.value).slice(0, 200)}` +
-        formatLogs(run.logs),
+        `discover() must return an object { locations, divisions, sampleJobs }, got: ${JSON.stringify(run.value).slice(0, 200)}` +
+        formatLogs(run.logs) +
+        formatFetches(run.fetches),
     };
   }
 
-  return { ok: true, values: run.value.map(String) };
+  const v = run.value as Record<string, unknown>;
+  if (
+    !Array.isArray(v.locations) ||
+    !Array.isArray(v.divisions) ||
+    !Array.isArray(v.sampleJobs)
+  ) {
+    return {
+      ok: false,
+      feedback:
+        `discover() return shape is wrong. Required: { locations: string[], divisions: string[], sampleJobs: { jobTitle: string, url: string }[] }. Got: ${JSON.stringify(run.value).slice(0, 200)}` +
+        formatLogs(run.logs) +
+        formatFetches(run.fetches),
+    };
+  }
+
+  const sampleJobs: { jobTitle: string; url: string }[] = [];
+  for (const j of v.sampleJobs) {
+    if (
+      j &&
+      typeof j === 'object' &&
+      typeof (j as { jobTitle?: unknown }).jobTitle === 'string' &&
+      typeof (j as { url?: unknown }).url === 'string'
+    ) {
+      sampleJobs.push({
+        jobTitle: (j as { jobTitle: string }).jobTitle,
+        url: (j as { url: string }).url,
+      });
+    } else {
+      return {
+        ok: false,
+        feedback:
+          `discover().sampleJobs item missing { jobTitle: string, url: string }: ${JSON.stringify(j).slice(0, 200)}. Both must be strings; url must be absolute.` +
+          formatLogs(run.logs) +
+          formatFetches(run.fetches),
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    locations: v.locations.map(String),
+    divisions: v.divisions.map(String),
+    sampleJobs,
+    logs: run.logs,
+    fetches: run.fetches,
+  };
 }
