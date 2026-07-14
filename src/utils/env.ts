@@ -13,7 +13,8 @@ import {
   TAGS,
 } from 'jobfinder.config.js';
 
-const ENV_PATH = '.env.local';
+const ENV_PATH = '.env';
+const ENV_LOCAL_PATH = '.env.local';
 const REQUIRED_VARS = ['OPENROUTER_API_KEY', 'DB_PATH'] as const;
 
 function createEnvFileIfNotExists(path: string, vars: readonly string[]): void {
@@ -22,8 +23,34 @@ function createEnvFileIfNotExists(path: string, vars: readonly string[]): void {
   }
 }
 
-createEnvFileIfNotExists(ENV_PATH, REQUIRED_VARS);
-dotenv.config({ path: ENV_PATH, quiet: true });
+/** Loads `.env.local` first and `.env` second via `dotenv.config`, which
+ * never overwrites a variable that is already set, so the effective
+ * precedence is shell > `.env.local` > `.env`. Empty entries in
+ * `.env.local` (the stubs written by `createEnvFileIfNotExists`) are
+ * removed again before `.env` loads so that a blank stub cannot block a
+ * real `.env` value. A warning is printed whenever `.env.local` shadows
+ * a `.env` key with a different value. */
+function loadEnv(): void {
+  const local =
+    dotenv.config({ path: ENV_LOCAL_PATH, quiet: true }).parsed ?? {};
+
+  for (const [key, value] of Object.entries(local)) {
+    if (value === '' && process.env[key] === '') {
+      delete process.env[key];
+    }
+  }
+
+  const base = dotenv.config({ path: ENV_PATH, quiet: true }).parsed ?? {};
+
+  for (const [key, value] of Object.entries(local)) {
+    if (value !== '' && key in base && base[key] !== value) {
+      console.warn(`[env] ${ENV_LOCAL_PATH} overrides ${key} from ${ENV_PATH}`);
+    }
+  }
+}
+
+createEnvFileIfNotExists(ENV_LOCAL_PATH, REQUIRED_VARS);
+loadEnv();
 
 function requiredEnvVar(name: string, defaultValue?: string): string {
   const value = process.env[name] ?? defaultValue;
