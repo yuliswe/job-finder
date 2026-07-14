@@ -30,6 +30,9 @@ type ScriptingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobListSourceId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
   /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
   suppressNothingToDoLog?: boolean;
 };
@@ -37,7 +40,7 @@ type ScriptingOptions = {
 export function createScriptingCommand(): Command {
   return new Command('scripting')
     .description(
-      'Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript.'
+      'Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -55,15 +58,26 @@ export function createScriptingCommand(): Command {
       '--job-list-source-id <id>',
       'Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.'
     )
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
     .action(async (opts: ScriptingOptions) => {
-      await withBrowserInstance(context => runScripting(context, opts));
+      if (opts.start) {
+        await withBrowserInstance(context => runScripting(context, opts));
+        return;
+      }
+
+      await queueScripting(opts);
     });
 }
 
-export async function runScripting(
-  context: BrowserContext,
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickScriptingTargets(
   opts: ScriptingOptions
-): Promise<{ processed: number }> {
+): Promise<{ id: string; url: string }[]> {
   if (opts.jobListSourceId) {
     const exists = await db
       .selectFrom('JobListSource')
@@ -101,13 +115,46 @@ export async function runScripting(
 
   if (stateFilter) query = query.where(stateFilter);
 
-  const targets = opts.jobListSourceId
-    ? await db
+  return opts.jobListSourceId
+    ? db
         .selectFrom('JobListSource')
         .select(['id', 'url'])
         .where('JobListSource.id', '=', opts.jobListSourceId)
         .execute()
-    : await query.execute();
+    : query.execute();
+}
+
+export async function queueScripting(
+  opts: ScriptingOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickScriptingTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-list-source-id enqueues its
+  // row explicitly — so only --include-failed's failed/aborted/no_result
+  // rows still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'scripting',
+        entity: { ofJobListSourceId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobListSource row(s) queued for scripting. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runScripting(
+  context: BrowserContext,
+  opts: ScriptingOptions
+): Promise<{ processed: number }> {
+  const targets = await pickScriptingTargets(opts);
 
   const results = await Promise.all(
     targets.map(target => tabLimit(() => scriptOneTarget({ context, target })))

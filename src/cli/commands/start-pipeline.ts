@@ -10,7 +10,7 @@ import { runViewing } from 'src/cli/commands/pipeline/viewing.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
 
-/** Per-task opts forwarded to each runX. We only thread the bits run-pipeline
+/** Per-task opts forwarded to each runX. We only thread the bits start-pipeline
  * cares about; runX functions accept additional task-specific fields
  * (division/location/jobSourceId/etc.) that we never set here. */
 type IterationOpts = {
@@ -58,12 +58,12 @@ type Orchestrator = {
   sleepers: Set<() => void>;
 };
 
-type RunPipelineOptions = {
+type StartPipelineOptions = {
   includeFailed?: boolean;
 };
 
-export function createRunPipelineCommand(): Command {
-  return new Command('run-pipeline')
+export function createStartPipelineCommand(): Command {
+  return new Command('start-pipeline')
     .description(
       'Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.'
     )
@@ -76,7 +76,7 @@ export function createRunPipelineCommand(): Command {
     .action(runAllLoops);
 }
 
-async function runAllLoops(opts: RunPipelineOptions): Promise<void> {
+async function runAllLoops(opts: StartPipelineOptions): Promise<void> {
   // `running: true` at init is a "not yet completed first iteration" sentinel.
   // Without it, a fast no-browser task (evaluate) can finish its first
   // iteration before the browser-using tasks have even returned from
@@ -97,7 +97,7 @@ async function runAllLoops(opts: RunPipelineOptions): Promise<void> {
   };
 
   terminal.log(
-    `Starting run-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
+    `Starting start-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
   );
 
   // Every iteration runs with suppressNothingToDoLog so tasks don't

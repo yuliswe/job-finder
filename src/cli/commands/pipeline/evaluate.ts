@@ -30,14 +30,26 @@ type EvaluateOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
   /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
   suppressNothingToDoLog?: boolean;
+};
+
+type EvaluateTarget = {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  isRemote: number | null;
+  skillRequirements: string | null;
 };
 
 export function createEvaluateCommand(): Command {
   return new Command('evaluate')
     .description(
-      'For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.'
+      'For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -55,14 +67,26 @@ export function createEvaluateCommand(): Command {
       '--job-post-id <id>',
       'Re-evaluate only the JobPost with this ID, regardless of pipeline state or qualification.'
     )
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
     .action(async (opts: EvaluateOptions) => {
-      await runEvaluate(opts);
+      if (opts.start) {
+        await runEvaluate(opts);
+        return;
+      }
+
+      await queueEvaluate(opts);
     });
 }
 
-export async function runEvaluate(
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickEvaluateTargets(
   opts: EvaluateOptions
-): Promise<{ processed: number }> {
+): Promise<EvaluateTarget[]> {
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -82,20 +106,6 @@ export async function runEvaluate(
 
   const mode = pipelineModeFromOptions(opts);
   if (mode === 'all') await requeueAllInScope('evaluate');
-
-  const [interests, cv] = await Promise.all([getUserInterests(), getUserCV()]);
-
-  if (!interests) {
-    terminal.warn(
-      'No user interests found (seeds/interests.local.md or seeds/interests.md). interestScore will be unreliable.'
-    );
-  }
-
-  if (!cv) {
-    terminal.warn(
-      'No CV found (seeds/cv.local.md or seeds/cv.md). skillScore will be unreliable.'
-    );
-  }
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
@@ -121,13 +131,45 @@ export async function runEvaluate(
 
   if (stateFilter) query = query.where(stateFilter);
 
-  const targets = opts.jobPostId
-    ? await db
+  return opts.jobPostId
+    ? db
         .selectFrom('JobPost')
         .select(selectCols)
         .where('JobPost.id', '=', opts.jobPostId)
         .execute()
-    : await query.execute();
+    : query.execute();
+}
+
+export async function queueEvaluate(
+  opts: EvaluateOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickEvaluateTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-post-id enqueues its row
+  // explicitly — so only --include-failed's failed/aborted/no_result rows
+  // still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'evaluate',
+        entity: { ofJobPostId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobPost row(s) queued for evaluate. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runEvaluate(
+  opts: EvaluateOptions
+): Promise<{ processed: number }> {
+  const targets = await pickEvaluateTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {
@@ -137,6 +179,20 @@ export async function runEvaluate(
     }
 
     return { processed: 0 };
+  }
+
+  const [interests, cv] = await Promise.all([getUserInterests(), getUserCV()]);
+
+  if (!interests) {
+    terminal.warn(
+      'No user interests found (seeds/interests.local.md or seeds/interests.md). interestScore will be unreliable.'
+    );
+  }
+
+  if (!cv) {
+    terminal.warn(
+      'No CV found (seeds/cv.local.md or seeds/cv.md). skillScore will be unreliable.'
+    );
   }
 
   const results = await Promise.all(
@@ -158,14 +214,7 @@ export async function runEvaluate(
 }
 
 async function evaluateOne(args: {
-  target: {
-    id: string;
-    title: string;
-    description: string | null;
-    location: string | null;
-    isRemote: number | null;
-    skillRequirements: string | null;
-  };
+  target: EvaluateTarget;
   interests: string;
   cv: string;
 }): Promise<{ jobPostEvaluated: number } | undefined> {

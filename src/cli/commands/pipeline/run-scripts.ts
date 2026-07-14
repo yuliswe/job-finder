@@ -30,10 +30,23 @@ import { getUserInterests } from 'src/utils/userInterests.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
+type RunScriptsOptions = {
+  division?: string;
+  location?: string;
+  all?: boolean;
+  includeFailed?: boolean;
+  jobListSourceId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
+  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  suppressNothingToDoLog?: boolean;
+};
+
 export function createRunScriptsCommand(): Command {
   return new Command('run-scripts')
     .description(
-      'For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost'
+      'For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost. By default only queues the selected rows; pass --start to process them now.'
     )
     .option(
       '-d, --division <division>',
@@ -59,31 +72,31 @@ export function createRunScriptsCommand(): Command {
       '--job-list-source-id <id>',
       'Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.'
     )
-    .action(
-      async (opts: {
-        division?: string;
-        location?: string;
-        all?: boolean;
-        includeFailed?: boolean;
-        jobListSourceId?: string;
-      }) => {
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
+    .action(async (opts: RunScriptsOptions) => {
+      if (opts.start) {
         await withBrowserInstance(context => runRunScripts(context, opts));
+        return;
       }
-    );
+
+      await queueRunScripts(opts);
+    });
 }
 
-export async function runRunScripts(
-  context: BrowserContext,
-  opts: {
-    division?: string;
-    location?: string;
-    all?: boolean;
-    includeFailed?: boolean;
-    jobListSourceId?: string;
-    /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
-    suppressNothingToDoLog?: boolean;
-  }
-): Promise<{ processed: number }> {
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
+  {
+    id: string;
+    url: string;
+    parserScript: string | null;
+    ofJobSourceId: string;
+  }[]
+> {
   if (opts.jobListSourceId) {
     const exists = await db
       .selectFrom('JobListSource')
@@ -121,13 +134,46 @@ export async function runRunScripts(
 
   if (stateFilter) query = query.where(stateFilter);
 
-  const targets = opts.jobListSourceId
-    ? await db
+  return opts.jobListSourceId
+    ? db
         .selectFrom('JobListSource')
         .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
         .where('JobListSource.id', '=', opts.jobListSourceId)
         .execute()
-    : await query.execute();
+    : query.execute();
+}
+
+export async function queueRunScripts(
+  opts: RunScriptsOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickRunScriptsTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-list-source-id enqueues its
+  // row explicitly — so only --include-failed's failed/aborted/no_result
+  // rows still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'run-scripts',
+        entity: { ofJobListSourceId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobListSource row(s) queued for run-scripts. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runRunScripts(
+  context: BrowserContext,
+  opts: RunScriptsOptions
+): Promise<{ processed: number }> {
+  const targets = await pickRunScriptsTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {

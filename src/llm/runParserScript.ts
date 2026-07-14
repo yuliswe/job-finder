@@ -312,7 +312,7 @@ Pick the best-matching options for each axis.`,
 
       // `picked.locations` is the union of every tier that actually
       // contributed jobs, so downstream logs reflect what was effectively
-      // applied. Surface empty result to the caller as-is — run-pipeline
+      // applied. Surface empty result to the caller as-is — start-pipeline
       // records `no_result_found` when there are zero jobs across every
       // tier the LLM thought worth trying.
       return {

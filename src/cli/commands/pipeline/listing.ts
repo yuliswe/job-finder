@@ -28,6 +28,9 @@ type ListingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobSourceId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
   /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
   suppressNothingToDoLog?: boolean;
 };
@@ -35,7 +38,7 @@ type ListingOptions = {
 export function createListingCommand(): Command {
   return new Command('listing')
     .description(
-      'For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in).'
+      'For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in). By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -53,15 +56,26 @@ export function createListingCommand(): Command {
       '--job-source-id <id>',
       'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
     .action(async (opts: ListingOptions) => {
-      await withBrowserInstance(context => runListing(context, opts));
+      if (opts.start) {
+        await withBrowserInstance(context => runListing(context, opts));
+        return;
+      }
+
+      await queueListing(opts);
     });
 }
 
-export async function runListing(
-  context: BrowserContext,
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickListingTargets(
   opts: ListingOptions
-): Promise<{ processed: number }> {
+): Promise<{ id: string; name: string; url: string }[]> {
   if (opts.jobSourceId) {
     const exists = await db
       .selectFrom('JobSource')
@@ -105,7 +119,7 @@ export async function runListing(
         .execute()
     : await query.execute();
 
-  const sources = rawSources.map(s => {
+  return rawSources.map(s => {
     if (s.url == null) {
       throw new Error(
         `JobSource ${s.id} (${s.name}) has no url — cannot list.`
@@ -114,6 +128,39 @@ export async function runListing(
 
     return { id: s.id, name: s.name, url: s.url };
   });
+}
+
+export async function queueListing(
+  opts: ListingOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickListingTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-source-id enqueues its row
+  // explicitly — so only --include-failed's failed/aborted/no_result rows
+  // still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'listing',
+        entity: { ofJobSourceId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobSource row(s) queued for listing. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runListing(
+  context: BrowserContext,
+  opts: ListingOptions
+): Promise<{ processed: number }> {
+  const sources = await pickListingTargets(opts);
 
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))

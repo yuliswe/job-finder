@@ -64,7 +64,7 @@ Print the supported sites and job types (useful as a reference for `--site` / `-
 For each unprocessed `JobSource`, open the company URL and BFS the same-domain links the LLM ranks most likely to lead to a careers/jobs page (capped at `PIPELINE_LISTING_BFS_MAX_DEPTH`). The first page the LLM classifies as a listing page is inserted as a new `JobListSource` row with an empty `parserScript` placeholder. `pipeline scripting` fills the script in later. The `JobSource` is always marked `isProcessed` after the attempt to avoid re-running BFS.
 
 ```bash
-./src/cli/bin/cli pipeline listing
+./src/cli/bin/cli pipeline listing --start
 ```
 
 Requires:
@@ -77,7 +77,7 @@ Requires:
 For each unprocessed `JobListSource` (i.e. one whose `parserScript` has not yet been generated), reload the listing page and ask the LLM to emit a JavaScript snippet defining `listLocations()` and `async searchJobs(locations, keywords)`. The script is executed inside the page in a feedback loop — corrective feedback is fed back to the LLM until `searchJobs` returns a non-empty `{ jobTitle, url }[]`. On success, the script is stored in `JobListSource.parserScript` and the row is marked `isProcessed`. On failure, the row is left unprocessed so it can be retried (after tweaking prompts, raising `PIPELINE_LISTING_BFS_MAX_DEPTH`, etc.).
 
 ```bash
-./src/cli/bin/cli pipeline scripting
+./src/cli/bin/cli pipeline scripting --start
 ```
 
 Requires:
@@ -90,7 +90,7 @@ Requires:
 For every `JobListSource` with a validated `parserScript`, reload the listing page, call the script's `listLocations()` and `listDivisions()` to enumerate the page's actual filter values, ask the LLM to map the user-supplied `--division` and `--location` strings to subsets of those values, then invoke `searchJobs()` with the picks and insert every returned `{ jobTitle, url }` into `JobPost` (ON CONFLICT(url) DO NOTHING). Each row is recorded in `PipelineState` with `task='run-scripts'` and state `script_error` / `no_result_found` / `success`.
 
 ```bash
-./src/cli/bin/cli pipeline run-scripts -d engineering -l "Toronto, ON"
+./src/cli/bin/cli pipeline run-scripts -d engineering -l "Toronto, ON" --start
 ```
 
 Requires:
@@ -103,13 +103,13 @@ Requires:
 For each unprocessed `JobPost` (i.e. `isProcessed=false`), open the posting URL, clean the page HTML, and ask the LLM to extract structured fields (`title`, `company`, `location`, `description`, `isRemote`, `jobType`, `postedAt`, `salaryMin`/`salaryMax`/`salaryCurrency`/`salaryInterval`, `summary`). The row is updated with whatever fields the LLM populates and marked `isProcessed`. Each row is recorded in `PipelineState` with `task='viewing'` and state `done` / `failed`.
 
 ```bash
-jobfinder pipeline viewing
+jobfinder pipeline viewing --start
 ```
 
-Pass `--all` to re-view every qualifying `JobPost` regardless of pipeline state — including ones already `done` / `not_a_job_posting` / `failed`. Useful after a prompt change.
+Pass `--all` to re-queue every qualifying `JobPost` regardless of pipeline state — including ones already `done` / `not_a_job_posting` / `failed`. Useful after a prompt change.
 
 ```bash
-jobfinder pipeline viewing --all
+jobfinder pipeline viewing --all --start
 ```
 
 Requires:
@@ -122,17 +122,28 @@ Requires:
 For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.
 
 ```bash
-jobfinder pipeline sourcing
+jobfinder pipeline sourcing --start
 ```
 
-All pipeline subcommands (except `seeding`) accept `--all` to re-process every qualifying parent regardless of pipeline state — including ones already `done` / `failed` / `aborted`. Useful after a prompt change. Available on `sourcing`, `listing`, `scripting`, `run-scripts`, `viewing`, `evaluate`:
+By default, `sourcing`, `listing`, `scripting`, `run-scripts`, `viewing`, and `evaluate` only queue the rows they select — nothing is processed until you either pass `--start` or let `jobfinder start-pipeline` drain the queues. This makes it cheap to stage work first and process it later in one orchestrated run:
 
 ```bash
-jobfinder pipeline sourcing --all
-jobfinder pipeline evaluate --all
+# Queue failed viewing rows now, process everything queued later:
+jobfinder pipeline viewing --include-failed
+jobfinder start-pipeline
+
+# Or queue and process in one invocation:
+jobfinder pipeline viewing --include-failed --start
 ```
 
-Each of those subcommands also accepts a `--<parent-table>-id <id>` flag to force-process a single record regardless of pipeline state or qualification (the record is re-queued before the task runs):
+All pipeline subcommands (except `seeding`) accept `--all` to re-queue every qualifying parent regardless of pipeline state — including ones already `done` / `failed` / `aborted`. Useful after a prompt change. Available on `sourcing`, `listing`, `scripting`, `run-scripts`, `viewing`, `evaluate`:
+
+```bash
+jobfinder pipeline sourcing --all --start
+jobfinder pipeline evaluate --all --start
+```
+
+Each of those subcommands also accepts a `--<parent-table>-id <id>` flag to force a single record onto the queue regardless of pipeline state or qualification (add `--start` to process it immediately):
 
 - `sourcing --source-seed-id <id>`
 - `listing --job-source-id <id>`
@@ -142,8 +153,8 @@ Each of those subcommands also accepts a `--<parent-table>-id <id>` flag to forc
 - `evaluate --job-post-id <id>`
 
 ```bash
-jobfinder pipeline viewing --job-post-id 0192...abcd
-jobfinder pipeline run-scripts --job-list-source-id 0192...abcd
+jobfinder pipeline viewing --job-post-id 0192...abcd --start
+jobfinder pipeline run-scripts --job-list-source-id 0192...abcd --start
 ```
 
 Requires:
@@ -165,12 +176,12 @@ Requires:
 - `LLM_SEEDING_MODEL` set in `src/llm/config.ts` (empty by default).
 - `seeds/interests.md` populated with the user's job-search interests.
 
-## `run-pipeline`
+## `start-pipeline`
 
 Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop re-iterates immediately when its previous iteration processed ≥1 row, and sleeps 5s only when it found nothing to do. The orchestrator exits once every task has finished an idle iteration with no productive work happening anywhere in between — so it's the right thing to leave running unattended after `pipeline seeding` + `pipeline approve-seeds`.
 
 ```bash
-jobfinder run-pipeline
+jobfinder start-pipeline
 
 # Also retry every in-scope row whose latest state is NOT done
 # (failed / aborted / no_result / etc.) — applied once on each task's
@@ -178,10 +189,10 @@ jobfinder run-pipeline
 # `jobfinder pipeline <task> --include-failed`. Subsequent iterations
 # run in default queued-only mode so a transient failure inside the
 # run is not retried forever.
-jobfinder run-pipeline --include-failed
+jobfinder start-pipeline --include-failed
 ```
 
-Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them with `--include-failed` on a fresh `run-pipeline`, or with the relevant subcommand and `--include-failed` / `--all`.
+Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them with `--include-failed` on a fresh `start-pipeline`, or with the relevant subcommand and `--include-failed` / `--all`.
 
 Requires:
 

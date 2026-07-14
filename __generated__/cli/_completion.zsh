@@ -36,21 +36,24 @@ _jobfinder_pipeline_sourcing() {
   _arguments -s -S \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-source-id[job-source-id]:job-source-id:'
+    '--job-source-id[job-source-id]:job-source-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline_listing() {
   _arguments -s -S \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-source-id[job-source-id]:job-source-id:'
+    '--job-source-id[job-source-id]:job-source-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline_scripting() {
   _arguments -s -S \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-list-source-id[job-list-source-id]:job-list-source-id:'
+    '--job-list-source-id[job-list-source-id]:job-list-source-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline_run_scripts() {
@@ -59,21 +62,24 @@ _jobfinder_pipeline_run_scripts() {
     '(-l --location)'{-l,--location}'[location]:location:' \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-list-source-id[job-list-source-id]:job-list-source-id:'
+    '--job-list-source-id[job-list-source-id]:job-list-source-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline_viewing() {
   _arguments -s -S \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-post-id[job-post-id]:job-post-id:'
+    '--job-post-id[job-post-id]:job-post-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline_evaluate() {
   _arguments -s -S \
     '--all[all]' \
     '--include-failed[include-failed]' \
-    '--job-post-id[job-post-id]:job-post-id:'
+    '--job-post-id[job-post-id]:job-post-id:' \
+    '--start[start]'
 }
 
 _jobfinder_pipeline() {
@@ -100,7 +106,7 @@ _jobfinder_pipeline() {
   esac
 }
 
-_jobfinder_run_pipeline() {
+_jobfinder_start_pipeline() {
   _arguments -s -S \
     '--include-failed[include-failed]'
 }
@@ -128,6 +134,11 @@ _jobfinder_export() {
   esac
 }
 
+_jobfinder_track() {
+  _arguments -s -S \
+    '1:url:'
+}
+
 _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
@@ -147,7 +158,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init scrape sites pipeline run-pipeline export tui completion-script-dump help-menu-dump)' \
+    '1:subcommand:(init scrape sites pipeline start-pipeline export track tui completion-script-dump help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -157,8 +168,9 @@ _jobfinder() {
     scrape) _jobfinder_scrape ;;
     sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
-    run-pipeline) _jobfinder_run_pipeline ;;
+    start-pipeline) _jobfinder_start_pipeline ;;
     export) _jobfinder_export ;;
+    track) _jobfinder_track ;;
     tui) _jobfinder_tui ;;
     completion-script-dump) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;

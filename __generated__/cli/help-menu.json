@@ -28,7 +28,9 @@
             "naukri",
             "bdjobs"
           ],
-          "default": ["indeed"]
+          "default": [
+            "indeed"
+          ]
         },
         {
           "flags": "-q, --search <term>",
@@ -103,7 +105,10 @@
           "flags": "--description-format <fmt>",
           "description": "Description format",
           "required": true,
-          "choices": ["markdown", "html"]
+          "choices": [
+            "markdown",
+            "html"
+          ]
         },
         {
           "flags": "--linkedin-fetch-description",
@@ -144,7 +149,10 @@
           "flags": "-f, --format <format>",
           "description": "Output format",
           "required": true,
-          "choices": ["json", "csv"],
+          "choices": [
+            "json",
+            "csv"
+          ],
           "default": "json"
         },
         {
@@ -176,7 +184,7 @@
         },
         {
           "name": "sourcing",
-          "description": "For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in.",
+          "description": "For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -191,12 +199,16 @@
               "flags": "--job-source-id <id>",
               "description": "Re-process only the JobSource with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         },
         {
           "name": "listing",
-          "description": "For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in).",
+          "description": "For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in). By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -211,12 +223,16 @@
               "flags": "--job-source-id <id>",
               "description": "Re-process only the JobSource with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         },
         {
           "name": "scripting",
-          "description": "Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript.",
+          "description": "Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -231,12 +247,16 @@
               "flags": "--job-list-source-id <id>",
               "description": "Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         },
         {
           "name": "run-scripts",
-          "description": "For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost",
+          "description": "For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -261,12 +281,16 @@
               "flags": "--job-list-source-id <id>",
               "description": "Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         },
         {
           "name": "viewing",
-          "description": "For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields.",
+          "description": "For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -281,12 +305,16 @@
               "flags": "--job-post-id <id>",
               "description": "Re-view only the JobPost with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         },
         {
           "name": "evaluate",
-          "description": "For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.",
+          "description": "For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -301,13 +329,17 @@
               "flags": "--job-post-id <id>",
               "description": "Re-evaluate only the JobPost with this ID, regardless of pipeline state or qualification.",
               "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
         }
       ]
     },
     {
-      "name": "run-pipeline",
+      "name": "start-pipeline",
       "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.",
       "usage": "[options]",
       "options": [
@@ -353,6 +385,18 @@
       ]
     },
     {
+      "name": "track",
+      "description": "Classify <url> via LLM as a job post / job list / neither. For a job post, enqueue sourcing on the company and viewing on the post. For a job list, enqueue sourcing and listing on the company. Exits non-zero when the URL is neither.",
+      "usage": "[options] <url>",
+      "arguments": [
+        {
+          "name": "url",
+          "description": "URL of a job posting or a careers / jobs index page.",
+          "required": true
+        }
+      ]
+    },
+    {
       "name": "tui",
       "description": "Open the live dashboard. All flags are deep-link state — pass them to jump straight to a specific view.",
       "usage": "[options]",
@@ -361,7 +405,10 @@
           "flags": "--tab <tab>",
           "description": "initial tab",
           "required": true,
-          "choices": ["jobs", "sources"],
+          "choices": [
+            "jobs",
+            "sources"
+          ],
           "default": "jobs"
         },
         {
@@ -382,7 +429,11 @@
           "flags": "--sources-sort <key>",
           "description": "sort key for the Sources tab",
           "required": true,
-          "choices": ["interest", "posts", "name"],
+          "choices": [
+            "interest",
+            "posts",
+            "name"
+          ],
           "default": "interest"
         },
         {

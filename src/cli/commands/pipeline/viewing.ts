@@ -28,6 +28,9 @@ type ViewingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
   /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
   suppressNothingToDoLog?: boolean;
 };
@@ -35,7 +38,7 @@ type ViewingOptions = {
 export function createViewingCommand(): Command {
   return new Command('viewing')
     .description(
-      'For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields.'
+      'For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -53,15 +56,26 @@ export function createViewingCommand(): Command {
       '--job-post-id <id>',
       'Re-view only the JobPost with this ID, regardless of pipeline state or qualification.'
     )
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
     .action(async (opts: ViewingOptions) => {
-      await withBrowserInstance(context => runViewing(context, opts));
+      if (opts.start) {
+        await withBrowserInstance(context => runViewing(context, opts));
+        return;
+      }
+
+      await queueViewing(opts);
     });
 }
 
-export async function runViewing(
-  context: BrowserContext,
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickViewingTargets(
   opts: ViewingOptions
-): Promise<{ processed: number }> {
+): Promise<{ id: string; url: string }[]> {
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -101,13 +115,46 @@ export async function runViewing(
 
   if (stateFilter) query = query.where(stateFilter);
 
-  const targets = opts.jobPostId
-    ? await db
+  return opts.jobPostId
+    ? db
         .selectFrom('JobPost')
         .select(['JobPost.id as id', 'JobPost.url as url'])
         .where('JobPost.id', '=', opts.jobPostId)
         .execute()
-    : await query.execute();
+    : query.execute();
+}
+
+export async function queueViewing(
+  opts: ViewingOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickViewingTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-post-id enqueues its row
+  // explicitly — so only --include-failed's failed/aborted/no_result rows
+  // still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'viewing',
+        entity: { ofJobPostId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobPost row(s) queued for viewing. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runViewing(
+  context: BrowserContext,
+  opts: ViewingOptions
+): Promise<{ processed: number }> {
+  const targets = await pickViewingTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {

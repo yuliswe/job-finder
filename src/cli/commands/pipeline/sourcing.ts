@@ -32,8 +32,11 @@ type SourcingOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobSourceId?: string;
+  /** Process the selected rows now. Without it the command only queues
+   * them for a later `--start` / `jobfinder start-pipeline`. */
+  start?: boolean;
   /** Suppress "nothing to do" / "0 rows" log lines. Set by the
-   * run-pipeline orchestrator since its tight poll loop would otherwise
+   * start-pipeline orchestrator since its tight poll loop would otherwise
    * spam the terminal. Individual `jobfinder pipeline sourcing` invocations
    * leave it false so the user sees actionable feedback. */
   suppressNothingToDoLog?: boolean;
@@ -42,7 +45,7 @@ type SourcingOptions = {
 export function createSourcingCommand(): Command {
   return new Command('sourcing')
     .description(
-      'For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in.'
+      'For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -60,15 +63,26 @@ export function createSourcingCommand(): Command {
       '--job-source-id <id>',
       'Re-process only the JobSource with this ID, regardless of pipeline state or qualification.'
     )
+    .option(
+      '--start',
+      'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
+    )
     .action(async (opts: SourcingOptions) => {
-      await withBrowserInstance(context => runSourcing(context, opts));
+      if (opts.start) {
+        await withBrowserInstance(context => runSourcing(context, opts));
+        return;
+      }
+
+      await queueSourcing(opts);
     });
 }
 
-export async function runSourcing(
-  context: BrowserContext,
+/** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
+ * return the rows the mode selects. Shared by the queue-only default path
+ * and the --start processing path. */
+async function pickSourcingTargets(
   opts: SourcingOptions
-): Promise<{ processed: number }> {
+): Promise<{ id: string; name: string; url: string | null }[]> {
   if (opts.jobSourceId) {
     await enqueuePipelineTask({
       task: 'sourcing',
@@ -110,13 +124,46 @@ export async function runSourcing(
       ])
     );
 
-  const sources = opts.jobSourceId
-    ? await db
+  return opts.jobSourceId
+    ? db
         .selectFrom('JobSource')
         .select(['id', 'name', 'url'])
         .where('JobSource.id', '=', opts.jobSourceId)
         .execute()
-    : await query.execute();
+    : query.execute();
+}
+
+export async function queueSourcing(
+  opts: SourcingOptions
+): Promise<{ queued: number }> {
+  const mode = pipelineModeFromOptions(opts);
+  const targets = await pickSourcingTargets(opts);
+
+  // The default mode only selects rows that are already queued, --all
+  // bulk-requeues inside the picker, and --job-source-id enqueues its row
+  // explicitly — so only --include-failed's failed/aborted/no_result rows
+  // still need a fresh queued state for a later --start to pick them up.
+  if (mode === 'include-failed') {
+    for (const target of targets) {
+      await enqueuePipelineTask({
+        task: 'sourcing',
+        entity: { ofJobSourceId: target.id },
+      });
+    }
+  }
+
+  terminal.log(
+    `${targets.length} JobSource row(s) queued for sourcing. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+  );
+
+  return { queued: targets.length };
+}
+
+export async function runSourcing(
+  context: BrowserContext,
+  opts: SourcingOptions
+): Promise<{ processed: number }> {
+  const sources = await pickSourcingTargets(opts);
 
   if (sources.length === 0) {
     if (!opts.suppressNothingToDoLog) {
