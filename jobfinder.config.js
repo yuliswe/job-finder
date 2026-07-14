@@ -112,6 +112,7 @@ export const DB_PATH = './jobs-new.db';
  * The model used by the seeding process.
  */
 export const LLM_SEEDING_MODEL = [
+  'ollama-plugin/gpt-oss:120b',
   'ollama-plugin/gemma4:e4b-mlx',
   'ollama-plugin/qwen3.6:35b-mlx',
   'ollama-plugin/gemma4:31b-mlx',
@@ -130,6 +131,7 @@ export const LLM_SEEDING_MODEL = [
  * file.
  */
 export const LLM_SOURCING_MODEL = [
+  'ollama-plugin/gpt-oss:120b',
   'ollama-plugin/gemma4:e4b-mlx',
   'ollama-plugin/qwen3.6:35b-mlx',
   'ollama-plugin/gemma4:31b-mlx',
@@ -147,6 +149,7 @@ export const LLM_SOURCING_MODEL = [
  *
  */
 export const LLM_LISTING_MODEL = [
+  'ollama-plugin/gpt-oss:120b',
   'ollama-plugin/gemma4:e4b-mlx',
   'ollama-plugin/qwen3.6:35b-mlx',
   'ollama-plugin/gemma4:31b-mlx',
@@ -160,7 +163,7 @@ export const LLM_LISTING_MODEL = [
  * - >=200K context window
  * - strong coding capability (>=45 on OpenRouter's Code LLM Leaderboard)
  */
-export const LLM_CODING_MODEL = ['anthropic-plugin/claude-opus-4-8'];
+export const LLM_CODING_MODEL = ['ollama-plugin/gemma4:31b-mlx'];
 
 /**
  * The model used by the viewing process for extracting and cleaning text from
@@ -172,6 +175,7 @@ export const LLM_CODING_MODEL = ['anthropic-plugin/claude-opus-4-8'];
  * - low output cost
  */
 export const LLM_VIEWING_MODEL = [
+  'ollama-plugin/gpt-oss:120b',
   'ollama-plugin/gemma4:e4b-mlx',
   'ollama-plugin/qwen3.6:35b-mlx',
   'ollama-plugin/gemma4:31b-mlx',
@@ -188,6 +192,7 @@ export const LLM_VIEWING_MODEL = [
  * - low input cost
  */
 export const LLM_EVALUATION_MODEL = [
+  'ollama-plugin/gpt-oss:120b',
   'ollama-plugin/gemma4:e4b-mlx',
   'ollama-plugin/qwen3.6:35b-mlx',
   'ollama-plugin/gemma4:31b-mlx',
