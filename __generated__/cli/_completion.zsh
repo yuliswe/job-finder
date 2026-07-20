@@ -132,7 +132,8 @@ _jobfinder_tui() {
   _arguments -s -S \
     '--tab[tab]:tab:(jobs sources)' \
     '--sort[sort]:sort:(all interest skill location excl. interest excl. location)' \
-    '--sources-sort[sources-sort]:sources-sort:(interest posts name)'
+    '--sources-sort[sources-sort]:sources-sort:(interest posts name)' \
+    '--non-interactive[non-interactive]'
 }
 
 _jobfinder_help_menu_dump() {

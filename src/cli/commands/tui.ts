@@ -39,22 +39,40 @@ export function createTuiCommand(): Command {
         .choices([...SOURCE_SORT_CHOICES])
         .default('interest' satisfies SourceSortKey)
     )
+    .addOption(
+      new Option(
+        '--non-interactive',
+        'print a one-shot plain-text snapshot of the dashboard (for agentic use) instead of opening the live view'
+      ).default(false)
+    )
     .action(
       async (opts: {
         tab: AppTab;
         sort: JobPostSortKey;
         sourcesSort: SourceSortKey;
+        nonInteractive: boolean;
       }) => {
+        const initial = {
+          tab: opts.tab,
+          sort: opts.sort,
+          sourcesSort: opts.sourcesSort,
+        };
+
+        if (opts.nonInteractive) {
+          // Render once, snapshot the settled frame, and print it. No Ink
+          // instance stays mounted, so the CLI's trailing `process.exit(0)`
+          // ends the command cleanly.
+          const { captureApp } = await import('src/tui/capture.js');
+          process.stdout.write(await captureApp(initial));
+          return;
+        }
+
         // Lazy-load Ink so spinning up the CLI for unrelated commands stays fast.
         const { renderApp } = await import('src/tui/index.js');
 
         // Await Ink's waitUntilExit so the CLI's trailing `process.exit(0)`
         // doesn't kill the dashboard before the user can interact with it.
-        await renderApp({
-          tab: opts.tab,
-          sort: opts.sort,
-          sourcesSort: opts.sourcesSort,
-        });
+        await renderApp(initial);
       }
     );
 }

@@ -4,6 +4,11 @@
   "usage": "[options] [command]",
   "commands": [
     {
+      "name": "init",
+      "description": "Create the SQLite DB and apply all migrations",
+      "usage": "[options]"
+    },
+    {
       "name": "scrape",
       "description": "Scrape jobs via python-jobspy",
       "usage": "[options]",
@@ -165,19 +170,225 @@
           "usage": "[options]"
         },
         {
-          "name": "sourcing",
-          "description": "Discover JobSource rows from recent SourceSeed URLs via headless browse + LLM",
+          "name": "approve-seeds",
+          "description": "For each SourceSeed name without a matching JobSource, create a JobSource (url left null) and queue sourcing on it. Run `pipeline sourcing` afterwards to discover the URLs.",
           "usage": "[options]"
+        },
+        {
+          "name": "sourcing",
+          "description": "For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in.",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-process every qualifying in-scope JobSource regardless of pipeline state. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-source-id <id>",
+              "description": "Re-process only the JobSource with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
         },
         {
           "name": "listing",
-          "description": "For each unprocessed JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in)",
-          "usage": "[options]"
+          "description": "For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in).",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-process every qualifying in-scope JobSource regardless of pipeline state. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-source-id <id>",
+              "description": "Re-process only the JobSource with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
         },
         {
           "name": "scripting",
-          "description": "For each unprocessed JobListSource, generate and validate a parser script (listLocations + searchJobs) and store it in JobListSource.parserScript",
-          "usage": "[options]"
+          "description": "Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript.",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-process every qualifying in-scope JobListSource regardless of pipeline state. Re-scripts done rows and overwrites their parserScript on success. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-list-source-id <id>",
+              "description": "Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "run-scripts",
+          "description": "For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "-d, --division <division>",
+              "description": "Division/department to filter by (e.g. \"engineering\"). Overrides the value extracted from interests.md.",
+              "required": true
+            },
+            {
+              "flags": "-l, --location <location>",
+              "description": "Location to filter by (e.g. \"Toronto, ON\"). Overrides the value extracted from interests.md.",
+              "required": true
+            },
+            {
+              "flags": "--all",
+              "description": "Re-process every qualifying in-scope JobListSource regardless of pipeline state. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-list-source-id <id>",
+              "description": "Re-process only the JobListSource with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "viewing",
+          "description": "For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields.",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-view every qualifying in-scope JobPost regardless of pipeline state — including ones already done / not_a_job_posting / failed. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-post-id <id>",
+              "description": "Re-view only the JobPost with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "evaluate",
+          "description": "For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval.",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-evaluate every qualifying in-scope JobPost regardless of pipeline state. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-post-id <id>",
+              "description": "Re-evaluate only the JobPost with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "run-pipeline",
+      "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.",
+      "usage": "[options]",
+      "options": [
+        {
+          "flags": "--include-failed",
+          "description": "Pass --include-failed to each task on its FIRST iteration only — same picker semantics as `jobfinder pipeline <task> --include-failed`, applied once at the start so failed / aborted / no_result rows get retried. Subsequent iterations of each loop run in default queued-only mode so a fresh failure during the run is not retried forever."
+        }
+      ]
+    },
+    {
+      "name": "export",
+      "description": "Export pipeline data for use outside the CLI / TUI (CSV, etc.).",
+      "usage": "[options] [command]",
+      "commands": [
+        {
+          "name": "jobs",
+          "description": "Export fully-evaluated JobPost rows (status=Done) as CSV — i.e. only posts that cleared the in-scope filter AND have description + interestScore + skillScore + locationScore filled in.",
+          "usage": "[options] [output]",
+          "arguments": [
+            {
+              "name": "output",
+              "description": "Output CSV path. Defaults to ./jobs.out.csv (matches the *.out.csv gitignore so it stays out of version control).",
+              "default": "./jobs.out.csv"
+            }
+          ],
+          "options": [
+            {
+              "flags": "-s, --sort <key>",
+              "description": "Sort key (mirrors `jobfinder tui`).",
+              "required": true,
+              "choices": [
+                "all",
+                "interest",
+                "skill",
+                "location",
+                "excl. interest",
+                "excl. location"
+              ],
+              "default": "all"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tui",
+      "description": "Open the live dashboard. All flags are deep-link state — pass them to jump straight to a specific view.",
+      "usage": "[options]",
+      "options": [
+        {
+          "flags": "--tab <tab>",
+          "description": "initial tab",
+          "required": true,
+          "choices": ["jobs", "sources"],
+          "default": "jobs"
+        },
+        {
+          "flags": "--sort <key>",
+          "description": "sort key for the JobPost tab",
+          "required": true,
+          "choices": [
+            "all",
+            "interest",
+            "skill",
+            "location",
+            "excl. interest",
+            "excl. location"
+          ],
+          "default": "all"
+        },
+        {
+          "flags": "--sources-sort <key>",
+          "description": "sort key for the Sources tab",
+          "required": true,
+          "choices": ["interest", "posts", "name"],
+          "default": "interest"
+        },
+        {
+          "flags": "--non-interactive",
+          "description": "print a one-shot plain-text snapshot of the dashboard (for agentic use) instead of opening the live view",
+          "default": false
         }
       ]
     },
