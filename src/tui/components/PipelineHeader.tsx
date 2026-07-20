@@ -1,6 +1,7 @@
 import { Box, Text } from 'ink';
 import { useEffect, useState } from 'react';
 
+import { Table, type Column } from 'src/tui/components/Table.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import type { PipelineStageStats } from 'src/tui/queries.js';
 
@@ -45,9 +46,9 @@ export function PipelineHeader({
     );
   }
 
-  const labelWidth = Math.max(...stats.map(s => s.label.length));
-  const rowsWidth = 2 + labelWidth + 1 + 18 + 1 + 22;
-  const infoWidth = Math.max(20, cols - rowsWidth - 4);
+  const columns = buildColumns(pulseOn);
+  const tableWidth = naturalWidth(columns, stats, DIVIDER);
+  const infoWidth = Math.max(20, cols - tableWidth - 4);
   const selected = stats[cursor] ?? null;
   return (
     <Box flexDirection='column'>
@@ -55,32 +56,19 @@ export function PipelineHeader({
         PIPELINE{focused ? ' ◂' : ''}
       </Text>
       <Box flexDirection='row'>
-        <Box flexDirection='column' flexShrink={0}>
-          {stats.map((s, i) => {
-            const isCursor = focused && i === cursor;
-            const segs = progressSegments(s);
-            const running = s.started > 0;
-            return (
-              <Text key={s.task} inverse={isCursor}>
-                {' '}
-                {running ? (
-                  <Text color={PULSE_COLOR} dimColor={!pulseOn}>
-                    ●
-                  </Text>
-                ) : (
-                  ' '
-                )}{' '}
-                {s.label.padEnd(labelWidth)}{' '}
-                <Text color='red'>{'█'.repeat(segs.red)}</Text>
-                <Text color='yellow'>{'█'.repeat(segs.yellow)}</Text>
-                <Text color='green'>{'█'.repeat(segs.green)}</Text>
-                <Text dimColor>{'░'.repeat(segs.empty)}</Text> {countSummary(s)}
-                {s.outOfScope > 0 && (
-                  <Text dimColor> ({s.outOfScope} out-of-scope)</Text>
-                )}{' '}
-              </Text>
-            );
-          })}
+        <Box flexShrink={0}>
+          <Table
+            rows={stats}
+            columns={columns}
+            cursor={cursor}
+            windowStart={0}
+            visibleCount={stats.length}
+            width={tableWidth}
+            getKey={s => s.task}
+            emptyMessage='No pipeline stages.'
+            active={focused}
+            separator={DIVIDER}
+          />
         </Box>
         {focused && selected && (
           <Box
@@ -164,12 +152,122 @@ function progressSegments(
   return { green: out[0]!, yellow: out[1]!, red: out[2]!, empty: out[3]! };
 }
 
-function countSummary(s: PipelineStageStats): string {
-  const inScope = s.total - s.outOfScope;
-  const parts = [`${s.done}✓`];
-  if (s.noResult > 0) parts.push(`${s.noResult}∅`);
-  if (s.failed > 0) parts.push(`${s.failed}✗`);
-  return `${s.queued} / ${parts.join(' ')} / ${inScope}`;
+/** Vertical cell divider drawn between every column, with a space on each
+ * side so the bars don't touch the content. */
+const DIVIDER = ' │ ';
+
+/** Fixed width of the progress-bar column, matching `progressSegments`. */
+const BAR_WIDTH = 18;
+
+/** The pipeline table's columns, in render order: a running-indicator dot, the
+ * stage label, the four-segment progress bar, and the numeric outcome counts.
+ * Built per render so the dot can close over the current `pulseOn` phase. */
+function buildColumns(pulseOn: boolean): Column<PipelineStageStats>[] {
+  return [
+    {
+      label: '',
+      value: s => (s.started > 0 ? '●' : ' '),
+      min: 1,
+      max: 1,
+      render: s =>
+        s.started > 0 ? (
+          <Text color={PULSE_COLOR} dimColor={!pulseOn}>
+            ●
+          </Text>
+        ) : (
+          ' '
+        ),
+    },
+    { label: 'stage', value: s => s.label, min: 5 },
+    {
+      label: 'progress',
+      value: s => plainBar(s),
+      min: BAR_WIDTH,
+      max: BAR_WIDTH,
+      render: s => {
+        const segs = progressSegments(s);
+        return (
+          <>
+            <Text color='red'>{'█'.repeat(segs.red)}</Text>
+            <Text color='yellow'>{'█'.repeat(segs.yellow)}</Text>
+            <Text color='green'>{'█'.repeat(segs.green)}</Text>
+            <Text dimColor>{'░'.repeat(segs.empty)}</Text>
+          </>
+        );
+      },
+    },
+    { label: 'queued', value: s => `${s.queued}`, min: 1, align: 'right' },
+    {
+      label: 'done',
+      value: s => `${s.done}`,
+      min: 1,
+      align: 'right',
+      color: 'green',
+    },
+    {
+      label: 'no-result',
+      value: s => `${s.noResult}`,
+      min: 1,
+      align: 'right',
+      color: 'yellow',
+    },
+    {
+      label: 'failed',
+      value: s => `${s.failed}`,
+      min: 1,
+      align: 'right',
+      color: 'red',
+    },
+    {
+      label: 'in-scope',
+      value: s => `${s.total - s.outOfScope}`,
+      min: 1,
+      align: 'right',
+    },
+    {
+      label: 'out-of-scope',
+      value: s => `${s.outOfScope}`,
+      min: 1,
+      align: 'right',
+      color: 'gray',
+    },
+  ];
+}
+
+/** Plain-text (colorless) rendering of the progress bar, used only for column
+ * width budgeting and as the fallback when the rich renderer is unavailable. */
+function plainBar(s: PipelineStageStats): string {
+  const segs = progressSegments(s);
+  return (
+    '█'.repeat(segs.red + segs.yellow + segs.green) + '░'.repeat(segs.empty)
+  );
+}
+
+/** The exact width the table needs so `Table`'s allocator hands every column
+ * its natural content width and leaves no slack to stretch, keeping the grid
+ * as tight as the hand-rolled layout was. */
+function naturalWidth(
+  columns: Column<PipelineStageStats>[],
+  stats: PipelineStageStats[],
+  separator: string
+): number {
+  const content = columns.reduce((sum, c) => {
+    const contentMax = Math.max(
+      c.label.length,
+      ...stats.map(s => c.value(s).length)
+    );
+
+    const desired = Math.max(
+      c.min,
+      Math.min(contentMax, c.max ?? Number.POSITIVE_INFINITY)
+    );
+
+    return sum + desired;
+  }, 0);
+
+  // Mirror Table's own reservation: (N-1) separators plus 2 cols of
+  // selection-highlight padding.
+  return content + (columns.length - 1) * separator.length + 2;
 }
 
 /** Returns a boolean that flips every PULSE_MS while `active`. When inactive,
