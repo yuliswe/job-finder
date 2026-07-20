@@ -1,8 +1,16 @@
-/** Pad/truncate `s` to exactly `w` characters (right-padded with spaces). */
-export function pad(s: string, w: number): string {
+/** Pad/truncate `s` to exactly `w` characters. Left-aligned by default
+ * (padding on the right); pass `align: 'right'` to pad on the left instead,
+ * which is the natural choice for numeric columns. Over-long strings are
+ * truncated with an ellipsis regardless of alignment. */
+export function pad(
+  s: string,
+  w: number,
+  align: 'left' | 'right' = 'left'
+): string {
   if (w <= 0) return '';
   if (s.length > w) return s.slice(0, w - 1) + '…';
-  return s + ' '.repeat(w - s.length);
+  const fill = ' '.repeat(w - s.length);
+  return align === 'right' ? fill + s : s + fill;
 }
 
 /**
