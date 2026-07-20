@@ -1,5 +1,5 @@
 import { Box, useApp, useInput } from 'ink';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ActivityFeed } from 'src/tui/components/ActivityFeed.js';
 import { Footer } from 'src/tui/components/Footer.js';
@@ -30,7 +30,18 @@ import {
 
 export type { AppOptions, AppTab };
 
-export function App({ initial }: { initial: AppOptions }) {
+export function App({
+  initial,
+  onReady,
+}: {
+  initial: AppOptions;
+  /**
+   * Fired once every primary data source has resolved. The non-interactive
+   * snapshot (`captureApp`) uses this to know the dashboard is fully populated
+   * before it reads the frame; the live path leaves it undefined.
+   */
+  onReady?: () => void;
+}) {
   const { exit } = useApp();
   const [tab, setTab] = useState<AppTab>(initial.tab);
   const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
@@ -93,6 +104,19 @@ export function App({ initial }: { initial: AppOptions }) {
       [sourcesSort, sourcesScopeFilter]
     )
   );
+
+  // Signal `onReady` exactly once, on the first render where every primary
+  // data source has resolved. Effects run after Ink has committed the frame,
+  // so by the time this fires the snapshot already reflects the loaded data.
+  const readyFired = useRef(false);
+
+  useEffect(() => {
+    if (readyFired.current || !onReady) return;
+    if (stats && activity && jobPosts && sources) {
+      readyFired.current = true;
+      onReady();
+    }
+  }, [onReady, stats, activity, jobPosts, sources]);
 
   // App-level keys only. Cursor (↑↓) lives inside TabView so arrow keys don't
   // re-render the chrome on every press. Ink supports multiple useInput hooks.

@@ -202,6 +202,25 @@ jobfinder export jobs ./shortlist.csv --sort 'excl. location'
 
 Sort keys mirror `jobfinder tui`'s `--sort`: `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
 
+## `tui`
+
+Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB. Every flag is deep-link state, so you can jump straight to a specific view.
+
+```bash
+# Live dashboard on the Jobs tab
+jobfinder tui
+
+# Jump to the Sources tab, sorted by post count
+jobfinder tui --tab sources --sources-sort posts
+
+# One-shot plain-text snapshot (no interactive terminal) — for agentic use,
+# piping, or capturing the current state into a file
+jobfinder tui --non-interactive
+jobfinder tui --non-interactive --sort interest > dashboard.txt
+```
+
+`--non-interactive` renders the dashboard once, waits for its queries to resolve, and prints a plain-text (ANSI-stripped) snapshot of the same view a human would see, then exits. It honours the same `--tab`, `--sort`, and `--sources-sort` flags as the live view.
+
 ## `help-menu-dump`
 
 Dump the full command tree (commands, subcommands, options, choices, defaults) as JSON. Useful for tooling that needs a machine-readable view of the CLI surface.
