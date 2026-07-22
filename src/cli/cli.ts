@@ -15,7 +15,12 @@ import { createTuiCommand } from 'src/cli/commands/tui.js';
 
 const program = new Command();
 
-program.name('jobfinder').description('CLI for python-jobspy').version('1.0.0');
+program
+  .name('jobfinder')
+  .description(
+    'Job discovery and application-tracking pipeline that scrapes postings (via python-jobspy), seeds and sources companies, tracks applications, and exports results, with a TUI dashboard'
+  )
+  .version('1.0.0');
 
 program.addCommand(createInitCommand());
 program.addCommand(createScrapeCommand());
