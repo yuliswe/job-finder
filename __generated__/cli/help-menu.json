@@ -439,7 +439,7 @@
       ]
     },
     {
-      "name": "completion-script-dump",
+      "name": "completion",
       "description": "Generate Zsh completion script (writes __generated__/cli/_completion.zsh and prints to stdout)",
       "usage": "[options]"
     },

@@ -2,7 +2,7 @@
 
 import { Command } from 'commander';
 
-import { createCompletionScriptDumpCommand } from 'src/cli/commands/completion-script-dump.js';
+import { createCompletionCommand } from 'src/cli/commands/completion.js';
 import { createExportCommand } from 'src/cli/commands/export.js';
 import { createHelpMenuDumpCommand } from 'src/cli/commands/help-menu-dump.js';
 import { createInitCommand } from 'src/cli/commands/init.js';
@@ -25,7 +25,7 @@ program.addCommand(createStartPipelineCommand());
 program.addCommand(createExportCommand());
 program.addCommand(createTrackCommand());
 program.addCommand(createTuiCommand());
-program.addCommand(createCompletionScriptDumpCommand(program));
+program.addCommand(createCompletionCommand(program));
 program.addCommand(createHelpMenuDumpCommand(program));
 
 void (async () => {
