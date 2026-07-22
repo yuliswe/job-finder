@@ -80,6 +80,14 @@ _jobfinder_pipeline() {
   esac
 }
 
+_jobfinder_reset() {
+  _arguments -s -S \
+    '1:stage:(sourcing listing scripting run-scripts viewing evaluate)' \
+    '--all[all]' \
+    '--no-result[no-result]' \
+    '--failed[failed]'
+}
+
 _jobfinder_start_pipeline() {
   _arguments -s -S \
     '--include-failed[include-failed]'
@@ -134,7 +142,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init pipeline start-pipeline export track tui completion help-menu-dump)' \
+    '1:subcommand:(init pipeline reset start-pipeline export track tui completion help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -142,6 +150,7 @@ _jobfinder() {
       case $line[1] in
     init) _normal ;;
     pipeline) _jobfinder_pipeline ;;
+    reset) _jobfinder_reset ;;
     start-pipeline) _jobfinder_start_pipeline ;;
     export) _jobfinder_export ;;
     track) _jobfinder_track ;;
@@ -154,3 +163,5 @@ _jobfinder() {
 }
 
 compdef _jobfinder jobfinder ./bin/jobfinder
+
+[34m# wrote /Users/yuli/lab/job-finder/.claude/worktrees/reset-command/__generated__/cli/_completion.zsh[39m
