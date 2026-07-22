@@ -90,7 +90,8 @@ _jobfinder_reset() {
 
 _jobfinder_start_pipeline() {
   _arguments -s -S \
-    '--include-failed[include-failed]'
+    '--include-failed[include-failed]' \
+    '--force[force]'
 }
 
 _jobfinder_export_jobs() {

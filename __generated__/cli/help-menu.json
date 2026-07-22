@@ -222,6 +222,10 @@
         {
           "flags": "--include-failed",
           "description": "Pass --include-failed to each task on its FIRST iteration only — same picker semantics as `jobfinder pipeline <task> --include-failed`, applied once at the start so failed / aborted / no_result rows get retried. Subsequent iterations of each loop run in default queued-only mode so a fresh failure during the run is not retried forever."
+        },
+        {
+          "flags": "--force",
+          "description": "Start even if another instance holds this database’s pipeline lock. Only for when you are certain the recorded holder is dead — two live runs double-process every row and make the stale-started reap requeue each other’s in-flight work."
         }
       ]
     },
