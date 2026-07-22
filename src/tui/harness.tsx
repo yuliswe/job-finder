@@ -78,9 +78,12 @@ class HarnessStdout extends Writable {
     callback: (error?: Error | null) => void
   ): void {
     const frame = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-    // Ink's final barrier write is an empty string; ignore it so it doesn't
-    // blank out the captured frame.
-    if (frame) this.lastFrame = frame;
+    // Keep only writes that carry visible text. On a TTY, Ink brackets each
+    // frame with content-free control writes — a synchronized-update start/end
+    // pair and cursor-only sequences — and its final barrier write is an empty
+    // string; capturing any of those would blank out the frame that /screen
+    // reports. Everything is still forwarded to the real terminal below.
+    if (stripAnsi(frame).trim() !== '') this.lastFrame = frame;
     if (this.#real) {
       this.#real.write(frame, callback);
       return;
