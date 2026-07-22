@@ -37,9 +37,9 @@ export function App({
 }: {
   initial: AppOptions;
   /**
-   * Fired once every primary data source has resolved. The non-interactive
-   * snapshot (`captureApp`) uses this to know the dashboard is fully populated
-   * before it reads the frame; the live path leaves it undefined.
+   * Fired once every primary data source has resolved. The harness server uses
+   * this to know the dashboard is fully populated before it reads the first
+   * frame; the live path leaves it undefined.
    */
   onReady?: () => void;
   /**

@@ -79,12 +79,6 @@ export function createTuiCommand(): Command {
     )
     .addOption(
       new Option(
-        '--non-interactive',
-        'print a one-shot plain-text snapshot of the dashboard (for agentic use) instead of opening the live view'
-      ).default(false)
-    )
-    .addOption(
-      new Option(
         '--harness',
         'open the live dashboard and also expose an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys) to the same instance'
       ).default(false)
@@ -109,7 +103,6 @@ export function createTuiCommand(): Command {
         tab: AppTab;
         sort: JobPostSortKey;
         sourcesSort: SourceSortKey;
-        nonInteractive: boolean;
         harness: boolean;
         harnessPort?: number;
       }) => {
@@ -118,15 +111,6 @@ export function createTuiCommand(): Command {
           sort: opts.sort,
           sourcesSort: opts.sourcesSort,
         };
-
-        if (opts.nonInteractive) {
-          // Render once, snapshot the settled frame, and print it. No Ink
-          // instance stays mounted, so the CLI's trailing `process.exit(0)`
-          // ends the command cleanly.
-          const { captureApp } = await import('src/tui/capture.js');
-          process.stdout.write(await captureApp(initial));
-          return;
-        }
 
         if (opts.harness) {
           // Mount the dashboard behind an HTTP control server and keep the
