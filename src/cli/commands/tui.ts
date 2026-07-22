@@ -1,7 +1,17 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import { Command, Option } from 'commander';
 
 import type { AppTab } from 'src/tui/App.js';
 import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
+
+/**
+ * Well-known path where `--harness` publishes how to reach its control server,
+ * so an agent can discover a running instance without being told the port.
+ * Written on startup, removed on exit.
+ */
+const HARNESS_INFO_PATH = '/tmp/jobfinder/harness.json';
 
 const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
@@ -96,14 +106,55 @@ export function createTuiCommand(): Command {
           // signalled. In a real terminal the TUI is mirrored to the screen
           // and the human's keys are forwarded alongside injected ones; when
           // stdout is piped it runs headless for a pure agent.
+
+          // Remove the discovery file on every exit path. The handlers are
+          // registered *before* the server starts — the file is published as
+          // soon as the port binds, so a signal during startup must already be
+          // able to clean it up (default signal termination skips 'exit').
+          const removeInfo = (): void => {
+            try {
+              rmSync(HARNESS_INFO_PATH, { force: true });
+            } catch {
+              // Best effort: a stale file is harmless and gets overwritten.
+            }
+          };
+
+          process.once('exit', removeInfo);
+          const shutdown = (): void => {
+            removeInfo();
+            process.exit(0);
+          };
+
+          process.once('SIGINT', shutdown);
+          process.once('SIGTERM', shutdown);
+
           const { startHarnessServer } = await import('src/tui/harness.js');
           const server = await startHarnessServer(initial, {
             port: opts.harnessPort,
-            // Printed before Ink claims the terminal, so it sits above the TUI
-            // rather than corrupting it.
+            // Fires as soon as the server is listening, before the TUI is drawn.
+            // Publish the discovery file and print the banner here so both are
+            // available immediately, without waiting for the first frame.
             onListening: url => {
+              mkdirSync(dirname(HARNESS_INFO_PATH), { recursive: true });
+
+              writeFileSync(
+                HARNESS_INFO_PATH,
+                JSON.stringify(
+                  {
+                    url,
+                    port: Number(new URL(url).port),
+                    pid: process.pid,
+                    screen: `${url}/screen`,
+                    keys: `${url}/keys`,
+                  },
+                  null,
+                  2
+                ) + '\n'
+              );
+
               process.stderr.write(
                 `jobfinder tui harness listening on ${url}\n` +
+                  `  info ${HARNESS_INFO_PATH}\n` +
                   `  GET  ${url}/screen   read the current screen\n` +
                   `  POST ${url}/keys     send keystrokes { keys?: string[], text?: string }\n`
               );
@@ -112,13 +163,6 @@ export function createTuiCommand(): Command {
             // why this is done synchronously rather than after waitUntilExit.
             onQuit: () => process.exit(0),
           });
-
-          const shutdown = (): void => {
-            void server.close().then(() => process.exit(0));
-          };
-
-          process.once('SIGINT', shutdown);
-          process.once('SIGTERM', shutdown);
 
           await server.waitUntilExit();
           process.exit(0);
