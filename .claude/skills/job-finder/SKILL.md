@@ -11,13 +11,13 @@ When the user wants you to inspect or operate the live dashboard (the `jobfinder
 
 ### 1. Find (or start) a running harness
 
-The harness publishes its connection info to `/tmp/jobfinder/harness.json` while it is running, and removes the file on exit. Read it first:
+Each running harness publishes its connection info to `/tmp/jobfinder/harness.<pid>.json` (one file per instance, keyed by the TUI's process id) and removes it on exit. List them first:
 
 ```bash
-cat /tmp/jobfinder/harness.json
+ls /tmp/jobfinder/harness.*.json 2>/dev/null
 ```
 
-It contains:
+Each file contains:
 
 ```json
 {
@@ -29,15 +29,33 @@ It contains:
 }
 ```
 
-- If the file exists, a harness is running — use the `screen` and `keys` URLs from it. (If requests fail, the process may have died uncleanly; check `pid` with `kill -0 <pid>`.)
-- If the file is absent, no harness is running. Ask the user to start one in their terminal with `jobfinder tui --harness` (they see the live TUI; you drive it), or start one yourself in the background (e.g. `jobfinder tui --harness --harness-port 5599 &`) — headless is fine when stdout is not a terminal.
+- **No files** → no harness is running. Ask the user to start one in their terminal with `jobfinder tui --harness` (they see the live TUI; you drive it), or start one yourself in the background (e.g. `jobfinder tui --harness --harness-port 5599 &`) — headless is fine when stdout is not a terminal.
+- **Exactly one file** → use its `screen` and `keys` URLs.
+- **More than one file** → several TUIs are running. Do **not** guess. Read the `pid` from each file and **ask the user which instance to connect to** — every TUI shows its own `pid <n>` in the top-right corner of its screen, so the user can read it off the window they mean. Then use that file's `screen` / `keys` URLs.
+
+If a request to a discovered instance fails, its process may have died uncleanly (a stale file); confirm it is alive with `kill -0 <pid>` and fall back to the other instances. (A new harness sweeps stale files on startup, but one can briefly linger.)
+
+Read all instances and their pids at once, e.g.:
+
+```bash
+for f in /tmp/jobfinder/harness.*.json; do
+  python3 -c "import json,sys; d=json.load(open('$f')); print(d['pid'], d['url'])"
+done
+```
+
+Once you've picked an instance, set its endpoints from that file, e.g. for pid 12345:
+
+```bash
+SCREEN=$(python3 -c "import json;print(json.load(open('/tmp/jobfinder/harness.12345.json'))['screen'])")
+KEYS=$(python3 -c "import json;print(json.load(open('/tmp/jobfinder/harness.12345.json'))['keys'])")
+```
 
 ### 2. Read the current screen
 
 `GET {screen}` returns a plain-text (ANSI-stripped) snapshot of the current frame:
 
 ```bash
-curl -s "$(python3 -c "import json;print(json.load(open('/tmp/jobfinder/harness.json'))['screen'])")"
+curl -s "$SCREEN"
 ```
 
 ### 3. Send keystrokes
@@ -51,8 +69,6 @@ curl -s "$(python3 -c "import json;print(json.load(open('/tmp/jobfinder/harness.
 Key tokens are either named keys — `up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `pageup`, `pagedown`, `home`, `end`, `backspace`, `delete`, `space`, `ctrl+c` — or literal characters (`q`, `s`, `o`, `p`, `y`, …). `GET {url}/` lists the key names.
 
 ```bash
-KEYS=$(python3 -c "import json;print(json.load(open('/tmp/jobfinder/harness.json'))['keys'])")
-
 # Move down twice and open the highlighted row
 curl -s "$KEYS" -d '{"keys":["down","down","enter"]}'
 
@@ -64,6 +80,6 @@ The response body is the frame after the keys settle, so a single `POST /keys` b
 
 ### 4. TUI key reference (what the keys do)
 
-The footer of the dashboard lists them, but the common ones: arrows/`tab` switch tab or move the cursor, `enter` opens the highlighted Job/Source, `p` toggles pipeline focus, `s`/`S` cycle the sort, `o`/`O` change the scope filter, `t`/`T` tag/untag a job, `y` copies a deep-link command, `q` or `Esc` quits.
+The footer of the dashboard lists them, but the common ones: arrows/`tab` switch tab or move the cursor, `enter` opens the highlighted Job/Source, `p` toggles pipeline focus, `s`/`S` cycle the sort, `o`/`O` change the scope filter, `t`/`T` tag/untag a job, `y` copies a deep-link command, `q` or `Esc` quits. Each TUI shows its own `pid <n>` in the top-right corner.
 
-Sending `q` (or `Esc` from the top-level view) quits the TUI, which stops the server, removes `/tmp/jobfinder/harness.json`, and ends the process. Only do that when the user wants to close the dashboard.
+Sending `q` (or `Esc` from the top-level view) quits that TUI, which stops its server, removes its `/tmp/jobfinder/harness.<pid>.json`, and ends the process. Only do that when the user wants to close that dashboard.

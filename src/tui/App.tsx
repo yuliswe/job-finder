@@ -275,6 +275,7 @@ export function App({
           jobs: jobPosts?.length ?? 0,
           sources: sources?.length ?? 0,
         }}
+        pid={process.pid}
       />
       <TabView
         tab={tab}

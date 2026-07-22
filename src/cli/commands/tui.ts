@@ -1,5 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 
 import { Command, Option } from 'commander';
 
@@ -7,11 +6,40 @@ import type { AppTab } from 'src/tui/App.js';
 import type { JobPostSortKey, SourceSortKey } from 'src/tui/queries.js';
 
 /**
- * Well-known path where `--harness` publishes how to reach its control server,
- * so an agent can discover a running instance without being told the port.
- * Written on startup, removed on exit.
+ * Directory where each `--harness` instance publishes how to reach its control
+ * server, as `harness.<pid>.json`, so an agent can discover any running
+ * instance without being told the port. Keyed by pid so concurrent TUIs don't
+ * clobber each other's files. Each instance writes its file on startup and
+ * removes it on exit.
  */
-const HARNESS_INFO_PATH = '/tmp/jobfinder/harness.json';
+const HARNESS_INFO_DIR = '/tmp/jobfinder';
+const harnessInfoPath = (pid: number): string =>
+  `${HARNESS_INFO_DIR}/harness.${pid}.json`;
+
+/** Delete discovery files whose owning process is gone (e.g. killed with -9). */
+function sweepStaleHarnessInfo(): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(HARNESS_INFO_DIR);
+  } catch {
+    return; // Directory doesn't exist yet — nothing to sweep.
+  }
+
+  for (const name of entries) {
+    const match = /^harness\.(\d+)\.json$/.exec(name);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    try {
+      process.kill(pid, 0); // Throws if the process is gone.
+    } catch {
+      try {
+        rmSync(`${HARNESS_INFO_DIR}/${name}`, { force: true });
+      } catch {
+        // Best effort.
+      }
+    }
+  }
+}
 
 const TABS = ['jobs', 'sources'] as const satisfies readonly AppTab[];
 const SORTS = [
@@ -107,15 +135,18 @@ export function createTuiCommand(): Command {
           // and the human's keys are forwarded alongside injected ones; when
           // stdout is piped it runs headless for a pure agent.
 
-          // Remove the discovery file on every exit path. The handlers are
-          // registered *before* the server starts — the file is published as
-          // soon as the port binds, so a signal during startup must already be
-          // able to clean it up (default signal termination skips 'exit').
+          const infoPath = harnessInfoPath(process.pid);
+
+          // Remove this instance's discovery file on every exit path. The
+          // handlers are registered *before* the server starts — the file is
+          // published as soon as the port binds, so a signal during startup
+          // must already be able to clean it up (default signal termination
+          // skips 'exit').
           const removeInfo = (): void => {
             try {
-              rmSync(HARNESS_INFO_PATH, { force: true });
+              rmSync(infoPath, { force: true });
             } catch {
-              // Best effort: a stale file is harmless and gets overwritten.
+              // Best effort: a stale file is harmless and gets swept later.
             }
           };
 
@@ -135,10 +166,12 @@ export function createTuiCommand(): Command {
             // Publish the discovery file and print the banner here so both are
             // available immediately, without waiting for the first frame.
             onListening: url => {
-              mkdirSync(dirname(HARNESS_INFO_PATH), { recursive: true });
+              mkdirSync(HARNESS_INFO_DIR, { recursive: true });
+              // Tidy up files left behind by instances that died uncleanly.
+              sweepStaleHarnessInfo();
 
               writeFileSync(
-                HARNESS_INFO_PATH,
+                infoPath,
                 JSON.stringify(
                   {
                     url,
@@ -154,7 +187,8 @@ export function createTuiCommand(): Command {
 
               process.stderr.write(
                 `jobfinder tui harness listening on ${url}\n` +
-                  `  info ${HARNESS_INFO_PATH}\n` +
+                  `  pid  ${process.pid}\n` +
+                  `  info ${infoPath}\n` +
                   `  GET  ${url}/screen   read the current screen\n` +
                   `  POST ${url}/keys     send keystrokes { keys?: string[], text?: string }\n`
               );

@@ -21,6 +21,7 @@ export function TabBar({
   sourcesScopeFilter,
   jobsScopeFilter,
   counts,
+  pid,
 }: {
   tab: AppTab;
   sort: JobPostSortKey;
@@ -28,6 +29,8 @@ export function TabBar({
   sourcesScopeFilter: ScopeFilter;
   jobsScopeFilter: ScopeFilter;
   counts: Record<AppTab, number>;
+  /** This TUI's process id, shown right-aligned to identify the instance. */
+  pid: number;
 }) {
   const activeSort = tab === 'jobs' ? sort : sourcesSort;
   const activeScope = tab === 'jobs' ? jobsScopeFilter : sourcesScopeFilter;
@@ -53,6 +56,11 @@ export function TabBar({
       <Box marginLeft={2}>
         <Text dimColor>scope: </Text>
         <Text color='cyan'>{SCOPE_LABEL[activeScope]}</Text>
+      </Box>
+      {/* Spacer pushes the pid to the right edge so each running TUI is
+          identifiable when several are open under one harness directory. */}
+      <Box flexGrow={1} justifyContent='flex-end'>
+        <Text dimColor>pid {pid}</Text>
       </Box>
     </Box>
   );
