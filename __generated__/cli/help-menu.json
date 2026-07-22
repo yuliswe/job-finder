@@ -180,6 +180,41 @@
       ]
     },
     {
+      "name": "reset",
+      "description": "Requeue tasks in a pipeline stage so the next run reprocesses them. Pick exactly one selector: --all (every in-scope entity), --no-result (entities whose latest state produced no result), or --failed (entities whose latest state is an error).",
+      "usage": "[options] <stage>",
+      "arguments": [
+        {
+          "name": "stage",
+          "description": "Pipeline stage whose tasks to requeue.",
+          "required": true,
+          "choices": [
+            "sourcing",
+            "listing",
+            "scripting",
+            "run-scripts",
+            "viewing",
+            "evaluate"
+          ]
+        }
+      ],
+      "options": [
+        {
+          "flags": "--all",
+          "description": "Requeue every in-scope entity for the stage, including ones already done. Use after a prompt or config change."
+        },
+        {
+          "flags": "--no-result",
+          "description": "Requeue only entities whose latest state produced no result (e.g. not_a_job_posting, no_listing_found).",
+          "negate": true
+        },
+        {
+          "flags": "--failed",
+          "description": "Requeue only entities whose latest state is a failure (failed, script_error, aborted)."
+        }
+      ]
+    },
+    {
       "name": "start-pipeline",
       "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.",
       "usage": "[options]",

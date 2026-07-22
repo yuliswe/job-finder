@@ -7,6 +7,7 @@ import { createExportCommand } from 'src/cli/commands/export.js';
 import { createHelpMenuDumpCommand } from 'src/cli/commands/help-menu-dump.js';
 import { createInitCommand } from 'src/cli/commands/init.js';
 import { createPipelineCommand } from 'src/cli/commands/pipeline.js';
+import { createResetCommand } from 'src/cli/commands/reset.js';
 import { createStartPipelineCommand } from 'src/cli/commands/start-pipeline.js';
 import { createTrackCommand } from 'src/cli/commands/track.js';
 import { createTuiCommand } from 'src/cli/commands/tui.js';
@@ -22,6 +23,7 @@ program
 
 program.addCommand(createInitCommand());
 program.addCommand(createPipelineCommand());
+program.addCommand(createResetCommand());
 program.addCommand(createStartPipelineCommand());
 program.addCommand(createExportCommand());
 program.addCommand(createTrackCommand());

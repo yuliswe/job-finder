@@ -101,6 +101,26 @@ export const ELIGIBLE_FOR_PICKUP_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.USER_INTERRUPTED,
 ]);
 
+/** Latest states that mean "ran to a definite error". Targeted by
+ * `jobfinder reset <stage> --failed`, which requeues these so the next
+ * pipeline run retries them. */
+export const FAILED_STATES: ReadonlySet<string> = new Set([
+  PIPELINE_STATE.FAILED,
+  PIPELINE_STATE.SCRIPT_ERROR,
+  PIPELINE_STATE.ABORTED,
+]);
+
+/** Latest states that mean "ran but produced nothing to act on" — the genuine
+ * no-result terminals. Targeted by `jobfinder reset <stage> --no-result`.
+ * Excludes `user_interrupted` (already in `ELIGIBLE_FOR_PICKUP_STATES`, so it
+ * is retried automatically without an explicit reset). */
+export const NO_RESULT_STATES: ReadonlySet<string> = new Set([
+  PIPELINE_STATE.NOT_A_JOB_POSTING,
+  PIPELINE_STATE.NO_SOURCE_FOUND,
+  PIPELINE_STATE.NO_LISTING_FOUND,
+  PIPELINE_STATE.NO_RESULT_FOUND,
+]);
+
 /**
  * Append a row to `PipelineState` recording that `task` touched `entity` and
  * left it in `state`. The latest row per (task, entity) — found via
@@ -241,6 +261,48 @@ export async function requeueAllInScope(
     terminal.log(`--all: nothing to requeue for ${task} (no in-scope rows).`);
   } else {
     terminal.log(`--all: requeued ${ids.length} in-scope rows for ${task}.`);
+  }
+
+  return ids.length;
+}
+
+/** Requeue every parent entity whose CURRENT (latest) pipeline state for
+ * `task` is one of `states` — i.e. insert a fresh 'queued' row so the next
+ * run for `task` re-picks it. Unlike `requeueAllInScope`, this keys off the
+ * `LatestPipelineState` view rather than the in-scope predicate, so it only
+ * touches rows that actually reached one of the given states. Backs
+ * `jobfinder reset <stage> --failed` and `--no-result`.
+ *
+ * Returns the number of entities requeued. */
+export async function requeueByLatestState(
+  task: RequeueableTask,
+  states: ReadonlySet<string>
+): Promise<number> {
+  const fk = FK_BY_TASK[task];
+  // `fk` is one of the four `of*Id` columns; TS can't narrow it through
+  // `FK_BY_TASK`, so cast to a single concrete column name for the query
+  // builder. Runtime SQL is unaffected — same cast pattern as
+  // `eligibleForPipelineTask`. The RETURNED rows keep `fk`'s real column
+  // name as their key, so we must read the value back by `fk`, not by the
+  // casted name.
+  const fkCol = fk as 'ofJobSourceId';
+  const rows = await db
+    .selectFrom('LatestPipelineState')
+    .select(fkCol)
+    .where('task', '=', task)
+    .where('state', 'in', [...states])
+    .where(fkCol, 'is not', null)
+    .execute();
+
+  const ids = rows
+    .map(r => (r as Record<string, string | null>)[fk])
+    .filter((id): id is string => id != null);
+
+  for (const id of ids) {
+    await enqueuePipelineTask({
+      task,
+      entity: { [fk]: id } as PipelineEntity,
+    });
   }
 
   return ids.length;

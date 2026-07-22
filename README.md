@@ -164,6 +164,27 @@ Requires:
 - A locally installed Chrome/Chromium.
 - All `LLM_*` models that the individual subcommands need (sourcing/listing/scripting/viewing/evaluate).
 
+## `reset`
+
+Requeue the tasks in one pipeline stage so the next run reprocesses them. `reset` writes fresh `queued` rows and does not process anything itself, so follow it with `jobfinder start-pipeline` (or the stage's own `--start`) to drain the queue. The stage argument is one of `sourcing`, `listing`, `scripting`, `run-scripts`, `viewing`, `evaluate` (`seeding` is excluded because it generates new seeds rather than re-picking existing rows).
+
+Pick exactly one selector:
+
+```bash
+# Requeue every in-scope entity for the stage, including ones already done
+# (equivalent to the stage's own --all). Use after a prompt or config change.
+jobfinder reset viewing --all
+
+# Requeue only entities whose latest state produced no result
+# (e.g. not_a_job_posting, no_source_found, no_listing_found, no_result_found).
+jobfinder reset viewing --no-result
+
+# Requeue only entities whose latest state is an error (failed, script_error, aborted).
+jobfinder reset run-scripts --failed
+```
+
+Unlike `--all`, the `--no-result` and `--failed` selectors key off each entity's current (latest) pipeline state, so they touch only the rows that actually reached one of those states.
+
 ## `export jobs`
 
 Dump fully-evaluated JobPost rows (status=`Done`) to a CSV file — i.e. posts in an active source tree, above the title-relevancy threshold, with viewing + evaluate already populated. Useful for ad-hoc analysis in a spreadsheet / pandas.
