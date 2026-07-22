@@ -9,6 +9,7 @@ import {
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
+  reapStaleStartedStates,
   recordPipelineState,
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
@@ -163,6 +164,7 @@ export async function runSourcing(
   context: BrowserContext,
   opts: SourcingOptions
 ): Promise<{ processed: number }> {
+  await reapStaleStartedStates('sourcing');
   const sources = await pickSourcingTargets(opts);
 
   if (sources.length === 0) {
