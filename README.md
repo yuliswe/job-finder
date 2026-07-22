@@ -24,41 +24,6 @@ If you are setting up the repo for the first time, following these steps:
 
 The CLI at `src/cli/bin/cli` wraps the `python-jobspy` library. Run via `npm run cli -- <args>` or directly with `./src/cli/bin/cli <args>`.
 
-## `scrape`
-
-Scrape jobs from one or more sites.
-
-```bash
-# Quickstart: 30 software-engineer jobs from Indeed in Waterloo
-./src/cli/bin/cli scrape -q "software engineer" -l "Waterloo, Ontario" -n 30 --country canada
-
-# Multi-site with recency filter, write CSV
-./src/cli/bin/cli scrape \
-  -s linkedin indeed glassdoor \
-  -q "AI engineer" \
-  --hours-old 72 \
-  --linkedin-fetch-description \
-  -f csv -o jobs.csv
-
-# Google search (requires the full natural-language query)
-./src/cli/bin/cli scrape \
-  -s google \
-  --google-search "AI engineer jobs near San Francisco posted yesterday"
-
-# Remote-only, internship
-./src/cli/bin/cli scrape -q "ML" --remote --job-type internship -n 50
-```
-
-See `./src/cli/bin/cli scrape --help` for the full flag list.
-
-## `sites`
-
-Print the supported sites and job types (useful as a reference for `--site` / `--job-type`).
-
-```bash
-./src/cli/bin/cli sites
-```
-
 ## `pipeline listing`
 
 For each unprocessed `JobSource`, open the company URL and BFS the same-domain links the LLM ranks most likely to lead to a careers/jobs page (capped at `PIPELINE_LISTING_BFS_MAX_DEPTH`). The first page the LLM classifies as a listing page is inserted as a new `JobListSource` row with an empty `parserScript` placeholder. `pipeline scripting` fills the script in later. The `JobSource` is always marked `isProcessed` after the attempt to avoid re-running BFS.

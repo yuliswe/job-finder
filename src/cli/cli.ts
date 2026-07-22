@@ -8,8 +8,6 @@ import { createHelpMenuDumpCommand } from 'src/cli/commands/help-menu-dump.js';
 import { createInitCommand } from 'src/cli/commands/init.js';
 import { createPipelineCommand } from 'src/cli/commands/pipeline.js';
 import { createStartPipelineCommand } from 'src/cli/commands/start-pipeline.js';
-import { createScrapeCommand } from 'src/cli/commands/scrape.js';
-import { createSitesCommand } from 'src/cli/commands/sites.js';
 import { createTrackCommand } from 'src/cli/commands/track.js';
 import { createTuiCommand } from 'src/cli/commands/tui.js';
 
@@ -23,8 +21,6 @@ program
   .version('1.0.0');
 
 program.addCommand(createInitCommand());
-program.addCommand(createScrapeCommand());
-program.addCommand(createSitesCommand());
 program.addCommand(createPipelineCommand());
 program.addCommand(createStartPipelineCommand());
 program.addCommand(createExportCommand());
