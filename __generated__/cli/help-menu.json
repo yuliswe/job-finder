@@ -306,11 +306,6 @@
           "default": "interest"
         },
         {
-          "flags": "--non-interactive",
-          "description": "print a one-shot plain-text snapshot of the dashboard (for agentic use) instead of opening the live view",
-          "default": false
-        },
-        {
           "flags": "--harness",
           "description": "open the live dashboard and also expose an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys) to the same instance",
           "default": false

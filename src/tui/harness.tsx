@@ -21,9 +21,9 @@ import { App, type AppOptions } from 'src/tui/App.js';
  *   GET  /screen  -> plain-text snapshot of the current frame
  *   POST /keys    -> inject keystrokes, then return the settled frame
  *
- * Unlike `captureApp` (one-shot snapshot), the App stays mounted for the
- * lifetime of the server, so its 1s SQLite polling keeps the frame live and
- * keystrokes flow into the same `useInput` handlers a human would trigger.
+ * The App stays mounted for the lifetime of the server, so its 1s SQLite
+ * polling keeps the frame live and keystrokes flow into the same `useInput`
+ * handlers a human would trigger.
  *
  * When invoked from a real terminal the streams *mirror* it: every frame Ink
  * draws is also written to the terminal (so a human watches the same TUI) and
