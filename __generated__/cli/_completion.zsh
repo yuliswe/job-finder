@@ -144,7 +144,9 @@ _jobfinder_tui() {
     '--tab[tab]:tab:(jobs sources)' \
     '--sort[sort]:sort:(all interest skill location excl. interest excl. location)' \
     '--sources-sort[sources-sort]:sources-sort:(interest posts name)' \
-    '--non-interactive[non-interactive]'
+    '--non-interactive[non-interactive]' \
+    '--harness[harness]' \
+    '--harness-port[harness-port]:harness-port:'
 }
 
 _jobfinder_help_menu_dump() {

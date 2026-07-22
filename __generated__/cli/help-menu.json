@@ -28,9 +28,7 @@
             "naukri",
             "bdjobs"
           ],
-          "default": [
-            "indeed"
-          ]
+          "default": ["indeed"]
         },
         {
           "flags": "-q, --search <term>",
@@ -105,10 +103,7 @@
           "flags": "--description-format <fmt>",
           "description": "Description format",
           "required": true,
-          "choices": [
-            "markdown",
-            "html"
-          ]
+          "choices": ["markdown", "html"]
         },
         {
           "flags": "--linkedin-fetch-description",
@@ -149,10 +144,7 @@
           "flags": "-f, --format <format>",
           "description": "Output format",
           "required": true,
-          "choices": [
-            "json",
-            "csv"
-          ],
+          "choices": ["json", "csv"],
           "default": "json"
         },
         {
@@ -405,10 +397,7 @@
           "flags": "--tab <tab>",
           "description": "initial tab",
           "required": true,
-          "choices": [
-            "jobs",
-            "sources"
-          ],
+          "choices": ["jobs", "sources"],
           "default": "jobs"
         },
         {
@@ -429,17 +418,23 @@
           "flags": "--sources-sort <key>",
           "description": "sort key for the Sources tab",
           "required": true,
-          "choices": [
-            "interest",
-            "posts",
-            "name"
-          ],
+          "choices": ["interest", "posts", "name"],
           "default": "interest"
         },
         {
           "flags": "--non-interactive",
           "description": "print a one-shot plain-text snapshot of the dashboard (for agentic use) instead of opening the live view",
           "default": false
+        },
+        {
+          "flags": "--harness",
+          "description": "run the dashboard headless behind an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys)",
+          "default": false
+        },
+        {
+          "flags": "--harness-port <port>",
+          "description": "port for the harness control server (default: an ephemeral free port)",
+          "required": true
         }
       ]
     },

@@ -228,9 +228,32 @@ jobfinder tui --tab sources --sources-sort posts
 # piping, or capturing the current state into a file
 jobfinder tui --non-interactive
 jobfinder tui --non-interactive --sort interest > dashboard.txt
+
+# Harness mode: run the dashboard headless behind an HTTP control server so an
+# agent can read the screen and drive it with keystrokes
+jobfinder tui --harness
+jobfinder tui --harness --harness-port 5599
 ```
 
 `--non-interactive` renders the dashboard once, waits for its queries to resolve, and prints a plain-text (ANSI-stripped) snapshot of the same view a human would see, then exits. It honours the same `--tab`, `--sort`, and `--sources-sort` flags as the live view.
+
+`--harness` keeps the dashboard mounted headless (no terminal) behind a small HTTP control server, printing the base URL to stderr on startup. Unlike the one-shot snapshot, the view stays live and interactive, so an agent can drive it exactly as a human would:
+
+- `GET /screen` returns a plain-text (ANSI-stripped) snapshot of the current frame.
+- `POST /keys` injects keystrokes and returns the resulting frame. The JSON body accepts `keys` (an array of key tokens) and/or `text` (a literal string typed one character at a time), plus an optional `settle` in milliseconds to wait for the re-render. Key tokens are either named keys (`up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `pageup`, `pagedown`, `home`, `end`, `backspace`, `delete`, `space`, `ctrl+c`) or literal characters (`q`, `s`, `o`, …). `GET /` lists the available key names.
+
+```bash
+# Read the current screen
+curl -s http://127.0.0.1:5599/screen
+
+# Move the cursor down twice and open the highlighted row
+curl -s http://127.0.0.1:5599/keys -d '{"keys":["down","down","enter"]}'
+
+# Switch to the Sources tab and cycle its sort
+curl -s http://127.0.0.1:5599/keys -d '{"keys":["tab","s"]}'
+```
+
+Sending `q` (or `escape` from the top-level view) quits the TUI, which shuts the server down and ends the process.
 
 ## `help-menu-dump`
 
