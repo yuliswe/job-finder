@@ -6,32 +6,6 @@ if ! (( $+functions[compdef] )); then
   autoload -Uz compinit && compinit
 fi
 
-_jobfinder_scrape() {
-  _arguments -s -S \
-    '(-s --site)'{-s,--site}'[site]:site:(linkedin indeed zip_recruiter glassdoor google bayt naukri bdjobs)' \
-    '(-q --search)'{-q,--search}'[search]:search:' \
-    '--google-search[google-search]:google-search:' \
-    '(-l --location)'{-l,--location}'[location]:location:' \
-    '(-d --distance)'{-d,--distance}'[distance]:distance:' \
-    '--remote[remote]' \
-    '--job-type[job-type]:job-type:(fulltime parttime contract temporary internship perdiem nights other summer volunteer)' \
-    '--easy-apply[easy-apply]' \
-    '(-n --results)'{-n,--results}'[results]:results:' \
-    '--country[country]:country:' \
-    '--proxy[proxy]:proxy:' \
-    '--ca-cert[ca-cert]:ca-cert:' \
-    '--description-format[description-format]:description-format:(markdown html)' \
-    '--linkedin-fetch-description[linkedin-fetch-description]' \
-    '--linkedin-company-id[linkedin-company-id]:linkedin-company-id:' \
-    '--offset[offset]:offset:' \
-    '--hours-old[hours-old]:hours-old:' \
-    '--enforce-annual-salary[enforce-annual-salary]' \
-    '--verbose[verbose]:verbose:' \
-    '--user-agent[user-agent]:user-agent:' \
-    '(-f --format)'{-f,--format}'[format]:format:(json csv)' \
-    '(-o --output)'{-o,--output}'[output]:output:'
-}
-
 _jobfinder_pipeline_sourcing() {
   _arguments -s -S \
     '--all[all]' \
@@ -160,15 +134,13 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init scrape sites pipeline start-pipeline export track tui completion help-menu-dump)' \
+    '1:subcommand:(init pipeline start-pipeline export track tui completion help-menu-dump)' \
     '*:: :->args'
 
   case $state in
     args)
       case $line[1] in
     init) _normal ;;
-    scrape) _jobfinder_scrape ;;
-    sites) _normal ;;
     pipeline) _jobfinder_pipeline ;;
     start-pipeline) _jobfinder_start_pipeline ;;
     export) _jobfinder_export ;;
