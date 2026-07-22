@@ -11,6 +11,7 @@ import {
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
+  reapStaleStartedStates,
   recordPipelineState,
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
@@ -154,6 +155,7 @@ export async function runViewing(
   context: BrowserContext,
   opts: ViewingOptions
 ): Promise<{ processed: number }> {
+  await reapStaleStartedStates('viewing');
   const targets = await pickViewingTargets(opts);
 
   if (targets.length === 0) {

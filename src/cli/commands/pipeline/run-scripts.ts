@@ -11,6 +11,7 @@ import {
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
+  reapStaleStartedStates,
   recordPipelineState,
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
@@ -173,6 +174,7 @@ export async function runRunScripts(
   context: BrowserContext,
   opts: RunScriptsOptions
 ): Promise<{ processed: number }> {
+  await reapStaleStartedStates('run-scripts');
   const targets = await pickRunScriptsTargets(opts);
 
   if (targets.length === 0) {

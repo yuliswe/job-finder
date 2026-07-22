@@ -11,6 +11,7 @@ import {
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
+  reapStaleStartedStates,
   recordPipelineState,
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
@@ -160,6 +161,7 @@ export async function runListing(
   context: BrowserContext,
   opts: ListingOptions
 ): Promise<{ processed: number }> {
+  await reapStaleStartedStates('listing');
   const sources = await pickListingTargets(opts);
 
   const results = await Promise.all(

@@ -9,6 +9,7 @@ import {
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
+  reapStaleStartedStates,
   recordPipelineState,
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
@@ -169,6 +170,7 @@ export async function queueEvaluate(
 export async function runEvaluate(
   opts: EvaluateOptions
 ): Promise<{ processed: number }> {
+  await reapStaleStartedStates('evaluate');
   const targets = await pickEvaluateTargets(opts);
 
   if (targets.length === 0) {

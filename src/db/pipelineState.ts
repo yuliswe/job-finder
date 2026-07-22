@@ -94,8 +94,12 @@ export const TERMINAL_NO_RESULT_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.USER_INTERRUPTED,
 ]);
 
-/** Latest states that mean "needs pickup" by the next pipeline run. Includes
- * `'started'` so a process that crashed mid-work is retried automatically. */
+/** Latest states that mean "needs pickup" by the next pipeline run. A crashed
+ * process leaves its in-flight rows in `'started'`, NOT here — those are not
+ * picked up directly (a live picker must never steal a row another process is
+ * actively working). Orphaned `'started'` rows are reconciled to `'queued'` at
+ * the start of the next run by `reapStaleStartedStates`, which then re-enters
+ * this set. */
 export const ELIGIBLE_FOR_PICKUP_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.QUEUED,
   PIPELINE_STATE.USER_INTERRUPTED,
@@ -161,6 +165,83 @@ export async function enqueuePipelineTask(args: {
     state: PIPELINE_STATE.QUEUED,
     entity: args.entity,
   });
+}
+
+/** Tasks whose stale `'started'` rows have already been reaped this process, so
+ * `reapStaleStartedStates` runs at most once per task per run. */
+const reapedTasks = new Set<PipelineTask>();
+
+/** Rebuild a `PipelineEntity` from the four nullable `of*Id` columns of a
+ * PipelineState / LatestPipelineState row. Exactly one is non-null; returns
+ * null only for a malformed row with none set. */
+function pipelineEntityFromColumns(row: {
+  ofSourceSeedId: string | null;
+  ofJobSourceId: string | null;
+  ofJobListSourceId: string | null;
+  ofJobPostId: string | null;
+}): PipelineEntity | null {
+  if (row.ofSourceSeedId != null) return { ofSourceSeedId: row.ofSourceSeedId };
+  if (row.ofJobSourceId != null) return { ofJobSourceId: row.ofJobSourceId };
+  if (row.ofJobListSourceId != null) {
+    return { ofJobListSourceId: row.ofJobListSourceId };
+  }
+
+  if (row.ofJobPostId != null) return { ofJobPostId: row.ofJobPostId };
+  return null;
+}
+
+/** Reconcile orphaned `'started'` rows for `task` — the in-flight rows a
+ * previous pipeline process left behind when it died without running its
+ * SIGINT/SIGTERM handler (a SIGKILL, a power loss, or a hard crash, none of
+ * which reach `flushInFlightAsInterrupted`). Only one pipeline process runs at
+ * a time, so any entity whose latest state for `task` is `'started'` at the
+ * moment a new run begins is by definition orphaned: no live process owns it.
+ * We append a fresh `'queued'` row for each so the picker retries it and the
+ * TUI stops drawing it as perpetually in-flight — the pipeline progress bar
+ * counts `'started'` as pending, so a single orphan pins its stage below 100%
+ * until the entity reaches a terminal state.
+ *
+ * Idempotent per process via `reapedTasks`. It MUST run before the run's first
+ * `processOne` for `task`, so that it can only ever touch rows a prior process
+ * left behind, never one this process is legitimately working. Returns the
+ * number of entities requeued. */
+export async function reapStaleStartedStates(
+  task: PipelineTask
+): Promise<number> {
+  if (reapedTasks.has(task)) return 0;
+  reapedTasks.add(task);
+
+  const orphans = await db
+    .selectFrom('LatestPipelineState')
+    .select([
+      'ofSourceSeedId',
+      'ofJobSourceId',
+      'ofJobListSourceId',
+      'ofJobPostId',
+    ])
+    .where('task', '=', task)
+    .where('state', '=', PIPELINE_STATE.STARTED)
+    .execute();
+
+  for (const orphan of orphans) {
+    const entity = pipelineEntityFromColumns(orphan);
+    if (entity == null) continue;
+
+    await recordPipelineState({
+      task,
+      state: PIPELINE_STATE.QUEUED,
+      reason: 'reaped: stale started row from a prior unclean exit',
+      entity,
+    });
+  }
+
+  if (orphans.length > 0) {
+    terminal.log(
+      `[${task}] reaped ${orphans.length} stale 'started' row(s) from a prior unclean exit; requeued for retry.`
+    );
+  }
+
+  return orphans.length;
 }
 
 /** Tasks that operate on a pre-existing parent entity and can therefore be
@@ -345,8 +426,10 @@ export async function isPipelineTaskDone(args: {
 
 /**
  * Where-predicate factory: rows of `P` whose latest `PipelineState` for `task`
- * is eligible for pickup (state in 'queued' or 'started'). `'started'` is
- * included so a process that crashed mid-work is retried on the next run.
+ * is eligible for pickup (state in 'queued' or 'user_interrupted'). Rows a
+ * crashed run left in 'started' are NOT matched here — `reapStaleStartedStates`
+ * requeues them to 'queued' at the start of the next run so they land in this
+ * set without a live picker ever stealing an actively-processing row.
  *
  * Example:
  *   db.selectFrom('JobSource').where(eligibleForPipelineTask({
