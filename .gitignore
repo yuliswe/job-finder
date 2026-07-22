@@ -6,6 +6,7 @@ node_modules/
 dist/
 build/
 .DS_Store
+.claude/worktrees/
 *.local
 *.local.*
 *.temp
