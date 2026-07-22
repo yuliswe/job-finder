@@ -1,6 +1,6 @@
 {
   "name": "jobfinder",
-  "description": "CLI for python-jobspy",
+  "description": "Job discovery and application-tracking pipeline that scrapes postings (via python-jobspy), seeds and sources companies, tracks applications, and exports results, with a TUI dashboard",
   "usage": "[options] [command]",
   "commands": [
     {
