@@ -197,18 +197,15 @@ jobfinder export jobs
 jobfinder export jobs ./shortlist.csv --sort 'excl. location'
 ```
 
-Sort keys mirror `jobfinder tui`'s `--sort`: `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
+The sort keys are `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
 
 ## `tui`
 
-Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB. Every flag is deep-link state, so you can jump straight to a specific view.
+Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB. The dashboard opens on the Jobs tab; switch tabs and re-sort from inside the TUI.
 
 ```bash
-# Live dashboard on the Jobs tab
+# Live dashboard
 jobfinder tui
-
-# Jump to the Sources tab, sorted by post count
-jobfinder tui --tab sources --sources-sort posts
 
 # Harness mode: open the live dashboard AND expose an HTTP control server, so an
 # agent (or you) can read the screen and drive it with keystrokes
