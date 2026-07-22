@@ -274,37 +274,9 @@
     },
     {
       "name": "tui",
-      "description": "Open the live dashboard. All flags are deep-link state — pass them to jump straight to a specific view.",
+      "description": "Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB.",
       "usage": "[options]",
       "options": [
-        {
-          "flags": "--tab <tab>",
-          "description": "initial tab",
-          "required": true,
-          "choices": ["jobs", "sources"],
-          "default": "jobs"
-        },
-        {
-          "flags": "--sort <key>",
-          "description": "sort key for the JobPost tab",
-          "required": true,
-          "choices": [
-            "all",
-            "interest",
-            "skill",
-            "location",
-            "excl. interest",
-            "excl. location"
-          ],
-          "default": "all"
-        },
-        {
-          "flags": "--sources-sort <key>",
-          "description": "sort key for the Sources tab",
-          "required": true,
-          "choices": ["interest", "posts", "name"],
-          "default": "interest"
-        },
         {
           "flags": "--harness",
           "description": "open the live dashboard and also expose an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys) to the same instance",

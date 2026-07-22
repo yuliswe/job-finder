@@ -11,7 +11,7 @@ import { render } from 'ink';
 import React from 'react';
 import stripAnsi from 'strip-ansi';
 
-import { App, type AppOptions } from 'src/tui/App.js';
+import { App } from 'src/tui/App.js';
 
 /**
  * A harness server that lets an agent drive the live TUI. The dashboard is
@@ -268,17 +268,14 @@ export type StartHarnessOptions = {
  * keystrokes are forwarded; otherwise the streams stay headless and only
  * injected keys drive the App.
  */
-export async function startHarnessServer(
-  appOptions: AppOptions,
-  {
-    host = '127.0.0.1',
-    port = 0,
-    columns,
-    rows,
-    onListening,
-    onQuit,
-  }: StartHarnessOptions = {}
-): Promise<HarnessServer> {
+export async function startHarnessServer({
+  host = '127.0.0.1',
+  port = 0,
+  columns,
+  rows,
+  onListening,
+  onQuit,
+}: StartHarnessOptions = {}): Promise<HarnessServer> {
   const realStdout = process.stdout.isTTY ? process.stdout : null;
   const realStdin = process.stdin.isTTY ? process.stdin : null;
   const cols = columns ?? process.stdout.columns ?? 120;
@@ -385,15 +382,12 @@ export async function startHarnessServer(
     resolveReady = resolve;
   });
 
-  const instance = render(
-    <App initial={appOptions} onReady={resolveReady} onExit={onExit} />,
-    {
-      stdout: stdout as unknown as NodeJS.WriteStream,
-      stdin: stdin as unknown as NodeJS.ReadStream,
-      exitOnCtrlC: false,
-      patchConsole: false,
-    }
-  );
+  const instance = render(<App onReady={resolveReady} onExit={onExit} />, {
+    stdout: stdout as unknown as NodeJS.WriteStream,
+    stdin: stdin as unknown as NodeJS.ReadStream,
+    exitOnCtrlC: false,
+    patchConsole: false,
+  });
 
   // Wait for the first fully-populated frame so an immediate /screen read is
   // meaningful, but don't hang if a query errors and onReady never fires.

@@ -18,24 +18,20 @@ import {
   type SourceSortKey,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
-import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import {
   ACTIVITY_ROWS,
   JOB_POST_SORTS,
   SOURCE_SORTS,
   TAB_LABELS,
-  type AppOptions,
   type AppTab,
 } from 'src/tui/utils/types.js';
 
-export type { AppOptions, AppTab };
+export type { AppTab };
 
 export function App({
-  initial,
   onReady,
   onExit,
 }: {
-  initial: AppOptions;
   /**
    * Fired once every primary data source has resolved. The harness server uses
    * this to know the dashboard is fully populated before it reads the first
@@ -50,18 +46,18 @@ export function App({
    * when driven by injected input. The live path leaves it undefined.
    */
   onExit?: () => void;
-}) {
+} = {}) {
   const { exit: inkExit } = useApp();
   const exit = useCallback(() => {
     onExit?.();
     inkExit();
   }, [onExit, inkExit]);
 
-  const [tab, setTab] = useState<AppTab>(initial.tab);
-  const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
-  const [sourcesSort, setSourcesSort] = useState<SourceSortKey>(
-    initial.sourcesSort
-  );
+  // The dashboard always opens on the Jobs tab with its default sorts; the
+  // user re-sorts and switches tabs from inside the TUI.
+  const [tab, setTab] = useState<AppTab>('jobs');
+  const [sort, setSort] = useState<JobPostSortKey>('all');
+  const [sourcesSort, setSourcesSort] = useState<SourceSortKey>('interest');
 
   // Scope filter for each tab. Both tabs share the same 'in' | 'all' | 'out'
   // shape (see ScopeFilter):
@@ -209,12 +205,6 @@ export function App({
           ] ?? 'interest';
 
         setSourcesSort(next);
-      }
-
-      if (input === 'y') {
-        copyToClipboard(
-          `jobfinder tui --tab ${tab} --sort ${sort} --sources-sort ${sourcesSort}`
-        );
       }
 
       if (input === 'o' || input === 'O') {
