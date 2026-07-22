@@ -229,18 +229,18 @@ jobfinder tui --tab sources --sources-sort posts
 jobfinder tui --non-interactive
 jobfinder tui --non-interactive --sort interest > dashboard.txt
 
-# Harness mode: run the dashboard headless behind an HTTP control server so an
-# agent can read the screen and drive it with keystrokes
+# Harness mode: open the live dashboard AND expose an HTTP control server, so an
+# agent (or you) can read the screen and drive it with keystrokes
 jobfinder tui --harness
 jobfinder tui --harness --harness-port 5599
 ```
 
 `--non-interactive` renders the dashboard once, waits for its queries to resolve, and prints a plain-text (ANSI-stripped) snapshot of the same view a human would see, then exits. It honours the same `--tab`, `--sort`, and `--sources-sort` flags as the live view.
 
-`--harness` keeps the dashboard mounted headless (no terminal) behind a small HTTP control server, printing the base URL to stderr on startup. Unlike the one-shot snapshot, the view stays live and interactive, so an agent can drive it exactly as a human would:
+`--harness` opens the normal live dashboard in your terminal **and** attaches a small HTTP control server (its base URL is printed to stderr on startup) so an agent can observe and drive the very same instance you are watching. Your keyboard and injected keystrokes both flow into it, and every change is reflected on your screen and readable over HTTP. (If stdout is not a terminal — piped output, CI, a pure headless agent — it runs the same server without drawing anything.)
 
 - `GET /screen` returns a plain-text (ANSI-stripped) snapshot of the current frame.
-- `POST /keys` injects keystrokes and returns the resulting frame. The JSON body accepts `keys` (an array of key tokens) and/or `text` (a literal string typed one character at a time), plus an optional `settle` in milliseconds to wait for the re-render. Key tokens are either named keys (`up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `pageup`, `pagedown`, `home`, `end`, `backspace`, `delete`, `space`, `ctrl+c`) or literal characters (`q`, `s`, `o`, …). `GET /` lists the available key names.
+- `POST /keys` injects keystrokes and returns the resulting frame. The JSON body accepts `keys` (an array of key tokens) and/or `text` (a literal string typed one character at a time), plus an optional `settle` in milliseconds to wait for the re-render. Keys in one request are applied in sequence, with a re-render between each, so a batch behaves like real successive presses. Key tokens are either named keys (`up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `pageup`, `pagedown`, `home`, `end`, `backspace`, `delete`, `space`, `ctrl+c`) or literal characters (`q`, `s`, `o`, …). `GET /` lists the available key names.
 
 ```bash
 # Read the current screen

@@ -5,6 +5,7 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { AddressInfo } from 'node:net';
+import { Writable } from 'node:stream';
 
 import { render } from 'ink';
 import React from 'react';
@@ -13,10 +14,9 @@ import stripAnsi from 'strip-ansi';
 import { App, type AppOptions } from 'src/tui/App.js';
 
 /**
- * A harness server that lets an agent drive the live TUI without a real
- * terminal. The dashboard is rendered into an in-memory stdout (whose latest
- * frame is readable at any moment) and an injectable stdin (into which
- * keystrokes are fed). A small HTTP server exposes two capabilities:
+ * A harness server that lets an agent drive the live TUI. The dashboard is
+ * rendered against instrumented streams and a small HTTP server exposes two
+ * capabilities:
  *
  *   GET  /screen  -> plain-text snapshot of the current frame
  *   POST /keys    -> inject keystrokes, then return the settled frame
@@ -24,32 +24,70 @@ import { App, type AppOptions } from 'src/tui/App.js';
  * Unlike `captureApp` (one-shot snapshot), the App stays mounted for the
  * lifetime of the server, so its 1s SQLite polling keeps the frame live and
  * keystrokes flow into the same `useInput` handlers a human would trigger.
+ *
+ * When invoked from a real terminal the streams *mirror* it: every frame Ink
+ * draws is also written to the terminal (so a human watches the same TUI) and
+ * the human's own keystrokes are forwarded alongside injected ones. When
+ * stdout is not a TTY (piped, or a pure headless agent) the streams stay fully
+ * in-memory and nothing is drawn.
  */
-
-const noop = (): void => {
-  // Intentionally inert.
-};
 
 /**
- * Fake stdout that records every frame Ink writes. Ink writes the full frame on
- * each render (standard, non-incremental mode); we keep the latest one and
- * strip ANSI to recover the plain-text screen on demand.
+ * Stdout that records the latest frame Ink writes and, when a real terminal is
+ * attached, mirrors every frame to it. Ink writes the full frame on each render
+ * (standard, non-incremental mode), so the last write is always the whole
+ * screen; we strip ANSI to recover its plain text on demand.
  */
-class HarnessStdout extends EventEmitter {
-  readonly columns: number;
-  readonly rows: number;
+class HarnessStdout extends Writable {
   lastFrame = '';
+  readonly #real: NodeJS.WriteStream | null;
+  readonly #columns: number;
+  readonly #rows: number;
 
-  constructor(columns: number, rows: number) {
-    super();
-    this.columns = columns;
-    this.rows = rows;
+  constructor(real: NodeJS.WriteStream | null, columns: number, rows: number) {
+    // A real Writable is used (rather than a bare fake) so Ink's teardown path
+    // works natively: on unmount Ink resolves `waitUntilExit` from the
+    // `write(chunk, callback)` completion callback, which a genuine Writable
+    // delivers and a hand-rolled object does not.
+    super({ decodeStrings: false });
+    this.#real = real;
+    this.#columns = columns;
+    this.#rows = rows;
+    // Ink listens for 'resize' on the stdout stream to re-layout; forward the
+    // real terminal's resize events through this proxy.
+    real?.on('resize', () => this.emit('resize'));
   }
 
-  write = (frame: string): boolean => {
-    this.lastFrame = frame;
-    return true;
-  };
+  get columns(): number {
+    return this.#real?.columns ?? this.#columns;
+  }
+
+  get rows(): number {
+    return this.#real?.rows ?? this.#rows;
+  }
+
+  // Undefined (falsy) in headless mode, so Ink writes plain full frames; true
+  // when mirroring a terminal, so Ink drives it exactly like the live TUI.
+  get isTTY(): boolean | undefined {
+    return this.#real?.isTTY;
+  }
+
+  override _write(
+    chunk: string | Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void
+  ): void {
+    const frame = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    // Ink's final barrier write is an empty string; ignore it so it doesn't
+    // blank out the captured frame.
+    if (frame) this.lastFrame = frame;
+    if (this.#real) {
+      this.#real.write(frame, callback);
+      return;
+    }
+
+    callback();
+  }
 
   /** Current screen as plain text, with trailing blank lines collapsed. */
   screen(): string {
@@ -58,22 +96,67 @@ class HarnessStdout extends EventEmitter {
 }
 
 /**
- * Fake stdin that reports raw-mode support so `useInput` mounts, and lets the
- * server push keystrokes. Ink listens for the `readable` event and drains via
- * `read()` (see ink/build/components/App.js), so `push` queues a chunk and
- * emits `readable`; `read` returns the queued chunks and null when empty.
+ * Stdin that lets the server push keystrokes and, when a real terminal is
+ * attached, forwards the human's keystrokes too. Ink listens for the `readable`
+ * event and drains via `read()` (see ink/build/components/App.js), so both
+ * `push` and the forwarded terminal data queue a chunk and emit `readable`;
+ * `read` returns the queued chunks and null when empty.
+ *
+ * With no real stdin the proxy still reports `isTTY` so `useInput` mounts and
+ * raw-mode toggles are no-ops — the App renders and only injected keys drive it.
  */
 class HarnessStdin extends EventEmitter {
-  readonly isTTY = true;
+  readonly isTTY: boolean = true;
+  readonly #real: NodeJS.ReadStream | null;
   #queue: string[] = [];
 
-  write = () => true;
-  setEncoding = noop;
-  setRawMode = noop;
-  resume = noop;
-  pause = noop;
-  ref = noop;
-  unref = noop;
+  constructor(real: NodeJS.ReadStream | null) {
+    super();
+    this.#real = real;
+    if (real?.isTTY != null) this.isTTY = real.isTTY;
+  }
+
+  #onRealData = (chunk: string): void => {
+    this.#queue.push(chunk);
+    this.emit('readable');
+  };
+
+  write = (): boolean => true;
+
+  setEncoding = (encoding: BufferEncoding): void => {
+    this.#real?.setEncoding(encoding);
+  };
+
+  // Ink enables raw mode when a component uses input and disables it on
+  // unmount. Mirror that onto the real terminal, and only start forwarding the
+  // human's keystrokes once raw mode is on (so cooked line-buffered input never
+  // leaks through and echoes over the TUI).
+  setRawMode = (enabled: boolean): void => {
+    if (!this.#real) return;
+    if (this.#real.isTTY) this.#real.setRawMode(enabled);
+    if (enabled) {
+      this.#real.on('data', this.#onRealData);
+      this.#real.resume();
+    } else {
+      this.#real.off('data', this.#onRealData);
+    }
+  };
+
+  resume = (): void => {
+    this.#real?.resume();
+  };
+
+  pause = (): void => {
+    this.#real?.pause();
+  };
+
+  ref = (): void => {
+    this.#real?.ref();
+  };
+
+  unref = (): void => {
+    this.#real?.unref();
+  };
 
   read = (): string | null => this.#queue.shift() ?? null;
 
@@ -158,49 +241,126 @@ export type StartHarnessOptions = {
   port?: number;
   columns?: number;
   rows?: number;
+  /**
+   * Called once the server is listening, before the TUI is rendered. Use it to
+   * print the base URL: in a terminal the TUI takes over the screen right after
+   * this, so anything printed later would corrupt the display.
+   */
+  onListening?: (url: string) => void;
+  /**
+   * Called synchronously during teardown, after the server is closed and the
+   * quit response has flushed. The CLI wires this to `process.exit(0)`: exiting
+   * here is reliable, whereas awaiting `waitUntilExit()` and then exiting is
+   * not, because the promise continuation can be starved by the event-loop
+   * stall Ink leaves behind after processing injected input with no further I/O.
+   */
+  onQuit?: () => void;
 };
 
 /**
- * Mount the dashboard against in-memory streams and start the HTTP control
- * server. Resolves once the server is listening and the first frame has
- * populated (or `READY_TIMEOUT_MS` elapses).
+ * Mount the dashboard, start the HTTP control server, and resolve once it is
+ * listening and the first frame has populated (or `READY_TIMEOUT_MS` elapses).
+ *
+ * When stdout is a real terminal the TUI is mirrored to it and the human's
+ * keystrokes are forwarded; otherwise the streams stay headless and only
+ * injected keys drive the App.
  */
 export async function startHarnessServer(
   appOptions: AppOptions,
-  { host = '127.0.0.1', port = 0, columns, rows }: StartHarnessOptions = {}
+  {
+    host = '127.0.0.1',
+    port = 0,
+    columns,
+    rows,
+    onListening,
+    onQuit,
+  }: StartHarnessOptions = {}
 ): Promise<HarnessServer> {
+  const realStdout = process.stdout.isTTY ? process.stdout : null;
+  const realStdin = process.stdin.isTTY ? process.stdin : null;
   const cols = columns ?? process.stdout.columns ?? 120;
   const lines = rows ?? process.stdout.rows ?? 40;
-  const stdout = new HarnessStdout(cols, lines);
-  const stdin = new HarnessStdin();
+  const stdout = new HarnessStdout(realStdout, cols, lines);
+  const stdin = new HarnessStdin(realStdin);
 
-  let resolveReady!: () => void;
-  const ready = new Promise<void>(resolve => {
-    resolveReady = resolve;
+  // `userQuit` is set the instant the App quits (q/Esc); `injecting` is true
+  // while a key batch is being applied. Together they let teardown wait until
+  // the quit request's own HTTP response has flushed (see the /keys handler and
+  // `onExit` below).
+  let userQuit = false;
+  let injecting = false;
+
+  let resolveExited!: () => void;
+  const exited = new Promise<void>(resolve => {
+    resolveExited = resolve;
   });
 
-  const instance = render(<App initial={appOptions} onReady={resolveReady} />, {
-    stdout: stdout as unknown as NodeJS.WriteStream,
-    stdin: stdin as unknown as NodeJS.ReadStream,
-    exitOnCtrlC: false,
-    patchConsole: false,
-  });
+  let tornDown = false;
+  // Teardown is synchronous and driven by an I/O completion (the flushed HTTP
+  // response, or a keystroke), never a wall-clock timer: after the App unmounts
+  // it clears its polling interval, and a fresh `setTimeout` registered then can
+  // fire seconds late because the event loop is parked in the poll phase.
+  // `closeAllConnections` forces every socket shut so `server.close` can't hang.
+  const teardown = (): void => {
+    if (tornDown) return;
+    tornDown = true;
+    server.closeAllConnections();
+    server.close();
+    // Resolve for programmatic callers, then hand control to onQuit (the CLI's
+    // synchronous `process.exit(0)`). onQuit runs before `instance.unmount()`
+    // because Ink's unmount schedules async exit work that can stall the event
+    // loop against our injected streams; a synchronous exit here sidesteps it.
+    resolveExited();
+    onQuit?.();
+    instance.unmount();
+  };
 
+  const injectKeys = async (request: HarnessKeysRequest): Promise<string> => {
+    injecting = true;
+    try {
+      const settle = request.settle ?? DEFAULT_SETTLE_MS;
+      const chars = request.text ? [...request.text] : [];
+      const bytes = [...(request.keys ?? []).map(tokenToBytes), ...chars];
+      // Deliver keys one at a time, pausing for a re-render between each, so a
+      // batch behaves like a real sequence of presses. Pushing them all at once
+      // would let every handler read the same pre-render state (e.g. two
+      // "right"s would both switch away from the starting tab).
+      for (const chunk of bytes) {
+        stdin.push(chunk);
+        await delay(settle);
+      }
+
+      if (bytes.length === 0) await delay(settle);
+      return stdout.screen();
+    } finally {
+      injecting = false;
+    }
+  };
+
+  // Public API: apply keys and, if they quit the TUI, tear down afterwards
+  // (a programmatic caller has already received the returned frame by then).
   const sendKeys = async (request: HarnessKeysRequest): Promise<string> => {
-    for (const token of request.keys ?? []) {
-      stdin.push(tokenToBytes(token));
-    }
+    const screen = await injectKeys(request);
+    if (userQuit) teardown();
+    return screen;
+  };
 
-    for (const char of request.text ?? '') {
-      stdin.push(char);
-    }
-
-    await delay(request.settle ?? DEFAULT_SETTLE_MS);
-    return stdout.screen();
+  // Fired synchronously by the App when the user quits. If a key batch is being
+  // injected, defer teardown to whoever is applying it (the /keys handler flushes
+  // its response first); otherwise the quit came from the terminal keyboard, so
+  // tear down now.
+  const onExit = (): void => {
+    userQuit = true;
+    if (!injecting) teardown();
   };
 
   const server = createServer((req, res) => {
-    handleRequest(req, res, stdout, sendKeys).catch(err => {
+    handleRequest(req, res, {
+      stdout,
+      injectKeys,
+      finalize: teardown,
+      isQuitPending: () => userQuit,
+    }).catch(err => {
       sendJson(res, 500, { error: String(err) });
     });
   });
@@ -214,21 +374,28 @@ export async function startHarnessServer(
   const boundPort = address.port;
   const url = `http://${host}:${boundPort}`;
 
+  // Announce the URL before Ink claims the terminal — see onListening's doc.
+  onListening?.(url);
+
+  let resolveReady!: () => void;
+  const ready = new Promise<void>(resolve => {
+    resolveReady = resolve;
+  });
+
+  const instance = render(
+    <App initial={appOptions} onReady={resolveReady} onExit={onExit} />,
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      exitOnCtrlC: false,
+      patchConsole: false,
+    }
+  );
+
   // Wait for the first fully-populated frame so an immediate /screen read is
   // meaningful, but don't hang if a query errors and onReady never fires.
   await Promise.race([ready, delay(READY_TIMEOUT_MS)]);
   await delay(50);
-
-  let closed = false;
-  const close = async (): Promise<void> => {
-    if (closed) return;
-    closed = true;
-    await new Promise<void>(resolve => server.close(() => resolve()));
-    instance.unmount();
-  };
-
-  // When the user quits from inside the TUI, tear the server down too.
-  const exited = instance.waitUntilExit().then(close);
 
   return {
     url,
@@ -236,15 +403,21 @@ export async function startHarnessServer(
     screen: () => stdout.screen(),
     sendKeys,
     waitUntilExit: () => exited,
-    close,
+    close: async () => teardown(),
   };
 }
+
+type RequestContext = {
+  stdout: HarnessStdout;
+  injectKeys: (request: HarnessKeysRequest) => Promise<string>;
+  isQuitPending: () => boolean;
+  finalize: () => void;
+};
 
 async function handleRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  stdout: HarnessStdout,
-  sendKeys: (request: HarnessKeysRequest) => Promise<string>
+  ctx: RequestContext
 ): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname;
@@ -263,7 +436,7 @@ async function handleRequest(
 
   if (req.method === 'GET' && path === '/screen') {
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end(stdout.screen());
+    res.end(ctx.stdout.screen());
     return;
   }
 
@@ -279,9 +452,11 @@ async function handleRequest(
       return;
     }
 
-    const screen = await sendKeys(request);
+    const screen = await ctx.injectKeys(request);
     res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
-    res.end(screen);
+    // If those keys quit the TUI, tear the server down only after this response
+    // has flushed, so the caller still receives the final frame.
+    res.end(screen, ctx.isQuitPending() ? ctx.finalize : undefined);
     return;
   }
 

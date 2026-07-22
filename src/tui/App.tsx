@@ -33,6 +33,7 @@ export type { AppOptions, AppTab };
 export function App({
   initial,
   onReady,
+  onExit,
 }: {
   initial: AppOptions;
   /**
@@ -41,8 +42,21 @@ export function App({
    * before it reads the frame; the live path leaves it undefined.
    */
   onReady?: () => void;
+  /**
+   * Fired synchronously, in the same key handler, whenever the user quits the
+   * whole TUI (q, or Esc from the top-level view). The harness server uses this
+   * as a reliable teardown signal, because Ink's own unmount (and therefore
+   * `waitUntilExit`) is scheduled asynchronously and can be delayed for seconds
+   * when driven by injected input. The live path leaves it undefined.
+   */
+  onExit?: () => void;
 }) {
-  const { exit } = useApp();
+  const { exit: inkExit } = useApp();
+  const exit = useCallback(() => {
+    onExit?.();
+    inkExit();
+  }, [onExit, inkExit]);
+
   const [tab, setTab] = useState<AppTab>(initial.tab);
   const [sort, setSort] = useState<JobPostSortKey>(initial.sort);
   const [sourcesSort, setSourcesSort] = useState<SourceSortKey>(

@@ -428,7 +428,7 @@
         },
         {
           "flags": "--harness",
-          "description": "run the dashboard headless behind an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys)",
+          "description": "open the live dashboard and also expose an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys) to the same instance",
           "default": false
         },
         {

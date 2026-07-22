@@ -48,7 +48,7 @@ export function createTuiCommand(): Command {
     .addOption(
       new Option(
         '--harness',
-        'run the dashboard headless behind an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys)'
+        'open the live dashboard and also expose an HTTP control server so an agent can read the screen (GET /screen) and send keystrokes (POST /keys) to the same instance'
       ).default(false)
     )
     .addOption(
@@ -91,19 +91,27 @@ export function createTuiCommand(): Command {
         }
 
         if (opts.harness) {
-          // Mount the dashboard headless behind an HTTP control server and
-          // keep the process alive until an agent quits the TUI (q/Esc) or
-          // the process is signalled.
+          // Mount the dashboard behind an HTTP control server and keep the
+          // process alive until the TUI is quit (q/Esc) or the process is
+          // signalled. In a real terminal the TUI is mirrored to the screen
+          // and the human's keys are forwarded alongside injected ones; when
+          // stdout is piped it runs headless for a pure agent.
           const { startHarnessServer } = await import('src/tui/harness.js');
           const server = await startHarnessServer(initial, {
             port: opts.harnessPort,
+            // Printed before Ink claims the terminal, so it sits above the TUI
+            // rather than corrupting it.
+            onListening: url => {
+              process.stderr.write(
+                `jobfinder tui harness listening on ${url}\n` +
+                  `  GET  ${url}/screen   read the current screen\n` +
+                  `  POST ${url}/keys     send keystrokes { keys?: string[], text?: string }\n`
+              );
+            },
+            // Exit the process the moment the TUI quits. See onQuit's doc for
+            // why this is done synchronously rather than after waitUntilExit.
+            onQuit: () => process.exit(0),
           });
-
-          process.stderr.write(
-            `jobfinder tui harness listening on ${server.url}\n` +
-              `  GET  ${server.url}/screen   read the current screen\n` +
-              `  POST ${server.url}/keys     send keystrokes { keys?: string[], text?: string }\n`
-          );
 
           const shutdown = (): void => {
             void server.close().then(() => process.exit(0));
@@ -113,7 +121,7 @@ export function createTuiCommand(): Command {
           process.once('SIGTERM', shutdown);
 
           await server.waitUntilExit();
-          return;
+          process.exit(0);
         }
 
         // Lazy-load Ink so spinning up the CLI for unrelated commands stays fast.
