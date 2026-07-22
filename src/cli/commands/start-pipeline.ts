@@ -1,6 +1,7 @@
 import { Command, Option } from 'commander';
 import type { BrowserContext } from 'patchright';
 
+import { acquirePipelineLock } from 'src/cli/commands/pipeline/pipelineLock.js';
 import { runEvaluate } from 'src/cli/commands/pipeline/evaluate.js';
 import { runListing } from 'src/cli/commands/pipeline/listing.js';
 import { runRunScripts } from 'src/cli/commands/pipeline/run-scripts.js';
@@ -60,6 +61,7 @@ type Orchestrator = {
 
 type StartPipelineOptions = {
   includeFailed?: boolean;
+  force?: boolean;
 };
 
 export function createStartPipelineCommand(): Command {
@@ -73,10 +75,41 @@ export function createStartPipelineCommand(): Command {
         'Pass --include-failed to each task on its FIRST iteration only — same picker semantics as `jobfinder pipeline <task> --include-failed`, applied once at the start so failed / aborted / no_result rows get retried. Subsequent iterations of each loop run in default queued-only mode so a fresh failure during the run is not retried forever.'
       )
     )
+    .addOption(
+      new Option(
+        '--force',
+        'Start even if another instance holds this database’s pipeline lock. Only for when you are certain the recorded holder is dead — two live runs double-process every row and make the stale-started reap requeue each other’s in-flight work.'
+      )
+    )
     .action(runAllLoops);
 }
 
 async function runAllLoops(opts: StartPipelineOptions): Promise<void> {
+  // Refuse to run a second instance against the same database: concurrent
+  // pickers double-process every queued row, and each run's startup reap would
+  // requeue the other's legitimately in-flight `started` rows as if they were
+  // crash orphans. --force overrides when the recorded holder is known dead.
+  const lock = acquirePipelineLock(undefined, { force: opts.force });
+  if (!lock.acquired) {
+    terminal.error(
+      `start-pipeline is already running against this database (pid ${lock.holderPid}). Stop it first, or pass --force if you are certain that process is dead.`
+    );
+
+    // `cli.ts` finishes with an unconditional `process.exit(0)`, so setting
+    // `process.exitCode` here would be overwritten; exit non-zero directly so
+    // callers and scripts can detect the refusal. Nothing to release — we
+    // never acquired the lock.
+    process.exit(1);
+  }
+
+  try {
+    await runAllLoopsLocked(opts);
+  } finally {
+    lock.release();
+  }
+}
+
+async function runAllLoopsLocked(opts: StartPipelineOptions): Promise<void> {
   // `running: true` at init is a "not yet completed first iteration" sentinel.
   // Without it, a fast no-browser task (evaluate) can finish its first
   // iteration before the browser-using tasks have even returned from

@@ -190,9 +190,15 @@ jobfinder start-pipeline
 # run in default queued-only mode so a transient failure inside the
 # run is not retried forever.
 jobfinder start-pipeline --include-failed
+
+# Override the single-instance lock (below). Only when you are certain the
+# recorded holder process is actually dead.
+jobfinder start-pipeline --force
 ```
 
 Each browser-using task (sourcing, listing, scripting, run-scripts, viewing) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them with `--include-failed` on a fresh `start-pipeline`, or with the relevant subcommand and `--include-failed` / `--all`.
+
+Only one `start-pipeline` may run per database at a time. On startup it takes an exclusive lock at `<db-path>.pipeline.lock`; a second instance against the same database refuses to start and exits non-zero, because concurrent runs would double-process every queued row and each run's stale-`started` reap would requeue the other's legitimately in-flight rows as if they were crash orphans. The lock records the holder's PID and is released on normal exit and on Ctrl+C / `SIGTERM`. A run killed with `SIGKILL` (or a power loss) leaves the file behind, but the next start detects the dead PID and reclaims it automatically, so a stale lock never needs manual cleanup; `--force` is only for the rare case where you want to override a lock whose holder you have already confirmed is dead. Two pipelines pointed at _different_ databases run independently and never block each other.
 
 Requires:
 
