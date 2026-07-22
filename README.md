@@ -272,13 +272,13 @@ Dump the full command tree (commands, subcommands, options, choices, defaults) a
 ./src/cli/bin/cli help-menu-dump --no-pretty
 ```
 
-## `completion-script-dump`
+## `completion`
 
 Generate the Zsh completion script and write it to `__generated__/cli/_completion.zsh`.
 
 ```bash
 # One-off for current shell
-source <(./src/cli/bin/cli completion-script-dump)
+source <(./src/cli/bin/cli completion)
 
 # Persistent — add to ~/.zshrc
 echo 'source ~/lab/job-finder/__generated__/cli/_completion.zsh' >> ~/.zshrc
