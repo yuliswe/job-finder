@@ -579,9 +579,21 @@ export async function toggleJobPostTag(
   bumpLocalRevision();
 }
 
-/** Single-line pipeline status for a JobPost, derived from the same fields
- * the rest of JobPostRow exposes. Checked in priority order — out-of-scope
- * verdicts shadow any "Waiting for…" interpretation. */
+/** Formats a status cell as `<state>: <stage>`, with an optional trailing
+ * `(reason)` when the state needs qualifying (out-of-scope cause, abort
+ * message). Both the JobPost and Source status columns render through this
+ * so the two tabs read the same way. */
+function fmtStatus(
+  state: string,
+  stage: PipelineTask,
+  reason?: string
+): string {
+  return reason ? `${state}: ${stage} (${reason})` : `${state}: ${stage}`;
+}
+
+/** Single-line pipeline status for a JobPost, rendered as `<state>: <stage>`.
+ * Derived from the same fields the rest of JobPostRow exposes and checked in
+ * priority order — out-of-scope verdicts shadow any queued interpretation. */
 function computeJobPostStatus(args: {
   inActiveTree: boolean;
   titleRelavency: number | null;
@@ -597,12 +609,12 @@ function computeJobPostStatus(args: {
     interestScore,
   } = args;
 
-  if (!inActiveTree) return 'Out of scope: deactivated';
+  if (!inActiveTree) return fmtStatus('Out-of-scope', 'viewing', 'deactivated');
   if (
     titleRelavency != null &&
     titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
   ) {
-    return 'Out of scope: low relevancy';
+    return fmtStatus('Out-of-scope', 'viewing', 'low relevancy');
   }
 
   // Location is scored at viewing time, so this only fires once the post has
@@ -611,12 +623,12 @@ function computeJobPostStatus(args: {
     locationRelevancy != null &&
     locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
   ) {
-    return 'Out of scope: location mismatch';
+    return fmtStatus('Out-of-scope', 'evaluate', 'location mismatch');
   }
 
-  if (!description) return 'Waiting for viewing';
-  if (interestScore == null) return 'Waiting for evaluate';
-  return 'Done';
+  if (!description) return fmtStatus('Queued', 'viewing');
+  if (interestScore == null) return fmtStatus('Queued', 'evaluate');
+  return fmtStatus('Done', 'evaluate');
 }
 
 /** The DB stores `postedAtSource` as plain text, but we constrain it to the
@@ -825,10 +837,10 @@ export async function listSources(args: {
   });
 }
 
-/** Single-line pipeline status for a source, derived from the same fields
- * the rest of SourceRow exposes. Checked in priority order — earlier states
- * (still pre-sourcing) shadow later ones, and out-of-scope verdicts shadow
- * any "Waiting for…" interpretation. */
+/** Single-line pipeline status for a source, rendered as `<state>: <stage>`.
+ * Derived from the same fields the rest of SourceRow exposes and checked in
+ * priority order — earlier states (still pre-sourcing) shadow later ones, and
+ * out-of-scope verdicts shadow any queued interpretation. */
 function computeSourceStatus(args: {
   score: number | null;
   sourceIsActive: number;
@@ -846,22 +858,28 @@ function computeSourceStatus(args: {
     abortListingReason,
   } = args;
 
-  if (score == null) return 'Waiting for sourcing';
-  if (sourceIsActive !== 1) return 'Out of scope: deactivated';
+  if (score == null) return fmtStatus('Queued', 'sourcing');
+  if (sourceIsActive !== 1) {
+    return fmtStatus('Out-of-scope', 'listing', 'deactivated');
+  }
+
   if (score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
-    return 'Out of scope: low interest';
+    return fmtStatus('Out-of-scope', 'listing', 'low interest');
   }
 
   if (listId == null) {
     // BFS already gave up — surface the LLM's reason instead of the bland
-    // "Waiting for listing" so the user knows it won't auto-retry.
-    if (abortListingReason) return `Listing aborted: ${abortListingReason}`;
-    return 'Waiting for listing';
+    // "Queued: listing" so the user knows it won't auto-retry.
+    if (abortListingReason) {
+      return fmtStatus('Aborted', 'listing', abortListingReason);
+    }
+
+    return fmtStatus('Queued', 'listing');
   }
 
-  if (hasScript === 0) return 'Waiting for scripting';
-  if (jobPostCount === 0) return 'Waiting for jobs';
-  return 'Done';
+  if (hasScript === 0) return fmtStatus('Queued', 'scripting');
+  if (jobPostCount === 0) return fmtStatus('Queued', 'run-scripts');
+  return fmtStatus('Done', 'run-scripts');
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
