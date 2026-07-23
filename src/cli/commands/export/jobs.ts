@@ -81,17 +81,17 @@ async function runExportJobs(args: {
   }
 
   const allRows = await listJobPosts({ sort: args.opts.sort, scope: 'in' });
-  // Only fully-processed posts: status === 'Done' means in active tree,
-  // titleRelavency cleared, viewing populated description, and evaluate
-  // produced an interestScore. Anything earlier in the pipeline gets
-  // omitted so the CSV is meant for downstream analysis, not progress
-  // tracking (the TUI is for that).
-  const rows = allRows.filter(r => r.status === 'Done');
+  // Only fully-processed posts: a `Done: <stage>` status means in active
+  // tree, titleRelavency cleared, viewing populated description, and evaluate
+  // produced an interestScore. Anything earlier in the pipeline reports a
+  // `Queued:`/`Out-of-scope:` status and gets omitted, so the CSV is meant
+  // for downstream analysis, not progress tracking (the TUI is for that).
+  const rows = allRows.filter(r => r.status.startsWith('Done:'));
   const csv = toCsv(rows, CSV_COLS);
   await writeFile(absolutePath, csv);
 
   terminal.log(
-    `Wrote ${rows.length} of ${allRows.length} in-scope JobPost row(s) to ${absolutePath} (status='Done' only)`
+    `Wrote ${rows.length} of ${allRows.length} in-scope JobPost row(s) to ${absolutePath} (Done only)`
   );
 }
 
