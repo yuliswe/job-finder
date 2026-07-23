@@ -19,7 +19,7 @@ const COLS: Column<SourceRow>[] = [
     min: 20,
     priority: 3,
   },
-  { label: 'status', value: r => r.status, min: 12, max: 28 },
+  { label: 'status', value: r => r.status, min: 14, max: 38 },
 ];
 
 export function SourceList(props: {
