@@ -106,6 +106,10 @@ export type JobPostRow = {
    * this to dim out-of-scope rows when they're surfaced via the 'all' or
    * 'out' scope filter. */
   isOutOfScopeForViewing: boolean;
+  /** Human-readable cause when `isOutOfScopeForViewing` is true (e.g.
+   * `'deactivated'`, `'low title relevancy'`, `'location mismatch'`), else
+   * `null`. Surfaced in the detail panel; see `jobPostOutOfScopeReason`. */
+  outOfScopeReason: string | null;
   /** Single-line summary of where this post is in the pipeline. Computed
    * from the other fields; see `computeJobPostStatus`. */
   status: string;
@@ -138,6 +142,10 @@ export type SourceRow = {
    * backlog regardless of the toggle. The TUI uses this to dim out-of-scope
    * rows when they're shown via `includeOutOfScope`. */
   isOutOfScopeForListing: boolean;
+  /** Human-readable cause when `isOutOfScopeForListing` is true (e.g.
+   * `'deactivated'`, `'low interest'`), else `null`. Surfaced in the detail
+   * panel; see `sourceOutOfScopeReason`. */
+  outOfScopeReason: string | null;
   /** LLM-generated reason from the listing BFS when it gave up on this
    * source (`abortSearch=true`). Null when the BFS hasn't aborted or hasn't
    * run yet. Surfaced in the status column when present. */
@@ -517,12 +525,13 @@ export async function listJobPosts(args: {
       sourceIsActive === 1 &&
       (listSourceIsActive == null || listSourceIsActive === 1);
 
-    const isOutOfScopeForViewing =
-      !inActiveTree ||
-      (r.titleRelavency != null &&
-        r.titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY) ||
-      (r.locationRelevancy != null &&
-        r.locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY);
+    const outOfScopeReason = jobPostOutOfScopeReason({
+      inActiveTree,
+      titleRelavency: r.titleRelavency,
+      locationRelevancy: r.locationRelevancy,
+    });
+
+    const isOutOfScopeForViewing = outOfScopeReason != null;
 
     return {
       ...rest,
@@ -538,6 +547,7 @@ export async function listJobPosts(args: {
           ? r.skillScore * r.interestScore * (r.locationScore ?? 1)
           : null,
       isOutOfScopeForViewing,
+      outOfScopeReason,
       status: computeJobPostStatus({
         inActiveTree,
         titleRelavency: r.titleRelavency,
@@ -589,6 +599,39 @@ function fmtStatus(
   reason?: string
 ): string {
   return reason ? `${state}: ${stage} (${reason})` : `${state}: ${stage}`;
+}
+
+/** Why a JobPost fails `inScopeForViewing`, or `null` when it is in scope.
+ * Drives both the `isOutOfScopeForViewing` flag and the `outOfScopeReason`
+ * the detail panel surfaces, so the two can never disagree. The reasons are
+ * checked in priority order so that a deactivated source tree shadows the
+ * relevancy checks. `computeJobPostStatus` mirrors the same conditions for
+ * the list's status cell, where it additionally names the pipeline stage
+ * each verdict blocks. */
+function jobPostOutOfScopeReason(args: {
+  inActiveTree: boolean;
+  titleRelavency: number | null;
+  locationRelevancy: number | null;
+}): string | null {
+  const { inActiveTree, titleRelavency, locationRelevancy } = args;
+  if (!inActiveTree) return 'deactivated';
+  if (
+    titleRelavency != null &&
+    titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+  ) {
+    return 'low title relevancy';
+  }
+
+  // Location is scored at viewing time, so this only fires once the post has
+  // been viewed. A below-threshold score keeps it out of `evaluate`.
+  if (
+    locationRelevancy != null &&
+    locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+  ) {
+    return 'location mismatch';
+  }
+
+  return null;
 }
 
 /** Single-line pipeline status for a JobPost, rendered as `<state>: <stage>`.
@@ -801,9 +844,8 @@ export async function listSources(args: {
   return rows.map(r => {
     const sourceIsActive = r.sourceIsActive ?? 0;
     const score = r.sourceInterestScore;
-    const isOutOfScopeForListing =
-      sourceIsActive !== 1 ||
-      (score != null && score < PIPELINE_LISTING_MIN_INTEREST_SCORE);
+    const outOfScopeReason = sourceOutOfScopeReason({ score, sourceIsActive });
+    const isOutOfScopeForListing = outOfScopeReason != null;
 
     const hasScript = r.listParserScript ? 1 : 0;
     const jobPostCount = Number(r.jobPostCount ?? 0);
@@ -824,6 +866,7 @@ export async function listSources(args: {
       jobPostCount,
       isActive: r.listIsActive ?? null,
       isOutOfScopeForListing,
+      outOfScopeReason,
       abortListingReason: r.abortListingReason,
       status: computeSourceStatus({
         score,
@@ -835,6 +878,27 @@ export async function listSources(args: {
       }),
     };
   });
+}
+
+/** Why a source fails `inScopeForListing`, or `null` when it is in scope.
+ * Mirrors the `isOutOfScopeForListing` predicate: a deactivated source is
+ * out-of-scope regardless of score, and a scored source drops out when its
+ * interest falls below the threshold. A source that hasn't been scored yet
+ * (`score == null`) is not out-of-scope unless it is also deactivated. Drives
+ * both the flag and the `outOfScopeReason` the detail panel surfaces;
+ * `computeSourceStatus` mirrors the same conditions for the list's status
+ * cell. */
+function sourceOutOfScopeReason(args: {
+  score: number | null;
+  sourceIsActive: number;
+}): string | null {
+  const { score, sourceIsActive } = args;
+  if (sourceIsActive !== 1) return 'deactivated';
+  if (score != null && score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
+    return 'low interest';
+  }
+
+  return null;
 }
 
 /** Single-line pipeline status for a source, rendered as `<state>: <stage>`.
