@@ -76,7 +76,7 @@ function buildColumns(sort: JobPostSortKey): Column<JobPostRow>[] {
     },
     { label: 'title', value: r => r.title, min: 20, priority: 3 },
     { label: 'where', value: r => r.location ?? '—', min: 10, max: 20 },
-    { label: 'status', value: r => r.status, min: 14, max: 38 },
+    { label: 'status', value: r => r.status, min: 14, max: 44 },
   ];
 }
 
