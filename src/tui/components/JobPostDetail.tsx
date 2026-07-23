@@ -15,22 +15,6 @@ export function JobPostDetail({ row }: { row: JobPostRow | null }) {
       <Text dimColor>{row.url}</Text>
       <Box marginTop={1} flexDirection='column'>
         <Text>
-          entity: <Text bold>JobPost</Text>
-        </Text>
-        <Text>
-          id: <Text bold>{row.id}</Text>
-        </Text>
-        {row.isOutOfScopeForViewing && (
-          <Text>
-            out-of-scope:{' '}
-            <Text bold color='yellow'>
-              {row.outOfScopeReason ?? '—'}
-            </Text>
-          </Text>
-        )}
-      </Box>
-      <Box marginTop={1} flexDirection='column'>
-        <Text>
           location: <Text bold>{row.location ?? '—'}</Text>
         </Text>
         <Text>
@@ -66,6 +50,22 @@ export function JobPostDetail({ row }: { row: JobPostRow | null }) {
           <Text>{row.summary}</Text>
         </Box>
       )}
+      <Box marginTop={1} flexDirection='column'>
+        <Text>
+          entity: <Text bold>JobPost</Text>
+        </Text>
+        <Text>
+          id: <Text bold>{row.id}</Text>
+        </Text>
+        {row.isOutOfScopeForViewing && (
+          <Text>
+            out-of-scope:{' '}
+            <Text bold color='yellow'>
+              {row.titleRelavencyReason ?? '—'}
+            </Text>
+          </Text>
+        )}
+      </Box>
     </Box>
   );
 }
