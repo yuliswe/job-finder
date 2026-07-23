@@ -1,4 +1,4 @@
-import type { ExpressionBuilder } from 'kysely';
+import { sql, type ExpressionBuilder, type SqlBool } from 'kysely';
 
 import type { DB } from '__generated__/db/types.js';
 import { db, sqlite } from 'src/db/index.js';
@@ -57,6 +57,53 @@ export const TASK_ORDER: readonly PipelineTask[] = [
   'evaluate',
 ];
 
+/**
+ * Hardcoded same-entity dependency tree. A task listed here must not be picked
+ * up for an entity ROW while any of its parent tasks is still pending on the
+ * SAME row (see `parentsSettledForPipelineTask`). Only tasks that share an FK
+ * column belong here — cross-entity ordering (e.g. sourcing → listing across
+ * different tables) is already enforced by the `qualifiedForX` / `inScopeForX`
+ * data gates, so the dependency here is specifically for the case where a
+ * parent's output column may already be populated from a prior run while a
+ * fresh parent run is queued, and the child would otherwise race ahead against
+ * stale data.
+ *
+ * `viewing` and `evaluate` both key on `ofJobPostId`: a re-queued `viewing`
+ * (via `reset`, `--job-post-id`, or `--all`) can coexist with a queued
+ * `evaluate` on the same JobPost, and without this gate `evaluate` would score
+ * the stale, about-to-be-overwritten description. The same shape also applies
+ * to `listing` ← `sourcing` and `run-scripts` ← `scripting`; add them here if
+ * we ever want those pairs gated too.
+ */
+export const TASK_PARENTS: Partial<
+  Record<PipelineTask, readonly PipelineTask[]>
+> = {
+  evaluate: ['viewing'],
+};
+
+/** Config invariant: every declared parent must share the child's FK column,
+ * so `parentsSettledForPipelineTask` can reuse the child's FK to look the
+ * parent's state up on the same entity row. A cross-entity entry here is a
+ * programming error — fail loudly at module load rather than silently generate
+ * a mismatched subquery. */
+export function assertTaskParentsSameEntity(
+  taskParents: Partial<Record<PipelineTask, readonly PipelineTask[]>>,
+  fkByTask: Record<PipelineTask, PipelineFk>
+): void {
+  for (const [child, parents] of Object.entries(taskParents)) {
+    for (const parent of parents ?? []) {
+      if (fkByTask[parent] !== fkByTask[child as PipelineTask]) {
+        throw new Error(
+          `TASK_PARENTS: ${child} → ${parent} is not a same-entity dependency ` +
+            `(${fkByTask[child as PipelineTask]} vs ${fkByTask[parent]}).`
+        );
+      }
+    }
+  }
+}
+
+assertTaskParentsSameEntity(TASK_PARENTS, FK_BY_TASK);
+
 /** Canonical state values written to `PipelineState.state`. The column is a
  * plain `text` and accepts arbitrary strings — these are the names every
  * pipeline command should use. */
@@ -103,6 +150,17 @@ export const TERMINAL_NO_RESULT_STATES: ReadonlySet<string> = new Set([
 export const ELIGIBLE_FOR_PICKUP_STATES: ReadonlySet<string> = new Set([
   PIPELINE_STATE.QUEUED,
   PIPELINE_STATE.USER_INTERRUPTED,
+]);
+
+/** Parent states that keep a child task waiting (see `TASK_PARENTS` /
+ * `parentsSettledForPipelineTask`): the parent is eligible for pickup
+ * (`queued` / `user_interrupted`) or actively in flight (`started`). Every
+ * terminal state — `done`, a no-result, or `failed` / `aborted` /
+ * `script_error` — releases the child, at which point the child's own
+ * qualified / inScope / state filters decide whether there is work to do. */
+export const PARENT_PENDING_STATES: ReadonlySet<string> = new Set([
+  ...ELIGIBLE_FOR_PICKUP_STATES,
+  PIPELINE_STATE.STARTED,
 ]);
 
 /** Latest states that mean "ran to a definite error". Targeted by
@@ -490,6 +548,83 @@ export function notDoneForPipelineTask<
             ...TERMINAL_SUCCESS_STATES,
           ])
       )
+    );
+  };
+}
+
+/** For each task that appears as a PARENT in `TASK_PARENTS`, the `inScopeForX`
+ * predicate used to decide whether a pending parent row genuinely blocks its
+ * children. A parent whose row is out of scope for the parent task will never
+ * be picked by that task's own picker, so a stale `queued` row on an
+ * out-of-scope parent must NOT pin the child forever — see
+ * `parentsSettledForPipelineTask`. Keyed by parent task; extend alongside
+ * `TASK_PARENTS`. The predicate runs over the CHILD's parent table, which by
+ * the same-entity invariant is also the parent task's table. */
+const PARENT_SCOPE_BY_TASK: Partial<
+  Record<PipelineTask, (eb: ExpressionBuilder<DB, 'JobPost'>) => unknown>
+> = {
+  viewing: inScopeForViewing,
+};
+
+/**
+ * Where-predicate factory: rows of `P` for which NO parent task (per
+ * `TASK_PARENTS`) is still pending on the same row. AND this into the child's
+ * picker alongside its existing `qualifiedForX ∩ inScopeForX` + state filter.
+ * Trivially true (`1`) for a task with no declared parents.
+ *
+ * A parent blocks the child only when BOTH its latest state is in
+ * `PARENT_PENDING_STATES` AND the row is in scope for the parent task. The
+ * in-scope conjunct keeps a force-queued but out-of-scope parent — which the
+ * parent's own picker will never touch — from pinning the child forever. This
+ * matters only for a pair whose child scope is NOT a subset of the parent
+ * scope. For the current linear-pipeline pairs (evaluate ← viewing, and the
+ * listing/run-scripts pairs if ever added) the child's `inScopeForX` already
+ * AND-embeds the parent's, so the conjunct is redundant-but-safe there; it is
+ * kept so the generic mechanism stays correct for any future non-subset pair.
+ *
+ * Example:
+ *   db.selectFrom('JobPost').where(parentsSettledForPipelineTask({
+ *     task: 'evaluate', parentIdRef: 'JobPost.id',
+ *   }))
+ */
+export function parentsSettledForPipelineTask<
+  P extends 'SourceSeed' | 'JobSource' | 'JobListSource' | 'JobPost',
+>(args: { task: PipelineTask; parentIdRef: `${P}.id` }) {
+  const parents = TASK_PARENTS[args.task] ?? [];
+  const fk = FK_BY_TASK[args.task];
+  return (eb: ExpressionBuilder<DB, P>) => {
+    if (parents.length === 0) return sql<SqlBool>`1`;
+    // Same TS narrowing escape hatch as `eligibleForPipelineTask`: the runtime
+    // FK column is one of the four `of*Id` columns, and (by the same-entity
+    // invariant) the parent scope predicate runs over the child's own table.
+    const ebConcrete = eb as unknown as ExpressionBuilder<DB, 'JobPost'>;
+    return ebConcrete.and(
+      parents.map(parent => {
+        const parentPending = ebConcrete.exists(
+          ebConcrete
+            .selectFrom('LatestPipelineState')
+            .select('LatestPipelineState.id')
+            .whereRef(
+              `LatestPipelineState.${fk}` as 'LatestPipelineState.ofJobPostId',
+              '=',
+              args.parentIdRef as 'JobPost.id'
+            )
+            .where('LatestPipelineState.task', '=', parent)
+            .where('LatestPipelineState.state', 'in', [
+              ...PARENT_PENDING_STATES,
+            ])
+        );
+
+        const parentInScope = PARENT_SCOPE_BY_TASK[parent];
+        const blocks = parentInScope
+          ? ebConcrete.and([
+              parentPending,
+              parentInScope(ebConcrete) as typeof parentPending,
+            ])
+          : parentPending;
+
+        return ebConcrete.not(blocks);
+      })
     );
   };
 }

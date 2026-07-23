@@ -6,6 +6,7 @@ import { newId } from 'src/db/id.js';
 import {
   enqueuePipelineTask,
   PIPELINE_STATE,
+  parentsSettledForPipelineTask,
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
@@ -128,7 +129,17 @@ async function pickEvaluateTargets(
     .selectFrom('JobPost')
     .select(selectCols)
     .where(qualifiedForEvaluate)
-    .where(inScopeForEvaluate);
+    .where(inScopeForEvaluate)
+    // Hold evaluate while a fresh viewing is still pending on the same post, so
+    // we never score a stale description that viewing is about to overwrite.
+    // Applied in every mode (correctness, not a state filter); the explicit
+    // --job-post-id branch below bypasses it as a deliberate manual override.
+    .where(
+      parentsSettledForPipelineTask({
+        task: 'evaluate',
+        parentIdRef: 'JobPost.id',
+      })
+    );
 
   if (stateFilter) query = query.where(stateFilter);
 
