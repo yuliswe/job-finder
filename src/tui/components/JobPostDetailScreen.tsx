@@ -424,6 +424,16 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
     });
   }
 
+  // Viewing-stage location gate. Surfaced so a post filtered out for a location
+  // mismatch (below PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY) explains itself.
+  if (row.locationRelevancyReason) {
+    reasons.push({
+      label: 'location fit',
+      score: row.locationRelevancy,
+      reason: row.locationRelevancyReason,
+    });
+  }
+
   if (reasons.length > 0) {
     out.push(
       <Text bold color='magenta' key={out.length}>

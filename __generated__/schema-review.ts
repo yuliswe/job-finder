@@ -68,6 +68,7 @@ type JobPost = {
   salaryMin?: Real;
   skillRequirements?: Text;
   summary?: Text;
+  tags?: Text;
   // ── relations ──
   ofJobSourceId: Text | ON_DELETE.CASCADE | JobSource['id'];
   ofJobListSourceId?: Text | ON_DELETE.SET_NULL | JobListSource['id'];
@@ -89,6 +90,8 @@ type JobPostEval = {
   // ── fields ──
   interestScore?: Real;
   interestScoreReason?: Text;
+  locationRelevancy?: Real;
+  locationRelevancyReason?: Text;
   locationScore?: Real;
   locationScoreReason?: Text;
   skillScore?: Real;
@@ -100,6 +103,7 @@ type JobPostEval = {
   ofJobPostId: Text | ON_DELETE.CASCADE | JobPost['id'];
   // ── indexes ──
   _indexes: {
+    locationRelevancy: [JobPostEval['locationRelevancy']];
     titleRelavency: [JobPostEval['titleRelavency']];
     ofJobPostId: [JobPostEval['ofJobPostId']] | UNIQUE;
   };
@@ -113,6 +117,7 @@ type JobSource = {
   // ── fields ──
   isActive: Bool | DEFAULT<1>;
   name: Text;
+  abortListingReason?: Text;
   interestScore?: Real;
   interestScoreReason?: Text;
   summary?: Text;

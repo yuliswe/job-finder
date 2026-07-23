@@ -52,6 +52,8 @@ export interface JobPostEval {
   id: string;
   interestScore: number | null;
   interestScoreReason: string | null;
+  locationRelevancy: number | null;
+  locationRelevancyReason: string | null;
   locationScore: number | null;
   locationScoreReason: string | null;
   ofJobPostId: string;

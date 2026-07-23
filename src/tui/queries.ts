@@ -3,6 +3,7 @@ import { type ExpressionBuilder, sql } from 'kysely';
 import type { DB } from '__generated__/db/types.js';
 import {
   PIPELINE_LISTING_MIN_INTEREST_SCORE,
+  PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY,
   PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
 } from 'jobfinder.config.js';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
@@ -22,6 +23,7 @@ import {
   inScopeForScripting,
   inScopeForSourcing,
   inScopeForViewing,
+  locationRelevancyInScope,
 } from 'src/db/pipelineQualified.js';
 import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
 import type { SkillRequirements } from 'src/llm/viewJobPost.js';
@@ -76,6 +78,12 @@ export type JobPostRow = {
   salaryCurrency: string | null;
   titleRelavency: number | null;
   titleRelavencyReason: string | null;
+  /** Viewing-stage score in [0, 1] of how well the posting's location fits the
+   * user's stated preferences. null until viewing scores it. Below
+   * `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY` puts the post out of scope for
+   * evaluate (see `locationRelevancyInScope`). */
+  locationRelevancy: number | null;
+  locationRelevancyReason: string | null;
   interestScore: number | null;
   interestScoreReason: string | null;
   skillScore: number | null;
@@ -89,13 +97,14 @@ export type JobPostRow = {
   overallScore: number | null;
   description: string | null;
   summary: string | null;
-  /** True iff the post fails `inScopeForViewing` — either its source tree
-   * has been deactivated, OR `titleRelavency` came back below the
-   * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY` threshold. Null relevancy is
-   * NOT considered out-of-scope (treated as "not yet evaluated", same as
-   * the listing-scope rule treats null interestScore on Sources). The TUI
-   * uses this to dim out-of-scope rows when they're surfaced via the
-   * 'all' or 'out' scope filter. */
+  /** True iff the post is out of scope for the viewing/evaluate pipeline —
+   * its source tree has been deactivated, OR `titleRelavency` came back below
+   * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`, OR `locationRelevancy` came back
+   * below `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`. Null relevancy is NOT
+   * considered out-of-scope (treated as "not yet evaluated", same as the
+   * listing-scope rule treats null interestScore on Sources). The TUI uses
+   * this to dim out-of-scope rows when they're surfaced via the 'all' or
+   * 'out' scope filter. */
   isOutOfScopeForViewing: boolean;
   /** Single-line summary of where this post is in the pipeline. Computed
    * from the other fields; see `computeJobPostStatus`. */
@@ -381,11 +390,15 @@ export async function listJobPosts(args: {
   }
 
   if (scope === 'in') {
-    base = base.where(jobPostInActiveSource).where(inScopeForViewing);
+    base = base
+      .where(jobPostInActiveSource)
+      .where(inScopeForViewing)
+      .where(locationRelevancyInScope);
   } else if (scope === 'out') {
-    // Out-of-scope for viewing = NOT in active source tree, OR (relevancy
-    // is known AND below threshold). Null relevancy stays in 'in' as
-    // backlog (matches the Sources-scope treatment of null interestScore).
+    // Out-of-scope = NOT in active source tree, OR title relevancy is known
+    // AND below threshold, OR location relevancy is known AND below threshold.
+    // Null relevancy stays in 'in' as backlog (matches the Sources-scope
+    // treatment of null interestScore).
     base = base.where(eb =>
       eb.or([
         eb.not(jobPostInActiveSource(eb)),
@@ -395,6 +408,14 @@ export async function listJobPosts(args: {
             'JobPostEval.titleRelavency',
             '<',
             PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+          ),
+        ]),
+        eb.and([
+          eb('JobPostEval.locationRelevancy', 'is not', null),
+          eb(
+            'JobPostEval.locationRelevancy',
+            '<',
+            PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
           ),
         ]),
       ])
@@ -420,6 +441,8 @@ export async function listJobPosts(args: {
     'JobPost.tags as tagsJson',
     'JobPostEval.titleRelavency as titleRelavency',
     'JobPostEval.titleRelavencyReason as titleRelavencyReason',
+    'JobPostEval.locationRelevancy as locationRelevancy',
+    'JobPostEval.locationRelevancyReason as locationRelevancyReason',
     'JobPostEval.interestScore as interestScore',
     'JobPostEval.interestScoreReason as interestScoreReason',
     'JobPostEval.skillScore as skillScore',
@@ -497,7 +520,9 @@ export async function listJobPosts(args: {
     const isOutOfScopeForViewing =
       !inActiveTree ||
       (r.titleRelavency != null &&
-        r.titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY);
+        r.titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY) ||
+      (r.locationRelevancy != null &&
+        r.locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY);
 
     return {
       ...rest,
@@ -516,6 +541,7 @@ export async function listJobPosts(args: {
       status: computeJobPostStatus({
         inActiveTree,
         titleRelavency: r.titleRelavency,
+        locationRelevancy: r.locationRelevancy,
         description: r.description,
         interestScore: r.interestScore,
       }),
@@ -559,16 +585,33 @@ export async function toggleJobPostTag(
 function computeJobPostStatus(args: {
   inActiveTree: boolean;
   titleRelavency: number | null;
+  locationRelevancy: number | null;
   description: string | null;
   interestScore: number | null;
 }): string {
-  const { inActiveTree, titleRelavency, description, interestScore } = args;
+  const {
+    inActiveTree,
+    titleRelavency,
+    locationRelevancy,
+    description,
+    interestScore,
+  } = args;
+
   if (!inActiveTree) return 'Out of scope: deactivated';
   if (
     titleRelavency != null &&
     titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
   ) {
     return 'Out of scope: low relevancy';
+  }
+
+  // Location is scored at viewing time, so this only fires once the post has
+  // been viewed. A below-threshold score keeps it out of `evaluate`.
+  if (
+    locationRelevancy != null &&
+    locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+  ) {
+    return 'Out of scope: location mismatch';
   }
 
   if (!description) return 'Waiting for viewing';
@@ -710,6 +753,18 @@ export async function listSources(args: {
           'JobPostEval.titleRelavency',
           '>=',
           PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+        )
+        // Exclude posts viewing has scored as a location mismatch, matching the
+        // Jobs 'in' scope. Null (not yet viewed) still counts as backlog.
+        .where(eb2 =>
+          eb2.or([
+            eb2('JobPostEval.locationRelevancy', 'is', null),
+            eb2(
+              'JobPostEval.locationRelevancy',
+              '>=',
+              PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+            ),
+          ])
         )
         .select(eb2 => eb2.fn.countAll<number>().as('n'))
         .as('jobPostCount'),
