@@ -614,7 +614,7 @@ function computeJobPostStatus(args: {
     titleRelavency != null &&
     titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
   ) {
-    return fmtStatus('Out-of-scope', 'viewing', 'low relevancy');
+    return fmtStatus('Out-of-scope', 'viewing', 'low title relevancy');
   }
 
   // Location is scored at viewing time, so this only fires once the post has
