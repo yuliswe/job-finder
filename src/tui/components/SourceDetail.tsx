@@ -11,9 +11,20 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
       <Text bold color='cyan' wrap='truncate-end'>
         {row.sourceName}
       </Text>
-      <Text dimColor wrap='truncate-end'>
-        JobSource id: {row.sourceId}
+      <Text>
+        entity: <Text bold>JobSource</Text>
       </Text>
+      <Text wrap='truncate-end'>
+        id: <Text bold>{row.sourceId}</Text>
+      </Text>
+      {row.isOutOfScopeForListing && (
+        <Text>
+          out-of-scope:{' '}
+          <Text bold color='yellow'>
+            {row.outOfScopeReason ?? '—'}
+          </Text>
+        </Text>
+      )}
       <Text dimColor wrap='truncate-end'>
         {prettyUrl(row.sourceUrl)}
       </Text>
