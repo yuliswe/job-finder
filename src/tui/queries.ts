@@ -10,6 +10,8 @@ import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import {
+  ELIGIBLE_FOR_PICKUP_STATES,
+  FAILED_STATES,
   PIPELINE_STATE,
   type PipelineTask,
   TASK_ORDER,
@@ -347,7 +349,8 @@ async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
  * ORDER BY createdAt DESC, id DESC LIMIT 1) AS state` correlated subquery.
  * Aliased as `"state"` so the outer query can group by it. The covering
  * `PipelineState_task_of*_createdAt_idx` index makes the inner scan O(log N)
- * per parent row. */
+ * per parent row. `listJobPosts` builds the same shape (aliased per task) via
+ * {@link latestJobPostState}. */
 function latestPipelineStateFor<
   P extends 'SourceSeed' | 'JobSource' | 'JobListSource' | 'JobPost',
 >(
@@ -373,6 +376,31 @@ function latestPipelineStateFor<
     .orderBy('PipelineState.id', 'desc')
     .limit(1)
     .as('state');
+}
+
+/** The `latestPipelineStateFor` correlated subquery specialized to JobPost and
+ * aliased to `alias`, so `listJobPosts` can pull the latest viewing and
+ * evaluate states onto one row. Takes the join-scoped expression builder from
+ * `listJobPosts` directly — `JobPost.id` is already in that scope, so unlike
+ * the generic helper above it needs no cast. Index-backed via
+ * `PipelineState_task_ofJobPostId_createdAt_idx`. */
+function latestJobPostState<A extends string>(
+  eb: ExpressionBuilder<
+    DB,
+    'JobPost' | 'JobPostEval' | 'JobSource' | 'JobListSource'
+  >,
+  task: 'viewing' | 'evaluate',
+  alias: A
+) {
+  return eb
+    .selectFrom('PipelineState')
+    .select('PipelineState.state')
+    .whereRef('PipelineState.ofJobPostId', '=', 'JobPost.id')
+    .where('PipelineState.task', '=', task)
+    .orderBy('PipelineState.createdAt', 'desc')
+    .orderBy('PipelineState.id', 'desc')
+    .limit(1)
+    .as(alias);
 }
 
 export async function listJobPosts(args: {
@@ -505,6 +533,18 @@ export async function listJobPosts(args: {
     .select([
       'JobSource.isActive as sourceIsActive',
       'JobListSource.isActive as listSourceIsActive',
+    ])
+    // Latest viewing/evaluate pipeline state per post, so the status column
+    // reflects a `jobfinder reset <stage>` (which appends a fresh `queued`
+    // PipelineState row without clearing the prior run's description /
+    // interestScore). Each is an index-backed O(log N) correlated subquery on
+    // `PipelineState_task_ofJobPostId_createdAt_idx` — the same performant
+    // pattern `stageRawBuckets` uses — rather than a join on the
+    // `LatestPipelineState` view, which would materialize the whole view
+    // (ROW_NUMBER + TEMP B-TREE) on every 1s TUI refresh.
+    .select(eb => [
+      latestJobPostState(eb, 'viewing', 'viewingState'),
+      latestJobPostState(eb, 'evaluate', 'evaluateState'),
     ]);
 
   const rows = await qWithScope.limit(limit).execute();
@@ -515,6 +555,8 @@ export async function listJobPosts(args: {
       tagsJson,
       sourceIsActive,
       listSourceIsActive,
+      viewingState,
+      evaluateState,
       ...rest
     } = r;
 
@@ -554,6 +596,8 @@ export async function listJobPosts(args: {
         locationRelevancy: r.locationRelevancy,
         description: r.description,
         interestScore: r.interestScore,
+        viewingState,
+        evaluateState,
       }),
       tags: parseJsonArray<string>(tagsJson) ?? [],
     };
@@ -634,15 +678,38 @@ function jobPostOutOfScopeReason(args: {
   return null;
 }
 
+/** Label a stage should carry when the given value is its latest
+ * `PipelineState`, or `null` when the state is terminal-done (success or a
+ * no-result outcome) so the caller falls back to what the JobPost/JobPostEval
+ * result columns imply. Surfacing queued/started/failed here is what makes a
+ * `jobfinder reset <stage>` — which appends a fresh `queued` row without
+ * clearing the prior run's result columns — show up in the status cell
+ * immediately. `user_interrupted` reads as `Queued`, matching the pipeline
+ * bar's convention (`stageStats`) that a Ctrl+C is pending work, not an
+ * outcome. */
+function pendingStageLabel(state: string | null): string | null {
+  if (state == null) return null;
+  if (ELIGIBLE_FOR_PICKUP_STATES.has(state)) return 'Queued';
+  if (state === PIPELINE_STATE.STARTED) return 'Started';
+  if (FAILED_STATES.has(state)) return 'Failed';
+  return null;
+}
+
 /** Single-line pipeline status for a JobPost, rendered as `<state>: <stage>`.
- * Derived from the same fields the rest of JobPostRow exposes and checked in
- * priority order — out-of-scope verdicts shadow any queued interpretation. */
+ * Out-of-scope verdicts (checked first) shadow everything. Otherwise the
+ * status prefers an active pipeline state for the earliest not-yet-done stage
+ * over what the result columns imply, so a `reset` that requeues a row is
+ * reflected even though the prior run's description / interestScore are still
+ * populated. Viewing is checked before evaluate because a row requeued for
+ * viewing will be re-viewed before it is re-evaluated. */
 function computeJobPostStatus(args: {
   inActiveTree: boolean;
   titleRelavency: number | null;
   locationRelevancy: number | null;
   description: string | null;
   interestScore: number | null;
+  viewingState: string | null;
+  evaluateState: string | null;
 }): string {
   const {
     inActiveTree,
@@ -650,6 +717,8 @@ function computeJobPostStatus(args: {
     locationRelevancy,
     description,
     interestScore,
+    viewingState,
+    evaluateState,
   } = args;
 
   if (!inActiveTree) return fmtStatus('Out-of-scope', 'viewing', 'deactivated');
@@ -669,7 +738,12 @@ function computeJobPostStatus(args: {
     return fmtStatus('Out-of-scope', 'evaluate', 'location mismatch');
   }
 
+  const viewingLabel = pendingStageLabel(viewingState);
+  if (viewingLabel) return fmtStatus(viewingLabel, 'viewing');
   if (!description) return fmtStatus('Queued', 'viewing');
+
+  const evaluateLabel = pendingStageLabel(evaluateState);
+  if (evaluateLabel) return fmtStatus(evaluateLabel, 'evaluate');
   if (interestScore == null) return fmtStatus('Queued', 'evaluate');
   return fmtStatus('Done', 'evaluate');
 }
