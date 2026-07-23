@@ -4,6 +4,7 @@ import type { BrowserContext } from 'patchright';
 
 import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
 import { Bool } from 'src/db/customTypes.js';
+import { newId } from 'src/db/id.js';
 import { db } from 'src/db/index.js';
 import {
   enqueuePipelineTask,
@@ -19,8 +20,10 @@ import {
   inScopeForViewing,
   qualifiedForViewing,
 } from 'src/db/pipelineQualified.js';
+import { evaluateJobLocationRelevancy } from 'src/llm/evaluateJobLocationRelevancy.js';
 import { viewJobPost } from 'src/llm/viewJobPost.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
+import { getUserInterests } from 'src/utils/userInterests.js';
 import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
@@ -166,8 +169,20 @@ export async function runViewing(
     return { processed: 0 };
   }
 
+  // Loaded once and shared across tabs: the viewing stage scores each post's
+  // location against the user's stated preferences to gate whether it proceeds
+  // to `evaluate` (see `inScopeForEvaluate`).
+  const interests = await getUserInterests();
+  if (!interests) {
+    terminal.warn(
+      'No user interests found (seeds/interests.local.md or seeds/interests.md). locationRelevancy will default to 0.5 (neutral).'
+    );
+  }
+
   const results = await Promise.all(
-    targets.map(target => tabLimit(() => viewOneTarget({ context, target })))
+    targets.map(target =>
+      tabLimit(() => viewOneTarget({ context, target, interests }))
+    )
   );
 
   const jobPostUpdated = results.reduce(
@@ -185,8 +200,9 @@ export async function runViewing(
 async function viewOneTarget(args: {
   context: BrowserContext;
   target: { id: string; url: string };
+  interests: string;
 }): Promise<{ jobPostUpdated: number } | undefined> {
-  const { context, target } = args;
+  const { context, target, interests } = args;
   return processOne({
     task: 'viewing',
     entity: { ofJobPostId: target.id },
@@ -252,6 +268,35 @@ async function viewOneTarget(args: {
         .updateTable('JobPost')
         .set(update)
         .where('id', '=', target.id)
+        .execute();
+
+      // Score the extracted location against the user's stated preferences and
+      // persist it on the eval row (which already exists from run-scripts with
+      // titleRelavency). `inScopeForEvaluate` gates on this via
+      // `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`, so a below-threshold post is
+      // viewed and recorded but never proceeds to evaluate / gets shown to the
+      // user.
+      const loc = await evaluateJobLocationRelevancy({
+        interests,
+        location: parsed.location,
+        isRemote: parsed.isRemote,
+      });
+
+      await db
+        .insertInto('JobPostEval')
+        .values({
+          id: newId(),
+          ofJobPostId: target.id,
+          locationRelevancy: loc.locationRelevancy,
+          locationRelevancyReason: loc.locationRelevancyReason,
+        })
+        .onConflict(oc =>
+          oc.column('ofJobPostId').doUpdateSet({
+            locationRelevancy: loc.locationRelevancy,
+            locationRelevancyReason: loc.locationRelevancyReason,
+            updatedAt: new Date().toISOString(),
+          })
+        )
         .execute();
 
       await recordPipelineState({

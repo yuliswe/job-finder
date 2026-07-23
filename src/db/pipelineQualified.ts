@@ -3,6 +3,7 @@ import { sql, type ExpressionBuilder, type SqlBool } from 'kysely';
 import type { DB } from '__generated__/db/types.js';
 import {
   PIPELINE_LISTING_MIN_INTEREST_SCORE,
+  PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY,
   PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
 } from 'jobfinder.config.js';
 import {
@@ -207,15 +208,40 @@ export function inScopeForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
   ]);
 }
 
-/** A JobPost is in scope for evaluate iff it was in scope for viewing AND
- * viewing has actually populated description + skillRequirements (the
- * upstream prerequisite). Unviewed posts are out-of-scope until viewing
- * fills those columns. */
+/** A JobPost's location cleared the viewing-stage relevancy gate. True when
+ * the post has NO known locationRelevancy yet (null = backlog, not yet scored
+ * by viewing) OR its score is at/above `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`.
+ * Only a KNOWN below-threshold score puts a post out of scope — a location the
+ * user does not want is tossed out after viewing without ever reaching
+ * evaluate. Mirrors the null-as-backlog convention used for titleRelavency. */
+export function locationRelevancyInScope(eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return eb.not(
+    eb.exists(
+      eb
+        .selectFrom('JobPostEval')
+        .select('JobPostEval.id')
+        .whereRef('JobPostEval.ofJobPostId', '=', 'JobPost.id')
+        .where('JobPostEval.locationRelevancy', 'is not', null)
+        .where(
+          'JobPostEval.locationRelevancy',
+          '<',
+          PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+        )
+    )
+  );
+}
+
+/** A JobPost is in scope for evaluate iff it was in scope for viewing, viewing
+ * has actually populated description + skillRequirements (the upstream
+ * prerequisite), AND its location cleared the relevancy gate. Unviewed posts
+ * are out-of-scope until viewing fills those columns; location-mismatched posts
+ * are dropped here rather than being evaluated and shown to the user. */
 export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
   return eb.and([
     inScopeForViewing(eb),
     eb('JobPost.description', 'is not', null),
     eb('JobPost.skillRequirements', 'is not', null),
+    locationRelevancyInScope(eb),
   ]);
 }
 
