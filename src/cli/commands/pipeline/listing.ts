@@ -8,6 +8,7 @@ import { newId } from 'src/db/id.js';
 import {
   enqueuePipelineTask,
   PIPELINE_STATE,
+  parentsSettledForPipelineTask,
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
@@ -108,7 +109,17 @@ async function pickListingTargets(
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
     .where(qualifiedForListing)
-    .where(inScopeForListing);
+    .where(inScopeForListing)
+    // Hold listing while a fresh sourcing is still pending on the same source,
+    // so we never crawl a stale url/interestScore that sourcing is about to
+    // overwrite. Applied in every mode (correctness, not a state filter); the
+    // explicit --job-source-id branch below bypasses it as a manual override.
+    .where(
+      parentsSettledForPipelineTask({
+        task: 'listing',
+        parentIdRef: 'JobSource.id',
+      })
+    );
 
   if (stateFilter) query = query.where(stateFilter);
 
