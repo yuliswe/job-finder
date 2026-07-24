@@ -42,6 +42,16 @@ export const SERPER_API_KEY = process.env.SERPER_API_KEY;
 export const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://localhost:11434';
 
 /**
+ * Path to (or bare name of) the Claude Code CLI binary invoked by any
+ * model prefixed with `claudecode-plugin/`. That plugin shells out to
+ * `claude -p`, so requests bill against the machine's Claude Pro/Max
+ * subscription (the CLI's keychain OAuth login) instead of an API key.
+ * Default: `'claude'` (resolved via PATH). Override via the
+ * `CLAUDE_CODE_CLI_BIN` env var when the binary is not on PATH.
+ */
+export const CLAUDE_CODE_CLI_BIN = process.env.CLAUDE_CODE_CLI_BIN ?? 'claude';
+
+/**
  * Per-model attempt budget inside `llmSend`. Each `LLM_*_MODEL` value is
  * an array; `llmSend` retries the current model up to this many times
  * before advancing to the next model in the array. When every model is
@@ -102,11 +112,15 @@ export const DB_NAME = 'jobs.db';
  * model in the array is exhausted, `llmSend` throws.
  *
  * EVERY model id must be prefixed with `<plugin>-plugin/`, where plugin
- * is one of `ollama`, `openrouter`, `anthropic`. The dispatcher in
- * `src/llm/base.ts` strips the prefix and routes the call to the
- * matching plugin instance. Arrays can freely mix plugins, e.g.
+ * is one of `ollama`, `openrouter`, `anthropic`, `claudecode`. The
+ * dispatcher in `src/llm/base.ts` strips the prefix and routes the call
+ * to the matching plugin instance. Arrays can freely mix plugins, e.g.
  *   ['openrouter-plugin/openai/gpt-5-nano', 'ollama-plugin/qwen3.6:35b-mlx']
  * to fall back to a local model when the remote call fails.
+ *
+ * The `claudecode` plugin shells out to the local `claude -p` CLI, so its
+ * calls bill against your Claude Pro/Max subscription rather than an API
+ * key, e.g. `'claudecode-plugin/claude-opus-4-8'`.
  */
 
 /**

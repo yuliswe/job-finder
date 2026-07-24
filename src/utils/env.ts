@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
   ANTHROPIC_AUTH_TOKEN,
+  CLAUDE_CODE_CLI_BIN,
   DATA_DIR,
   DB_NAME,
   LLM_LOG_STREAM,
@@ -116,6 +117,15 @@ export const Env = {
    * via `jobfinder.config.js`. */
   get OLLAMA_HOST(): string {
     return process.env.OLLAMA_HOST ?? OLLAMA_HOST;
+  },
+
+  /** Path to (or bare name of) the Claude Code CLI binary invoked by
+   * models prefixed with `claudecode-plugin/`. Defaults to `'claude'`,
+   * resolved via PATH. Override with `CLAUDE_CODE_CLI_BIN` when the binary
+   * lives somewhere not on PATH (e.g.
+   * `/opt/homebrew/Caskroom/claude-code/<version>/claude`). */
+  get CLAUDE_CODE_CLI_BIN(): string {
+    return process.env.CLAUDE_CODE_CLI_BIN || CLAUDE_CODE_CLI_BIN || 'claude';
   },
 
   /** User-defined color tags for JobPosts. See `jobfinder.config.js#TAGS`.
