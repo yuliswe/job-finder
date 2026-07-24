@@ -10,7 +10,7 @@ Use this skill when you need a quick count, sample, or sanity check against the 
 
 ## Where the DB lives
 
-- SQLite file at `./jobs.db` (relative to repo root). Override via `DB_PATH` in `.env.local`.
+- SQLite file at `DATA_DIR/DB_NAME` (default `./data/jobs.db`, relative to repo root). Both are set in `jobfinder.config.js`; the path is always composed as `DATA_DIR/DB_NAME`, so there is no independent `DB_PATH` override.
 - Same file is used by tests and by the running CLI — assume it's hot. Don't write to it from here.
 - WAL mode is on, so `jobs.db-wal` / `jobs.db-shm` are normal.
 
@@ -25,19 +25,19 @@ Use this skill when you need a quick count, sample, or sanity check against the 
 **Preferred — `sqlite3` CLI for one-shot reads:**
 
 ```bash
-sqlite3 jobs.db "SELECT COUNT(*) FROM JobPost WHERE description IS NULL;"
+sqlite3 data/jobs.db "SELECT COUNT(*) FROM JobPost WHERE description IS NULL;"
 ```
 
 For multi-column output, add `-header -column`:
 
 ```bash
-sqlite3 -header -column jobs.db "SELECT id, title FROM JobPost LIMIT 5;"
+sqlite3 -header -column data/jobs.db "SELECT id, title FROM JobPost LIMIT 5;"
 ```
 
 JSON output:
 
 ```bash
-sqlite3 jobs.db ".mode json" "SELECT id, title FROM JobPost LIMIT 5;"
+sqlite3 data/jobs.db ".mode json" "SELECT id, title FROM JobPost LIMIT 5;"
 ```
 
 **Do not** write `.tmp_*.{ts,js,mjs,py}` scripts to run a query — use the CLI inline. (Per project convention; throwaway scripts are not welcome.)

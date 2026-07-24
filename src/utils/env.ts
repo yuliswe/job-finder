@@ -1,10 +1,12 @@
 import { existsSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 import dotenv from 'dotenv';
 import {
   ANTHROPIC_API_KEY,
   ANTHROPIC_AUTH_TOKEN,
-  DB_PATH,
+  DATA_DIR,
+  DB_NAME,
   LLM_LOG_STREAM,
   LLM_REQUEST_CONCURRENCY_MAX,
   OLLAMA_HOST,
@@ -15,7 +17,7 @@ import {
 
 const ENV_PATH = '.env';
 const ENV_LOCAL_PATH = '.env.local';
-const REQUIRED_VARS = ['OPENROUTER_API_KEY', 'DB_PATH'] as const;
+const REQUIRED_VARS = ['OPENROUTER_API_KEY'] as const;
 
 function createEnvFileIfNotExists(path: string, vars: readonly string[]): void {
   if (!existsSync(path)) {
@@ -87,8 +89,19 @@ export const Env = {
     );
   },
 
-  get DB_PATH() {
-    return requiredEnvVar('DB_PATH', DB_PATH);
+  /** Absolute-or-relative path to the SQLite database file, always
+   * composed as `DATA_DIR/DB_NAME` (see `jobfinder.config.js`). There is
+   * no independent `DB_PATH` override: the database is pinned inside the
+   * data directory. `DB_NAME` must be a bare file name — a value with a
+   * path separator (which could escape `DATA_DIR`) throws. */
+  get DB_PATH(): string {
+    if (DB_NAME !== basename(DB_NAME)) {
+      throw new Error(
+        `DB_NAME=${JSON.stringify(DB_NAME)} must be a bare file name without path separators; the database always lives at DATA_DIR/DB_NAME.`
+      );
+    }
+
+    return join(DATA_DIR, DB_NAME);
   },
 
   /** Optional — only required by features that hit the Serper API (e.g.

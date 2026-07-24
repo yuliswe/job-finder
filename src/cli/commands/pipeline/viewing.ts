@@ -175,7 +175,7 @@ export async function runViewing(
   const interests = await getUserInterests();
   if (!interests) {
     terminal.warn(
-      'No user interests found (seeds/interests.local.md or seeds/interests.md). locationRelevancy will default to 0.5 (neutral).'
+      'No user interests found (data/interests.local.md or data/interests.md). locationRelevancy will default to 0.5 (neutral).'
     );
   }
 

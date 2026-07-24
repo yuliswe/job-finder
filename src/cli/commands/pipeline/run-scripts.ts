@@ -190,7 +190,7 @@ export async function runRunScripts(
   const interests = await getUserInterests();
   if (!interests) {
     terminal.warn(
-      'No user interests found (seeds/interests.local.md or seeds/interests.md). Relevance scores will all be neutral (0.5).'
+      'No user interests found (data/interests.local.md or data/interests.md). Relevance scores will all be neutral (0.5).'
     );
   }
 
@@ -239,7 +239,7 @@ async function resolveFilterPrefs(args: {
 
   if (!interests) {
     throw new Error(
-      'Both --division and --location must be supplied when interests text is empty (seeds/interests.local.md / seeds/interests.md is missing).'
+      'Both --division and --location must be supplied when interests text is empty (data/interests.local.md / data/interests.md is missing).'
     );
   }
 

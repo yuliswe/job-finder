@@ -14,9 +14,9 @@
     "db:migrate:down": "node --import tsx scripts/db/migrate.ts down",
     "db:migrate:create": "node --import tsx scripts/db/create-migration.ts",
     "db:reset": "node --import tsx scripts/db/migrate.ts reset",
-    "db:codegen": "kysely-codegen --url ${DB_PATH:-jobs.db}",
+    "db:codegen": "kysely-codegen --url ${DB_PATH:-data/jobs.db}",
     "db:schema-review": "node --import tsx scripts/db/generate-schema-review.ts",
-    "sql": "litecli ${DB_PATH:-jobs.db}"
+    "sql": "litecli ${DB_PATH:-data/jobs.db}"
   },
   "repository": {},
   "keywords": [],
