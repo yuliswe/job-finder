@@ -129,7 +129,7 @@ Requires:
 
 ## `pipeline seeding`
 
-Read `seeds/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.
+Read `data/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.
 
 ```bash
 ./src/cli/bin/cli pipeline seeding
@@ -139,7 +139,7 @@ Requires:
 
 - `OPENROUTER_API_KEY` set in the environment.
 - `LLM_SEEDING_MODEL` set in `src/llm/config.ts` (empty by default).
-- `seeds/interests.md` populated with the user's job-search interests.
+- `data/interests.md` populated with the user's job-search interests.
 
 ## `start-pipeline`
 

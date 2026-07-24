@@ -8,7 +8,7 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { PIPELINE_STATE, recordPipelineState } from 'src/db/pipelineState.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { LLM_SEEDING_MODEL, SEEDS_DIR } from 'jobfinder.config.js';
+import { DATA_DIR, LLM_SEEDING_MODEL } from 'jobfinder.config.js';
 import {
   SEEDING_SUMMARY_SYSTEM_PROMPT,
   SEEDING_SYSTEM_PROMPT,
@@ -50,7 +50,7 @@ const MAX_CONSECUTIVE_ZERO_NEW = 50;
 export function createSeedingCommand(): Command {
   return new Command('seeding')
     .description(
-      'Seed SourceSeed table from seeds/interests.md via an LLM-driven jobspy call'
+      'Seed SourceSeed table from <DATA_DIR>/interests.md via an LLM-driven jobspy call'
     )
     .action(() => runSeeding());
 }
@@ -62,8 +62,8 @@ async function runSeeding(): Promise<void> {
     );
   }
 
-  const interests = await readSeedFile(join(SEEDS_DIR, 'interests.md'));
-  const cv = await readSeedFile(join(SEEDS_DIR, 'cv.md'));
+  const interests = await readSeedFile(join(DATA_DIR, 'interests.md'));
+  const cv = await readSeedFile(join(DATA_DIR, 'cv.md'));
 
   // jobspy needs a location to scope the search (Indeed in particular returns
   // garbage when called without one), and the downstream `viewing` stage
@@ -73,7 +73,7 @@ async function runSeeding(): Promise<void> {
   const locCheck = await checkInterestsLocation(interests);
   if (!locCheck.hasLocation) {
     terminal.warn(
-      `${join(SEEDS_DIR, 'interests.md')} does not mention any location preference.`
+      `${join(DATA_DIR, 'interests.md')} does not mention any location preference.`
     );
     terminal.warn(`  Reason: ${locCheck.reason}`);
 
@@ -99,7 +99,7 @@ async function runSeeding(): Promise<void> {
   terminal.log(
     [
       '',
-      'Review seeds/interests.md and seeds/cv.md against the summary above.',
+      `Review ${join(DATA_DIR, 'interests.md')} and ${join(DATA_DIR, 'cv.md')} against the summary above.`,
       '  - Re-run `jobfinder pipeline seeding` after editing to refresh, or',
       '  - Run `jobfinder pipeline approve-seeds` to queue these seeds for sourcing.',
     ].join('\n')
@@ -363,8 +363,7 @@ async function runAttempt(
     if (accumulated.size === 0) {
       return {
         valid: false,
-        feedback:
-          'All attempts returned zero unique postings (or crashed). Aborting — adjust seeds/interests.md or fix the python env.',
+        feedback: `All attempts returned zero unique postings (or crashed). Aborting — adjust ${join(DATA_DIR, 'interests.md')} or fix the python env.`,
       };
     }
 

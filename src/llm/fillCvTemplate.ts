@@ -19,9 +19,9 @@ export type FillCvTemplateResult = {
 };
 
 /**
- * Ask the LLM to fill `<SEEDS_DIR>/cv-template.html` for a specific job
+ * Ask the LLM to fill `<DATA_DIR>/cv-template.html` for a specific job
  * posting, then ATS-sanitize the result. Reads the user's cv.md and the
- * HTML template directly from the seeds dir (no caller-side plumbing).
+ * HTML template directly from the data dir (no caller-side plumbing).
  *
  * The model is asked to:
  * - substitute every `{{TOKEN}}` in the template,
@@ -49,13 +49,13 @@ export async function fillCvTemplate(args: {
 
   if (!cv) {
     throw new Error(
-      'cv.md is empty or missing in SEEDS_DIR — cannot fill the CV template.'
+      'cv.md is empty or missing in DATA_DIR — cannot fill the CV template.'
     );
   }
 
   if (!template) {
     throw new Error(
-      'cv-template.html is empty or missing in SEEDS_DIR — cannot fill the CV template.'
+      'cv-template.html is empty or missing in DATA_DIR — cannot fill the CV template.'
     );
   }
 

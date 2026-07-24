@@ -70,19 +70,20 @@ export const LLM_LOG_STREAM = false;
 export const AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS = 3;
 
 /**
- * Directory holding the user's seed inputs — `interests.md`, `cv.md`, and
- * their gitignored `*.local.md` overrides. May be relative (resolved against
- * the CWD where you run `jobfinder`) or absolute. Default: `'seeds'` (the
+ * Directory holding the user's data — the seed inputs (`interests.md`,
+ * `cv.md`, and their gitignored `*.local.md` overrides) plus the SQLite
+ * database file named by `DB_NAME`. May be relative (resolved against the
+ * CWD where you run `jobfinder`) or absolute. Default: `'data'` (the
  * repo-local folder).
  */
-export const SEEDS_DIR = './seeds.local';
+export const DATA_DIR = './data.local';
 
 /**
- * Path to the SQLite database file. May be relative (to the CWD where you
- * run `jobfinder`) or absolute. Overridden by the `DB_PATH` env var (e.g.
- * via `.env.local`). Default: `'jobs.db'` (the repo-local file).
+ * File name of the SQLite database. This is a bare file name, not a path:
+ * the database always lives at `DATA_DIR/DB_NAME`, so it cannot escape the
+ * data directory. Default: `'jobs.db'`.
  */
-export const DB_PATH = './jobs.db';
+export const DB_NAME = 'jobs.db';
 
 /**
  * Each `LLM_*_MODEL` is an array of model IDs in fallback order. `llmSend`
@@ -184,7 +185,7 @@ export const LLM_EVALUATION_MODEL = [
 ];
 
 /**
- * The model used to fill the CV template (`<SEEDS_DIR>/cv-template.html`)
+ * The model used to fill the CV template (`<DATA_DIR>/cv-template.html`)
  * for a given job posting. Asked to rewrite the summary, build the
  * competency grid, reorder bullets, and inject keywords ethically from the
  * job's skillRequirements + full JD into the user's cv.md.

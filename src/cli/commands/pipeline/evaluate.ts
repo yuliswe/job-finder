@@ -50,7 +50,7 @@ type EvaluateTarget = {
 export function createEvaluateCommand(): Command {
   return new Command('evaluate')
     .description(
-      'For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.'
+      'For each currently-queued viewed JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -187,13 +187,13 @@ export async function runEvaluate(
 
   if (!interests) {
     terminal.warn(
-      'No user interests found (seeds/interests.local.md or seeds/interests.md). interestScore will be unreliable.'
+      'No user interests found (data/interests.local.md or data/interests.md). interestScore will be unreliable.'
     );
   }
 
   if (!cv) {
     terminal.warn(
-      'No CV found (seeds/cv.local.md or seeds/cv.md). skillScore will be unreliable.'
+      'No CV found (data/cv.local.md or data/cv.md). skillScore will be unreliable.'
     );
   }
 

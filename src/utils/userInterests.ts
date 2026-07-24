@@ -1,14 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { SEEDS_DIR } from 'jobfinder.config.js';
+import { DATA_DIR } from 'jobfinder.config.js';
 
-/** Read `<SEEDS_DIR>/<name>.local.md` if non-empty, else
- * `<SEEDS_DIR>/<name>.md`, else `''`. */
+/** Read `<DATA_DIR>/<name>.local.md` if non-empty, else
+ * `<DATA_DIR>/<name>.md`, else `''`. */
 async function readSeed(name: string): Promise<string> {
   for (const path of [
-    join(SEEDS_DIR, `${name}.local.md`),
-    join(SEEDS_DIR, `${name}.md`),
+    join(DATA_DIR, `${name}.local.md`),
+    join(DATA_DIR, `${name}.md`),
   ]) {
     try {
       const text = (await readFile(path, 'utf-8')).trim();
@@ -22,29 +22,29 @@ async function readSeed(name: string): Promise<string> {
 }
 
 /**
- * Return the user's interests text, preferring `<SEEDS_DIR>/interests.local.md`
+ * Return the user's interests text, preferring `<DATA_DIR>/interests.local.md`
  * (gitignored, real preferences) over the checked-in
- * `<SEEDS_DIR>/interests.md` placeholder. Returns the empty string if neither
- * file exists or both are empty. `SEEDS_DIR` comes from `jobfinder.config.js`.
+ * `<DATA_DIR>/interests.md` placeholder. Returns the empty string if neither
+ * file exists or both are empty. `DATA_DIR` comes from `jobfinder.config.js`.
  */
 export async function getUserInterests(): Promise<string> {
   return readSeed('interests');
 }
 
-/** Same as `getUserInterests`, but for `<SEEDS_DIR>/cv.md` /
- * `<SEEDS_DIR>/cv.local.md`. */
+/** Same as `getUserInterests`, but for `<DATA_DIR>/cv.md` /
+ * `<DATA_DIR>/cv.local.md`. */
 export async function getUserCV(): Promise<string> {
   return readSeed('cv');
 }
 
-/** Read `<SEEDS_DIR>/cv-template.local.html` if non-empty, else
- * `<SEEDS_DIR>/cv-template.html`. The template uses `{{TOKEN}}` placeholders
+/** Read `<DATA_DIR>/cv-template.local.html` if non-empty, else
+ * `<DATA_DIR>/cv-template.html`. The template uses `{{TOKEN}}` placeholders
  * (`{{NAME}}`, `{{SUMMARY_TEXT}}`, `{{EXPERIENCE}}`, etc.) that
  * `fillCvTemplate` asks an LLM to populate per job posting. */
 export async function getUserCvTemplate(): Promise<string> {
   for (const path of [
-    join(SEEDS_DIR, 'cv-template.local.html'),
-    join(SEEDS_DIR, 'cv-template.html'),
+    join(DATA_DIR, 'cv-template.local.html'),
+    join(DATA_DIR, 'cv-template.html'),
   ]) {
     try {
       const text = (await readFile(path, 'utf-8')).trim();
