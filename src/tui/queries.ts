@@ -5,7 +5,7 @@ import {
   PIPELINE_LISTING_MIN_INTEREST_SCORE,
   PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY,
   PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';

@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_LISTING_MODEL } from 'jobfinder.config.js';
+import { LLM_LISTING_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { VERIFY_FILTER_VALUES_SYSTEM_PROMPT } from 'src/prompts/verifyFilterValues.js';
 import { terminal } from 'src/utils/terminal.js';

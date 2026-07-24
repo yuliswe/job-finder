@@ -8,7 +8,7 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { PIPELINE_STATE, recordPipelineState } from 'src/db/pipelineState.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { DATA_DIR, LLM_SEEDING_MODEL } from 'jobfinder.config.js';
+import { DATA_DIR, LLM_SEEDING_MODEL } from 'src/utils/config.js';
 import {
   SEEDING_SUMMARY_SYSTEM_PROMPT,
   SEEDING_SYSTEM_PROMPT,

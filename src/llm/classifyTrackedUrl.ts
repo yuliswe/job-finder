@@ -1,7 +1,7 @@
 import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_VIEWING_MODEL } from 'jobfinder.config.js';
+import { LLM_VIEWING_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';

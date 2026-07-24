@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { DATA_DIR } from 'jobfinder.config.js';
+import { DATA_DIR } from 'src/utils/config.js';
 
 /** Read `<DATA_DIR>/<name>.local.md` if non-empty, else
  * `<DATA_DIR>/<name>.md`, else `''`. */

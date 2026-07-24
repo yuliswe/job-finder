@@ -370,9 +370,12 @@ export default [
     },
   },
 
-  // Env loader is the only allowed reader of process.env
+  // The config loaders are the only allowed readers of process.env:
+  // `config.ts` reads `CONFIG_FILE` to pick which config module to load, and
+  // `env.ts` reads the rest. Both sit below `Env`, so neither can route
+  // through it.
   {
-    files: ['src/utils/env.ts'],
+    files: ['src/utils/config.ts', 'src/utils/env.ts'],
     rules: {
       'no-restricted-syntax': 'off',
     },

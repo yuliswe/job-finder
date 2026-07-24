@@ -13,7 +13,7 @@ import {
   OPENROUTER_API_KEY,
   SERPER_API_KEY,
   TAGS,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 
 const ENV_PATH = '.env';
 const ENV_LOCAL_PATH = '.env.local';

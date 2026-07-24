@@ -5,7 +5,7 @@ import {
   LLM_LISTING_MODEL,
   PIPELINE_LISTING_BFS_MAX_DEPTH,
   PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT } from 'src/prompts/classifyAndRankLinks.js';
 import { VERIFY_IS_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/verifyIsJobPost.js';

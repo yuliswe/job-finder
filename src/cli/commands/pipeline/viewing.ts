@@ -2,7 +2,7 @@ import { Command, Option } from 'commander';
 import pLimit from 'p-limit';
 import type { BrowserContext } from 'patchright';
 
-import { MAX_CONCURRENT_BROWSER_TABS } from 'jobfinder.config.js';
+import { MAX_CONCURRENT_BROWSER_TABS } from 'src/utils/config.js';
 import { Bool } from 'src/db/customTypes.js';
 import { newId } from 'src/db/id.js';
 import { db } from 'src/db/index.js';
