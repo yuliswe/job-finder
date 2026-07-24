@@ -10,6 +10,7 @@ import type {
   LlmReasoningEffort,
 } from 'src/llm/plugins/interface.js';
 import { AnthropicSdkPlugin } from 'src/llm/plugins/anthropicSdk.js';
+import { ClaudeCodeCliPlugin } from 'src/llm/plugins/claudeCodeCli.js';
 import type { LlmPlugin } from 'src/llm/plugins/interface.js';
 import { OllamaPlugin } from 'src/llm/plugins/ollama.js';
 import { OpenRouterPlugin } from 'src/llm/plugins/openRouter.js';
@@ -25,6 +26,7 @@ type PluginName = keyof typeof plugins;
 const plugins = {
   openrouter: new OpenRouterPlugin(),
   anthropic: new AnthropicSdkPlugin(),
+  claudecode: new ClaudeCodeCliPlugin(),
   ollama: new OllamaPlugin(),
 } as const satisfies Record<string, LlmPlugin>;
 
@@ -44,7 +46,11 @@ const sendLimits: Record<PluginName, LimitFunction | null> = Object.fromEntries(
  *  1. Explicit `LLM_REQUEST_CONCURRENCY_MAX` always wins (applies per plugin).
  *  2. Otherwise, Ollama defaults to 1 — local daemons serialize
  *     inference anyway and parallel requests just thrash GPU memory.
- *  3. Otherwise, `null` (unlimited; the provider's own rate limits
+ *  3. Otherwise, `claudecode` defaults to 2 — every call spawns a full
+ *     `claude` subprocess (heavy) and bills against a rate-limited
+ *     subscription, so an unbounded fan-out would both storm the process
+ *     table and trip subscription rate limits.
+ *  4. Otherwise, `null` (unlimited; the provider's own rate limits
  *     are the only cap). */
 function resolveLlmConcurrency(
   pluginName: PluginName,
@@ -52,6 +58,7 @@ function resolveLlmConcurrency(
 ): number | null {
   if (explicit !== undefined) return explicit;
   if (pluginName === 'ollama') return 1;
+  if (pluginName === 'claudecode') return 2;
   return null;
 }
 
@@ -67,7 +74,7 @@ function resolvePluginAndModel(qualifiedModel: string): {
   const sep = qualifiedModel.indexOf('/');
   if (sep === -1) {
     throw new Error(
-      `LLM model "${qualifiedModel}" must be prefixed with a plugin (e.g. "ollama-plugin/gemma4:31b-mlx", "openrouter-plugin/openai/gpt-5-nano", "anthropic-plugin/claude-3-5-sonnet-latest").`
+      `LLM model "${qualifiedModel}" must be prefixed with a plugin (e.g. "ollama-plugin/gemma4:31b-mlx", "openrouter-plugin/openai/gpt-5-nano", "anthropic-plugin/claude-3-5-sonnet-latest", "claudecode-plugin/claude-opus-4-8").`
     );
   }
 
