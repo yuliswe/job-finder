@@ -2,7 +2,7 @@ import { Box, Text, useInput } from 'ink';
 import React, { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { join } from 'node:path';
 
-import { RESUME_OUTPUT_DIR } from 'jobfinder.config.js';
+import { RESUME_OUTPUT_DIR } from 'src/utils/config.js';
 import { fillCvTemplate } from 'src/llm/fillCvTemplate.js';
 import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';

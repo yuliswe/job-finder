@@ -4,7 +4,7 @@ import * as v from 'valibot';
 import {
   LLM_CODING_MODEL,
   PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { PICK_FILTER_OPTIONS_SYSTEM_PROMPT } from 'src/prompts/pickFilterOptions.js';
 import { goToPage, pageEval, withBrowserTab } from 'src/utils/browser.js';

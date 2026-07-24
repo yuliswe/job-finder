@@ -2,6 +2,11 @@
 // running a build. It is symlinked into `dist/` by `npm run build:assets`,
 // so changes here take effect on the very next CLI run.
 //
+// To point `jobfinder` at a different config without editing this file, set
+// the `CONFIG_FILE` environment variable to another module of the same shape
+// (relative paths are resolved against the directory you run `jobfinder`
+// from). When unset it defaults to this file, `./jobfinder.config.js`.
+//
 // Do NOT add imports that depend on the build-time module-resolver alias
 // (e.g. `'src/foo.js'`) — at runtime this file lives at the repo root and
 // Node ESM has no such alias. Keep this file to plain literals + env reads.

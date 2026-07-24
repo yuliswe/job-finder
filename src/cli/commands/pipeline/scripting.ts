@@ -5,7 +5,7 @@ import type { BrowserContext } from 'patchright';
 import {
   LLM_CODING_MODEL,
   MAX_CONCURRENT_BROWSER_TABS,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 import { db } from 'src/db/index.js';
 import {
   enqueuePipelineTask,

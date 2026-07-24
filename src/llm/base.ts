@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { toJsonSchema } from '@valibot/to-json-schema';
-import { AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS } from 'jobfinder.config.js';
+import { AUTO_CHOOSE_NEXT_MODEL_AFTER_N_ATTEMPTS } from 'src/utils/config.js';
 import pLimit, { type LimitFunction } from 'p-limit';
 import * as v from 'valibot';
 

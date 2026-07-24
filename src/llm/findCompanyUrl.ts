@@ -1,7 +1,7 @@
 import type { BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_SOURCING_MODEL } from 'jobfinder.config.js';
+import { LLM_SOURCING_MODEL } from 'src/utils/config.js';
 import { normalizeJobSourceUrl } from 'src/db/normalizeJobSourceUrl.js';
 import { Memory } from 'src/llm/base.js';
 import { verifyCompanyMatch } from 'src/llm/verifyCompanyMatch.js';

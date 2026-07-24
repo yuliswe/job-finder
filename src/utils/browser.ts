@@ -5,7 +5,7 @@ import {
   BROWSER_NAVIGATION_TIMEOUT_MS,
   MAX_CONCURRENT_BROWSER_TABS,
   USE_HEADLESS_BROWSER,
-} from 'jobfinder.config.js';
+} from 'src/utils/config.js';
 import { terminal } from 'src/utils/terminal.js';
 
 /**
