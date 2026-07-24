@@ -68,16 +68,29 @@ export const TASK_ORDER: readonly PipelineTask[] = [
  * fresh parent run is queued, and the child would otherwise race ahead against
  * stale data.
  *
- * `viewing` and `evaluate` both key on `ofJobPostId`: a re-queued `viewing`
- * (via `reset`, `--job-post-id`, or `--all`) can coexist with a queued
- * `evaluate` on the same JobPost, and without this gate `evaluate` would score
- * the stale, about-to-be-overwritten description. The same shape also applies
- * to `listing` ← `sourcing` and `run-scripts` ← `scripting`; add them here if
- * we ever want those pairs gated too.
+ * The three consecutive same-FK pairs in `TASK_ORDER` are all gated here:
+ *
+ *   - `evaluate` ← `viewing` (both key on `ofJobPostId`): a re-queued `viewing`
+ *     can coexist with a queued `evaluate` on the same JobPost, and without
+ *     this gate `evaluate` would score the stale, about-to-be-overwritten
+ *     `description` / `skillRequirements`.
+ *   - `listing` ← `sourcing` (both key on `ofJobSourceId`): a re-queued
+ *     `sourcing` overwrites `url` / `interestScore`, which `listing` reads as
+ *     its qualified / in-scope gate; without the gate `listing` could crawl a
+ *     stale URL that `sourcing` is about to replace.
+ *   - `run-scripts` ← `scripting` (both key on `ofJobListSourceId`): a
+ *     re-queued `scripting` overwrites `parserScript`, which `run-scripts`
+ *     executes; without the gate `run-scripts` could run the old script.
+ *
+ * Each of these is a re-queue race (via `reset <stage>`, `--<entity>-id`, or
+ * `--all`) that `start-pipeline`'s concurrent task loops expose. `seeding` is
+ * the only task with no same-FK neighbour, so it has no entry.
  */
 export const TASK_PARENTS: Partial<
   Record<PipelineTask, readonly PipelineTask[]>
 > = {
+  listing: ['sourcing'],
+  'run-scripts': ['scripting'],
   evaluate: ['viewing'],
 };
 
@@ -559,10 +572,15 @@ export function notDoneForPipelineTask<
  * out-of-scope parent must NOT pin the child forever — see
  * `parentsSettledForPipelineTask`. Keyed by parent task; extend alongside
  * `TASK_PARENTS`. The predicate runs over the CHILD's parent table, which by
- * the same-entity invariant is also the parent task's table. */
+ * the same-entity invariant is also the parent task's table — so each entry is
+ * cast to the erased signature `parentsSettledForPipelineTask` invokes it with
+ * (the same runtime-safe narrowing escape hatch used across this file). */
+type ParentScopePredicate = (eb: ExpressionBuilder<DB, 'JobPost'>) => unknown;
 const PARENT_SCOPE_BY_TASK: Partial<
-  Record<PipelineTask, (eb: ExpressionBuilder<DB, 'JobPost'>) => unknown>
+  Record<PipelineTask, ParentScopePredicate>
 > = {
+  sourcing: inScopeForSourcing as unknown as ParentScopePredicate,
+  scripting: inScopeForScripting as unknown as ParentScopePredicate,
   viewing: inScopeForViewing,
 };
 
@@ -577,10 +595,11 @@ const PARENT_SCOPE_BY_TASK: Partial<
  * in-scope conjunct keeps a force-queued but out-of-scope parent — which the
  * parent's own picker will never touch — from pinning the child forever. This
  * matters only for a pair whose child scope is NOT a subset of the parent
- * scope. For the current linear-pipeline pairs (evaluate ← viewing, and the
- * listing/run-scripts pairs if ever added) the child's `inScopeForX` already
- * AND-embeds the parent's, so the conjunct is redundant-but-safe there; it is
- * kept so the generic mechanism stays correct for any future non-subset pair.
+ * scope. For all three current linear-pipeline pairs (evaluate ← viewing,
+ * listing ← sourcing, run-scripts ← scripting) the child's `inScopeForX`
+ * already AND-embeds the parent's, so the conjunct is redundant-but-safe there;
+ * it is kept so the generic mechanism stays correct for any future non-subset
+ * pair.
  *
  * Example:
  *   db.selectFrom('JobPost').where(parentsSettledForPipelineTask({

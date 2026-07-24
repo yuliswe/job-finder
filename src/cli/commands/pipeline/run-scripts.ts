@@ -8,6 +8,7 @@ import { newId } from 'src/db/id.js';
 import {
   enqueuePipelineTask,
   PIPELINE_STATE,
+  parentsSettledForPipelineTask,
   pickerStateFilter,
   pipelineModeFromOptions,
   processOne,
@@ -131,7 +132,18 @@ async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
     .selectFrom('JobListSource')
     .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
     .where(qualifiedForRunScripts)
-    .where(inScopeForRunScripts);
+    .where(inScopeForRunScripts)
+    // Hold run-scripts while a fresh scripting is still pending on the same
+    // list source, so we never execute a stale parserScript that scripting is
+    // about to overwrite. Applied in every mode (correctness, not a state
+    // filter); the explicit --job-list-source-id branch below bypasses it as a
+    // manual override.
+    .where(
+      parentsSettledForPipelineTask({
+        task: 'run-scripts',
+        parentIdRef: 'JobListSource.id',
+      })
+    );
 
   if (stateFilter) query = query.where(stateFilter);
 
