@@ -40,6 +40,13 @@ const TASKS: readonly TaskName[] = [
   'evaluate',
 ];
 
+/** Tasks that surface results to the user (a viewed post's fields, then its
+ * scores). They run without deference. The remaining upstream tasks keep
+ * generating more JobPosts to view/evaluate, so we let those two drain their
+ * backlog before upstream produces more — see `PRIORITY_TASKS` usage in
+ * `runLoop`. */
+const PRIORITY_TASKS: readonly TaskName[] = ['viewing', 'evaluate'];
+
 /** Per-task bookkeeping the global drain check consults after every iteration.
  * `lastSeenGen` is the value of `gen` observed at the end of the task's most
  * recent iteration — paired with `lastProcessed===0` and `!running` it proves
@@ -67,7 +74,7 @@ type StartPipelineOptions = {
 export function createStartPipelineCommand(): Command {
   return new Command('start-pipeline')
     .description(
-      'Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.'
+      'Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. viewing and evaluate are prioritized: the upstream tasks (sourcing/listing/scripting/run-scripts) defer their next iteration while either of those two still has work, so the current backlog is viewed and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.'
     )
     .addOption(
       new Option(
@@ -130,7 +137,7 @@ async function runAllLoopsLocked(opts: StartPipelineOptions): Promise<void> {
   };
 
   terminal.log(
-    `Starting start-pipeline orchestrator: ${TASKS.length} tasks, idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
+    `Starting start-pipeline orchestrator: ${TASKS.length} tasks (prioritizing ${PRIORITY_TASKS.join(' + ')}), idle poll = ${IDLE_POLL_MS / 1000}s${opts.includeFailed ? ' (--include-failed: passed to each task on first iteration)' : ''}`
   );
 
   // Every iteration runs with suppressNothingToDoLog so tasks don't
@@ -194,6 +201,7 @@ async function runLoop(
   fn: (iterOpts: IterationOpts) => Promise<{ processed: number }>
 ): Promise<void> {
   const slot = orchestrator.state[name];
+  const deprioritized = !PRIORITY_TASKS.includes(name);
   // `firstOpts` (e.g. {includeFailed:true, suppressNothingToDoLog:true}
   // from --include-failed) is consumed on iteration 1 only; subsequent
   // iterations get `{ suppressNothingToDoLog: true }` so a failure
@@ -202,6 +210,20 @@ async function runLoop(
   let nextOpts: IterationOpts = firstOpts;
 
   while (!orchestrator.shutdown) {
+    // Deprioritized (upstream) tasks yield to viewing/evaluate: they don't
+    // start an iteration while either priority task is still running or its
+    // most recent iteration processed work. This makes start-pipeline surface
+    // viewed/evaluated results for the current backlog before generating more
+    // JobPosts. `slot.running` stays false during the wait, but the priority
+    // tasks' own `running` flags keep `isFullyDrained` from firing early.
+    if (deprioritized) {
+      while (!orchestrator.shutdown && priorityTasksBusy(orchestrator)) {
+        await sleepInterruptible(orchestrator, IDLE_POLL_MS);
+      }
+
+      if (orchestrator.shutdown) break;
+    }
+
     slot.running = true;
     let processed = 0;
     const iterOpts = nextOpts;
@@ -246,6 +268,18 @@ function isFullyDrained(orchestrator: Orchestrator): boolean {
     s =>
       !s.running && s.lastProcessed === 0 && s.lastSeenGen === orchestrator.gen
   );
+}
+
+/** True while any priority (viewing/evaluate) task is mid-iteration or its most
+ * recent iteration processed work — i.e. more may still be queued. Deprioritized
+ * tasks defer their next iteration until this goes false. The `running: true`
+ * init sentinel makes this report busy until both priority tasks have completed
+ * their first iteration, so upstream never races ahead at startup. */
+function priorityTasksBusy(orchestrator: Orchestrator): boolean {
+  return PRIORITY_TASKS.some(name => {
+    const s = orchestrator.state[name];
+    return s.running || s.lastProcessed > 0;
+  });
 }
 
 function wakeAll(orchestrator: Orchestrator): void {
