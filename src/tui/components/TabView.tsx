@@ -8,6 +8,7 @@ import { SourceList } from 'src/tui/components/SourceList.js';
 import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
+  toggleJobPostBump,
   toggleJobPostTag,
   toggleSourceActive,
   type JobPostRow,
@@ -133,6 +134,13 @@ export function TabView({
           setTagPickerMode(input === 'T' ? 'remove' : 'add');
         }
 
+        return;
+      }
+
+      // Toggle the manual priority bump on the focused JobPost (Jobs tab only).
+      if (input === 'b' && tab === 'jobs') {
+        const row = jobPosts?.[cursor];
+        if (row) void toggleJobPostBump(row.id);
         return;
       }
 

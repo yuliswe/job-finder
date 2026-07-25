@@ -10,6 +10,7 @@ const HINTS: { keys: string; label: string }[] = [
   { keys: 's/S', label: 'sort next/prev' },
   { keys: 'a', label: 'toggle active (Source)' },
   { keys: 't/T', label: 'tag / untag (Job)' },
+  { keys: 'b', label: 'bump priority (Job)' },
   { keys: 'o/O', label: 'scope all / out-of-scope only' },
   { keys: 'l', label: 'open url' },
   { keys: 'q/Esc', label: 'quit' },

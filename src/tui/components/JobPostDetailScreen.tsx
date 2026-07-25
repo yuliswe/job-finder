@@ -7,6 +7,7 @@ import { fillCvTemplate } from 'src/llm/fillCvTemplate.js';
 import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
 import {
+  toggleJobPostBump,
   toggleJobPostExcluded,
   toggleJobPostTag,
   type JobPostRow,
@@ -129,6 +130,11 @@ export function JobPostDetailScreen({
       return;
     }
 
+    if (input === 'b') {
+      void toggleJobPostBump(row.id);
+      return;
+    }
+
     if (key.downArrow || input === 'j') {
       setScroll(s => Math.min(maxScroll, s + 1));
       return;
@@ -230,7 +236,8 @@ export function JobPostDetailScreen({
           <Text color='cyan'>y</Text> copy url · <Text color='cyan'>p</Text>{' '}
           tailored CV pdf · <Text color='cyan'>t/T</Text> tag/untag ·{' '}
           <Text color='cyan'>x</Text> {excluded ? 'un-exclude' : 'exclude'} ·{' '}
-          <Text color='cyan'>Esc/q</Text> back
+          <Text color='cyan'>b</Text> bump · <Text color='cyan'>Esc/q</Text>{' '}
+          back
         </Text>
       </Box>
       {tagPickerMode != null && (

@@ -9,6 +9,7 @@ import {
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
+import { setJobPostPriorityBump } from 'src/db/jobPostPriority.js';
 import {
   ELIGIBLE_FOR_PICKUP_STATES,
   FAILED_STATES,
@@ -126,6 +127,10 @@ export type JobPostRow = {
   /** User-applied color tags (keys from `TAGS` config), sorted
    * alphabetically. Empty array when the post is untagged. */
   tags: string[];
+  /** ISO timestamp of the last manual priority bump, or `null` when the post
+   * has never been bumped. A non-null value lifts the post ahead of the
+   * backlog in the viewing/evaluate pickers; see `toggleJobPostBump`. */
+  priorityBumpedAt: string | null;
 };
 
 export type SourceRow = {
@@ -500,6 +505,7 @@ export async function listJobPosts(args: {
     'JobPost.tags as tagsJson',
     'JobPost.isManuallyExcluded as isManuallyExcluded',
     'JobPost.manualExclusionReason as manualExclusionReason',
+    'JobPost.priorityBumpedAt as priorityBumpedAt',
     'JobPostEval.titleRelavency as titleRelavency',
     'JobPostEval.titleRelavencyReason as titleRelavencyReason',
     'JobPostEval.locationRelevancy as locationRelevancy',
@@ -692,6 +698,24 @@ export async function toggleJobPostExcluded(
 
   bumpLocalRevision();
   return { isManuallyExcluded: next };
+}
+
+/** Toggle the manual priority bump on a JobPost: stamp `priorityBumpedAt` with
+ * the current time when it is unset, or clear it when already bumped. A bumped
+ * post is picked ahead of the backlog in the viewing/evaluate stages, and
+ * re-stamping a second post lifts it above the first ("stackable by
+ * recency"). Bumps the local revision so the TUI refetches immediately. */
+export async function toggleJobPostBump(jobPostId: string): Promise<void> {
+  const existing = await db
+    .selectFrom('JobPost')
+    .select('priorityBumpedAt')
+    .where('id', '=', jobPostId)
+    .executeTakeFirst();
+
+  const next = existing?.priorityBumpedAt ? null : new Date().toISOString();
+  await setJobPostPriorityBump(jobPostId, next);
+
+  bumpLocalRevision();
 }
 
 /** Formats a status cell as `<state>: <stage>`, with an optional trailing

@@ -115,7 +115,12 @@ async function pickViewingTargets(
     .selectFrom('JobPost')
     .select(['JobPost.id as id', 'JobPost.url as url'])
     .where(qualifiedForViewing)
-    .where(inScopeForViewing);
+    .where(inScopeForViewing)
+    // Manual priority bump: a bumped post sorts ahead of the backlog so it
+    // lands in the first concurrency batch, and a more recent bump outranks an
+    // older one. Unbumped rows (priorityBumpedAt IS NULL) sort last and keep
+    // their prior relative order. See `jobfinder job bump` / `setJobPostPriorityBump`.
+    .orderBy('JobPost.priorityBumpedAt', ob => ob.desc().nullsLast());
 
   if (stateFilter) query = query.where(stateFilter);
 

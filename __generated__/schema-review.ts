@@ -58,12 +58,14 @@ type JobPost = {
   url: Text;
   company?: Text;
   description?: Text;
+  fillFormScript?: Text;
   isRemote?: Bool;
   jobType?: Text;
   location?: Text;
   manualExclusionReason?: Text;
   postedAt?: Timestamp;
   postedAtSource?: Text;
+  priorityBumpedAt?: Text;
   salaryCurrency?: Text;
   salaryInterval?: Text;
   salaryMax?: Real;
@@ -76,6 +78,7 @@ type JobPost = {
   ofJobListSourceId?: Text | ON_DELETE.SET_NULL | JobListSource['id'];
   // ── indexes ──
   _indexes: {
+    priorityBumpedAt: [JobPost['priorityBumpedAt']];
     isManuallyExcluded: [JobPost['isManuallyExcluded']];
     createdAt: [JobPost['createdAt']];
     postedAt: [JobPost['postedAt']];

@@ -191,6 +191,23 @@ jobfinder reset run-scripts --failed
 
 Unlike `--all`, the `--no-result` and `--failed` selectors key off each entity's current (latest) pipeline state, so they touch only the rows that actually reached one of those states.
 
+## `job bump`
+
+Manually prioritize a single JobPost so it clears the `viewing` and `evaluate` stages ahead of the rest of the backlog. The two pickers order their eligible rows by the bump timestamp (most recently bumped first, unbumped last), so under contention a bumped post lands in the first concurrency batch and flows through both stages before its peers.
+
+```bash
+# Prioritize one post — it will be viewed and evaluated ahead of the others
+jobfinder job bump 0192...abcd
+
+# Bump a second post: because ordering is by recency, it now outranks the first
+jobfinder job bump 0192...ef01
+
+# Remove the bump
+jobfinder job bump 0192...abcd --clear
+```
+
+Bumps are cumulative and persist until you clear them or the post finishes evaluating and drops out of the pickers. In the TUI, press `b` on a highlighted job to toggle its bump; bumped rows show a yellow `▲` in the `pri` column.
+
 ## `export jobs`
 
 Dump fully-evaluated JobPost rows (status=`Done`) to a CSV file — i.e. posts in an active source tree, above the title-relevancy threshold, with viewing + evaluate already populated. Useful for ad-hoc analysis in a spreadsheet / pandas.

@@ -139,7 +139,12 @@ async function pickEvaluateTargets(
         task: 'evaluate',
         parentIdRef: 'JobPost.id',
       })
-    );
+    )
+    // Manual priority bump: a bumped post sorts ahead of the backlog so it is
+    // evaluated first, and a more recent bump outranks an older one. Unbumped
+    // rows (priorityBumpedAt IS NULL) sort last and keep their prior relative
+    // order. See `jobfinder job bump` / `setJobPostPriorityBump`.
+    .orderBy('JobPost.priorityBumpedAt', ob => ob.desc().nullsLast());
 
   if (stateFilter) query = query.where(stateFilter);
 

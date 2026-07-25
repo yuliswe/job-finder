@@ -15,7 +15,7 @@
       "commands": [
         {
           "name": "seeding",
-          "description": "Seed SourceSeed table from seeds/interests.md via an LLM-driven jobspy call",
+          "description": "Seed SourceSeed table from <DATA_DIR>/interests.md via an LLM-driven jobspy call",
           "usage": "[options]"
         },
         {
@@ -155,7 +155,7 @@
         },
         {
           "name": "evaluate",
-          "description": "For each currently-queued viewed JobPost, score interest + skill against seeds/interests.md and seeds/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.",
+          "description": "For each currently-queued viewed JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -176,6 +176,30 @@
               "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`."
             }
           ]
+        },
+        {
+          "name": "fill-form",
+          "description": "Generate and store a résumé fill-form script (discoverFields + fillForm) for each currently-queued JobPost and save it in JobPost.fillFormScript. Never submits. This stage is NOT run by `start-pipeline`; queue posts explicitly (e.g. via `jobfinder fill-form <id|url>`). By default only queues the selected rows; pass --start to process them now.",
+          "usage": "[options]",
+          "options": [
+            {
+              "flags": "--all",
+              "description": "Re-process every qualifying in-scope JobPost regardless of pipeline state, overwriting fillFormScript on success. Use after a prompt change."
+            },
+            {
+              "flags": "--include-failed",
+              "description": "Also retry rows in failed / aborted / no_result state (default skips them). Mutually exclusive with --all."
+            },
+            {
+              "flags": "--job-post-id <id>",
+              "description": "Re-process only the JobPost with this ID, regardless of pipeline state or qualification.",
+              "required": true
+            },
+            {
+              "flags": "--start",
+              "description": "Process the selected rows now. Without this flag the command only queues them for a later `--start`."
+            }
+          ]
         }
       ]
     },
@@ -194,7 +218,8 @@
             "scripting",
             "run-scripts",
             "viewing",
-            "evaluate"
+            "evaluate",
+            "fill-form"
           ]
         }
       ],
@@ -216,7 +241,7 @@
     },
     {
       "name": "start-pipeline",
-      "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. Each loop sleeps 5s only when its previous iteration found nothing to do.",
+      "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. viewing and evaluate are prioritized: the upstream tasks (sourcing/listing/scripting/run-scripts) defer their next iteration while either of those two still has work, so the current backlog is viewed and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.",
       "usage": "[options]",
       "options": [
         {
@@ -272,6 +297,102 @@
         {
           "name": "url",
           "description": "URL of a job posting or a careers / jobs index page.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "job",
+      "description": "Act on a single job post (identified by its id or url).",
+      "usage": "[options] [command]",
+      "commands": [
+        {
+          "name": "exclude",
+          "description": "Manually mark a job post out of scope so the pipeline skips it and the TUI hides it from the default view.",
+          "usage": "[options] <id-or-url>",
+          "arguments": [
+            {
+              "name": "id-or-url",
+              "description": "JobPost id (UUIDv7) or url.",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "flags": "--reason <text>",
+              "description": "Note recorded alongside the exclusion.",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "include",
+          "description": "Reverse a manual exclusion, letting the post re-enter scope (subject to the usual active-tree and relevancy gates).",
+          "usage": "[options] <id-or-url>",
+          "arguments": [
+            {
+              "name": "id-or-url",
+              "description": "JobPost id (UUIDv7) or url.",
+              "required": true
+            }
+          ]
+        },
+        {
+          "name": "bump",
+          "description": "Manually prioritize a JobPost so it clears the viewing and evaluate stages ahead of the rest. The pickers order by the bump timestamp (most recently bumped first), so bumping several posts stacks them by recency. Pass --clear to remove the bump.",
+          "usage": "[options] <jobPostId>",
+          "arguments": [
+            {
+              "name": "jobPostId",
+              "description": "ID of the JobPost to prioritize (or clear).",
+              "required": true
+            }
+          ],
+          "options": [
+            {
+              "flags": "--clear",
+              "description": "Remove the priority bump on the JobPost instead of adding one."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "fill-form",
+      "description": "Open a job application form and auto-fill it from your applicant profile (data/profile.local.md), WITHOUT submitting. Given a JobPost id it fills that post; given a URL it find-or-creates the post (bootstrapping a placeholder company + queuing sourcing/viewing) first. Caches the generated fill script on JobPost.fillFormScript.",
+      "usage": "[options] <jobPostIdOrUrl>",
+      "arguments": [
+        {
+          "name": "jobPostIdOrUrl",
+          "description": "A JobPost id, or the URL of a job application form / posting.",
+          "required": true
+        }
+      ],
+      "options": [
+        {
+          "flags": "--regenerate",
+          "description": "Discard any cached fillFormScript and generate a fresh one."
+        },
+        {
+          "flags": "--generate-only",
+          "description": "Generate and store the fill script but do not open the interactive fill."
+        },
+        {
+          "flags": "--no-bootstrap",
+          "description": "When given a URL with no existing JobPost, fail instead of creating one.",
+          "negate": true
+        },
+        {
+          "flags": "--headed",
+          "description": "Force a visible browser for the fill (default)."
+        },
+        {
+          "flags": "--headless",
+          "description": "Run the fill in a headless browser (still screenshots + reports the filled values)."
+        },
+        {
+          "flags": "--screenshot <path>",
+          "description": "Where to write a screenshot of the filled form. Defaults to <RESUME_OUTPUT_DIR>/fill-form-<jobPostId>.png.",
           "required": true
         }
       ]
