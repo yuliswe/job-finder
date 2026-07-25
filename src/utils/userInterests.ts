@@ -37,6 +37,15 @@ export async function getUserCV(): Promise<string> {
   return readSeed('cv');
 }
 
+/** The user's structured applicant profile — the discrete fields an
+ * application form asks for (name, email, phone, work authorization, links,
+ * …), preferring `<DATA_DIR>/profile.local.md` (gitignored, real data) over
+ * `<DATA_DIR>/profile.md`. Consumed by the fill-form stage; returns the empty
+ * string if neither file exists. */
+export async function getApplicantProfile(): Promise<string> {
+  return readSeed('profile');
+}
+
 /** Read `<DATA_DIR>/cv-template.local.html` if non-empty, else
  * `<DATA_DIR>/cv-template.html`. The template uses `{{TOKEN}}` placeholders
  * (`{{NAME}}`, `{{SUMMARY_TEXT}}`, `{{EXPERIENCE}}`, etc.) that

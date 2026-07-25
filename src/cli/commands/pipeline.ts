@@ -2,6 +2,7 @@ import { Command } from 'commander';
 
 import { createApproveSeedsCommand } from 'src/cli/commands/pipeline/approve-seeds.js';
 import { createEvaluateCommand } from 'src/cli/commands/pipeline/evaluate.js';
+import { createFillFormStageCommand } from 'src/cli/commands/pipeline/fill-form.js';
 import { createListingCommand } from 'src/cli/commands/pipeline/listing.js';
 import { createRunScriptsCommand } from 'src/cli/commands/pipeline/run-scripts.js';
 import { createScriptingCommand } from 'src/cli/commands/pipeline/scripting.js';
@@ -19,5 +20,6 @@ export function createPipelineCommand(): Command {
   pipeline.addCommand(createRunScriptsCommand());
   pipeline.addCommand(createViewingCommand());
   pipeline.addCommand(createEvaluateCommand());
+  pipeline.addCommand(createFillFormStageCommand());
   return pipeline;
 }

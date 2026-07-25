@@ -4,6 +4,7 @@ import { Command } from 'commander';
 
 import { createCompletionCommand } from 'src/cli/commands/completion.js';
 import { createExportCommand } from 'src/cli/commands/export.js';
+import { createFillFormCommand } from 'src/cli/commands/fill-form.js';
 import { createHelpMenuDumpCommand } from 'src/cli/commands/help-menu-dump.js';
 import { createInitCommand } from 'src/cli/commands/init.js';
 import { createJobCommand } from 'src/cli/commands/job.js';
@@ -29,6 +30,7 @@ program.addCommand(createStartPipelineCommand());
 program.addCommand(createExportCommand());
 program.addCommand(createTrackCommand());
 program.addCommand(createJobCommand());
+program.addCommand(createFillFormCommand());
 program.addCommand(createTuiCommand());
 program.addCommand(createCompletionCommand(program));
 program.addCommand(createHelpMenuDumpCommand(program));
