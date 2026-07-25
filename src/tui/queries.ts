@@ -100,18 +100,27 @@ export type JobPostRow = {
   description: string | null;
   summary: string | null;
   /** True iff the post is out of scope for the viewing/evaluate pipeline —
-   * its source tree has been deactivated, OR `titleRelavency` came back below
-   * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`, OR `locationRelevancy` came back
-   * below `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`. Null relevancy is NOT
+   * the user manually excluded it, OR its source tree has been deactivated,
+   * OR `titleRelavency` came back below `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`,
+   * OR `locationRelevancy` came back below
+   * `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`. Null relevancy is NOT
    * considered out-of-scope (treated as "not yet evaluated", same as the
    * listing-scope rule treats null interestScore on Sources). The TUI uses
    * this to dim out-of-scope rows when they're surfaced via the 'all' or
    * 'out' scope filter. */
   isOutOfScopeForViewing: boolean;
   /** Human-readable cause when `isOutOfScopeForViewing` is true (e.g.
-   * `'deactivated'`, `'low title relevancy'`, `'location mismatch'`), else
-   * `null`. Surfaced in the detail panel; see `jobPostOutOfScopeReason`. */
+   * `'manually excluded'`, `'deactivated'`, `'low title relevancy'`,
+   * `'location mismatch'`), else `null`. Surfaced in the detail panel; see
+   * `jobPostOutOfScopeReason`. */
   outOfScopeReason: string | null;
+  /** True iff the user manually pushed this post out of scope. Drives the
+   * `x` toggle's label in the detail screen and shadows every derived
+   * out-of-scope reason. */
+  isManuallyExcluded: boolean;
+  /** The note attached when the post was manually excluded (via
+   * `jobfinder job exclude --reason` or the TUI), else `null`. */
+  manualExclusionReason: string | null;
   /** Single-line summary of where this post is in the pipeline. Computed
    * from the other fields; see `computeJobPostStatus`. */
   status: string;
@@ -431,12 +440,13 @@ export async function listJobPosts(args: {
       .where(inScopeForViewing)
       .where(locationRelevancyInScope);
   } else if (scope === 'out') {
-    // Out-of-scope = NOT in active source tree, OR title relevancy is known
-    // AND below threshold, OR location relevancy is known AND below threshold.
-    // Null relevancy stays in 'in' as backlog (matches the Sources-scope
-    // treatment of null interestScore).
+    // Out-of-scope = manually excluded, OR NOT in active source tree, OR title
+    // relevancy is known AND below threshold, OR location relevancy is known
+    // AND below threshold. Null relevancy stays in 'in' as backlog (matches the
+    // Sources-scope treatment of null interestScore).
     base = base.where(eb =>
       eb.or([
+        eb('JobPost.isManuallyExcluded', '=', Bool.True),
         eb.not(jobPostInActiveSource(eb)),
         eb.and([
           eb('JobPostEval.titleRelavency', 'is not', null),
@@ -475,6 +485,8 @@ export async function listJobPosts(args: {
     'JobPost.summary as summary',
     'JobPost.skillRequirements as skillRequirementsJson',
     'JobPost.tags as tagsJson',
+    'JobPost.isManuallyExcluded as isManuallyExcluded',
+    'JobPost.manualExclusionReason as manualExclusionReason',
     'JobPostEval.titleRelavency as titleRelavency',
     'JobPostEval.titleRelavencyReason as titleRelavencyReason',
     'JobPostEval.locationRelevancy as locationRelevancy',
@@ -557,6 +569,7 @@ export async function listJobPosts(args: {
       listSourceIsActive,
       viewingState,
       evaluateState,
+      isManuallyExcluded: isManuallyExcludedRaw,
       ...rest
     } = r;
 
@@ -567,7 +580,10 @@ export async function listJobPosts(args: {
       sourceIsActive === 1 &&
       (listSourceIsActive == null || listSourceIsActive === 1);
 
+    const manuallyExcluded = isManuallyExcludedRaw === Bool.True;
+
     const outOfScopeReason = jobPostOutOfScopeReason({
+      manuallyExcluded,
       inActiveTree,
       titleRelavency: r.titleRelavency,
       locationRelevancy: r.locationRelevancy,
@@ -577,6 +593,7 @@ export async function listJobPosts(args: {
 
     return {
       ...rest,
+      isManuallyExcluded: manuallyExcluded,
       postedAtSource: narrowPostedAtSource(r.postedAtSource),
       skillScoreBreakdown: parseJsonArray<SkillBreakdownEntry>(
         skillScoreBreakdownJson
@@ -591,6 +608,7 @@ export async function listJobPosts(args: {
       isOutOfScopeForViewing,
       outOfScopeReason,
       status: computeJobPostStatus({
+        manuallyExcluded,
         inActiveTree,
         titleRelavency: r.titleRelavency,
         locationRelevancy: r.locationRelevancy,
@@ -633,6 +651,36 @@ export async function toggleJobPostTag(
   bumpLocalRevision();
 }
 
+/** Flip a JobPost's manual out-of-scope override and return the new state so
+ * the caller can reflect it immediately. Excluding stamps a default reason
+ * (the CLI's `--reason` is where a specific note goes); including clears it.
+ * Bumps the local revision so the row re-renders — dimmed, or dropping out of
+ * the `in` filter — without waiting for the next 1s poll. */
+export async function toggleJobPostExcluded(
+  jobPostId: string
+): Promise<{ isManuallyExcluded: boolean }> {
+  const existing = await db
+    .selectFrom('JobPost')
+    .select('isManuallyExcluded')
+    .where('id', '=', jobPostId)
+    .executeTakeFirst();
+
+  const next = existing?.isManuallyExcluded !== Bool.True;
+
+  await db
+    .updateTable('JobPost')
+    .set({
+      isManuallyExcluded: next ? Bool.True : Bool.False,
+      manualExclusionReason: next ? 'excluded from TUI' : null,
+      updatedAt: sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    })
+    .where('id', '=', jobPostId)
+    .execute();
+
+  bumpLocalRevision();
+  return { isManuallyExcluded: next };
+}
+
 /** Formats a status cell as `<state>: <stage>`, with an optional trailing
  * `(reason)` when the state needs qualifying (out-of-scope cause, abort
  * message). Both the JobPost and Source status columns render through this
@@ -648,16 +696,20 @@ function fmtStatus(
 /** Why a JobPost fails `inScopeForViewing`, or `null` when it is in scope.
  * Drives both the `isOutOfScopeForViewing` flag and the `outOfScopeReason`
  * the detail panel surfaces, so the two can never disagree. The reasons are
- * checked in priority order so that a deactivated source tree shadows the
- * relevancy checks. `computeJobPostStatus` mirrors the same conditions for
- * the list's status cell, where it additionally names the pipeline stage
- * each verdict blocks. */
+ * checked in priority order so that a manual exclusion shadows a deactivated
+ * source tree, which in turn shadows the relevancy checks.
+ * `computeJobPostStatus` mirrors the same conditions for the list's status
+ * cell, where it additionally names the pipeline stage each verdict blocks. */
 function jobPostOutOfScopeReason(args: {
+  manuallyExcluded: boolean;
   inActiveTree: boolean;
   titleRelavency: number | null;
   locationRelevancy: number | null;
 }): string | null {
-  const { inActiveTree, titleRelavency, locationRelevancy } = args;
+  const { manuallyExcluded, inActiveTree, titleRelavency, locationRelevancy } =
+    args;
+
+  if (manuallyExcluded) return 'manually excluded';
   if (!inActiveTree) return 'deactivated';
   if (
     titleRelavency != null &&
@@ -703,6 +755,7 @@ function pendingStageLabel(state: string | null): string | null {
  * populated. Viewing is checked before evaluate because a row requeued for
  * viewing will be re-viewed before it is re-evaluated. */
 function computeJobPostStatus(args: {
+  manuallyExcluded: boolean;
   inActiveTree: boolean;
   titleRelavency: number | null;
   locationRelevancy: number | null;
@@ -712,6 +765,7 @@ function computeJobPostStatus(args: {
   evaluateState: string | null;
 }): string {
   const {
+    manuallyExcluded,
     inActiveTree,
     titleRelavency,
     locationRelevancy,
@@ -721,6 +775,8 @@ function computeJobPostStatus(args: {
     evaluateState,
   } = args;
 
+  if (manuallyExcluded)
+    return fmtStatus('Out-of-scope', 'viewing', 'manually excluded');
   if (!inActiveTree) return fmtStatus('Out-of-scope', 'viewing', 'deactivated');
   if (
     titleRelavency != null &&

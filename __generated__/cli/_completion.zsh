@@ -122,12 +122,37 @@ _jobfinder_track() {
     '1:url:'
 }
 
+_jobfinder_job_exclude() {
+  _arguments -s -S \
+    '1:id-or-url:' \
+    '--reason[reason]:reason:'
+}
+
+_jobfinder_job_include() {
+  _arguments -s -S \
+    '1:id-or-url:'
+}
+
+_jobfinder_job() {
+  local state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1:subcommand:(exclude include)' \
+    '*:: :->args'
+
+  case $state in
+    args)
+      case $line[1] in
+    exclude) _jobfinder_job_exclude ;;
+    include) _jobfinder_job_include ;;
+      esac
+      ;;
+  esac
+}
+
 _jobfinder_tui() {
   _arguments -s -S \
-    '--tab[tab]:tab:(jobs sources)' \
-    '--sort[sort]:sort:(all interest skill location excl. interest excl. location)' \
-    '--sources-sort[sources-sort]:sources-sort:(interest posts name)' \
-    '--non-interactive[non-interactive]' \
     '--harness[harness]' \
     '--harness-port[harness-port]:harness-port:'
 }
@@ -143,7 +168,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init pipeline reset start-pipeline export track tui completion help-menu-dump)' \
+    '1:subcommand:(init pipeline reset start-pipeline export track job tui completion help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -155,6 +180,7 @@ _jobfinder() {
     start-pipeline) _jobfinder_start_pipeline ;;
     export) _jobfinder_export ;;
     track) _jobfinder_track ;;
+    job) _jobfinder_job ;;
     tui) _jobfinder_tui ;;
     completion) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;
@@ -164,5 +190,3 @@ _jobfinder() {
 }
 
 compdef _jobfinder jobfinder ./bin/jobfinder
-
-[34m# wrote /Users/yuli/lab/job-finder/.claude/worktrees/reset-command/__generated__/cli/_completion.zsh[39m

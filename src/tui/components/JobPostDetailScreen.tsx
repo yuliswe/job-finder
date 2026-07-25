@@ -6,7 +6,11 @@ import { RESUME_OUTPUT_DIR } from 'src/utils/config.js';
 import { fillCvTemplate } from 'src/llm/fillCvTemplate.js';
 import { TagMenuBar } from 'src/tui/components/TagMenuBar.js';
 import { useTerminalSize } from 'src/tui/components/useTerminalSize.js';
-import { toggleJobPostTag, type JobPostRow } from 'src/tui/queries.js';
+import {
+  toggleJobPostExcluded,
+  toggleJobPostTag,
+  type JobPostRow,
+} from 'src/tui/queries.js';
 import { copyToClipboard } from 'src/tui/utils/clipboard.js';
 import { fmtSalary, fmtScore } from 'src/tui/utils/format.js';
 import { openFile } from 'src/tui/utils/openFile.js';
@@ -54,13 +58,19 @@ export function JobPostDetailScreen({
     null
   );
 
+  // Local mirror of the manual out-of-scope flag so the `x` toggle updates the
+  // footer instantly. The row prop stops updating once the post drops out of
+  // the `in` filter, so we can't read `row.isManuallyExcluded` after toggling.
+  const [excluded, setExcluded] = useState(row.isManuallyExcluded);
+
   // Reset scroll AND PDF status when the row changes (defensive — usually
   // unmounted/remounted).
   useEffect(() => {
     setScroll(0);
     setPdfStatus({ kind: 'idle' });
     setPdfLog([]);
-  }, [row.id]);
+    setExcluded(row.isManuallyExcluded);
+  }, [row.id, row.isManuallyExcluded]);
 
   // The fixed top/bottom chrome is intentionally minimal so the wrapped
   // scoring/breakdown/description content has room to breathe.
@@ -109,6 +119,13 @@ export function JobPostDetailScreen({
 
     if (input === 't' || input === 'T') {
       setTagPickerMode(input === 'T' ? 'remove' : 'add');
+      return;
+    }
+
+    if (input === 'x' || input === 'X') {
+      void toggleJobPostExcluded(row.id).then(r =>
+        setExcluded(r.isManuallyExcluded)
+      );
       return;
     }
 
@@ -212,6 +229,7 @@ export function JobPostDetailScreen({
           top/bottom · <Text color='cyan'>l</Text> open ·{' '}
           <Text color='cyan'>y</Text> copy url · <Text color='cyan'>p</Text>{' '}
           tailored CV pdf · <Text color='cyan'>t/T</Text> tag/untag ·{' '}
+          <Text color='cyan'>x</Text> {excluded ? 'un-exclude' : 'exclude'} ·{' '}
           <Text color='cyan'>Esc/q</Text> back
         </Text>
       </Box>
