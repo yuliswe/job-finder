@@ -1,22 +1,23 @@
-# Design: resume autofill pipeline
+# Design: fill-form pipeline (résumé autofill)
 
 ## Summary
 
 This document describes a new, human-triggered pipeline that opens a job
 posting's application form in a browser and fills it in from the user's résumé,
-stopping short of submitting it. The work is expressed as a new pipeline stage
-that generates a browser-side _fill script_ and stores it on the `JobPost` row,
-in exactly the way the existing `scripting` stage generates a `parserScript` and
-stores it on `JobListSource`. A new top-level command, `jobfinder fill-resume
-<jobPostIdOrUrl>`, is the manual entry point. When it is given a URL for a job
-post that does not yet exist, it bootstraps the missing entities from the leaf
-upward — it creates the `JobPost` first, then a placeholder company
-(`JobSource`) as its parent, and then enqueues the enrichment tasks (company
-sourcing, post viewing, post evaluation) so that the rest of the content is
-backfilled by the normal pipeline while the résumé is being filled in.
+stopping short of submitting it. The work is expressed as a new pipeline stage,
+`fill-form`, that generates a browser-side _fill-form script_ and stores it on
+the `JobPost` row, in exactly the way the existing `scripting` stage generates a
+`parserScript` and stores it on `JobListSource`. A new top-level command,
+`jobfinder fill-form <jobPostIdOrUrl>`, is the manual entry point. When it is
+given a URL for a job post that does not yet exist, it bootstraps the missing
+entities from the leaf upward — it creates the `JobPost` first, then a
+placeholder company (`JobSource`) as its parent, and then enqueues the
+enrichment tasks (company sourcing, post viewing, post evaluation) so that the
+rest of the content is backfilled by the normal pipeline while the résumé is
+being filled in.
 
 The design deliberately reuses the machinery that already exists. The only
-genuinely new concepts are one pipeline task (`fill`), one generated-script
+genuinely new concepts are one pipeline task (`fill-form`), one generated-script
 column on `JobPost`, a small applicant-profile reader, and the command that ties
 the bootstrap and the interactive fill together.
 
@@ -37,8 +38,8 @@ the bootstrap and the interactive fill together.
 
 - Automatic submission of applications. The pipeline stops at a filled form.
 - Unattended, bulk résumé filling across the whole backlog. Generation of the
-  fill script is cacheable and could run unattended, but the interactive fill is
-  driven one post at a time by a human running the command.
+  fill-form script is cacheable and could run unattended, but the interactive
+  fill is driven one post at a time by a human running the command.
 - Solving arbitrary anti-bot / captcha / authentication walls. Where a form
   cannot be reached or filled, the stage records a terminal no-result state and
   the human is told why, in the same manner as the existing scraping stages.
@@ -124,7 +125,7 @@ column. `run-scripts` (`src/llm/runParserScript.ts`) later loads that string,
 opens the page, and executes it with `new Function(...)` inside
 `pageEval`/`page.evaluate` in `src/utils/browser.ts`.
 
-The résumé fill script is the same idea applied to a `JobPost`: generate a
+The fill-form script is the same idea applied to a `JobPost`: generate a
 browser-side script that maps the user's profile onto the form's fields, store
 it on the post, and execute it against the live form on demand.
 
@@ -145,7 +146,7 @@ find-or-creates a `JobPost` by URL (with a placeholder title and a
 `JobPostEval` seeded at `titleRelavency = 1.0` so a manually supplied URL
 bypasses the viewing relevancy gate), and enqueues `sourcing` on the company and
 `viewing` on the post. The new command generalizes this same bottom-up creation
-and adds the fill stage.
+and adds the `fill-form` stage.
 
 ## The bottom-up bootstrap model
 
@@ -161,48 +162,49 @@ that makes this cheap is that the existing gates are entirely data-driven and
 `TASK_PARENTS` is same-entity only, so bootstrapping a leaf reduces to three
 mechanical steps:
 
-1. Insert the leaf (`JobPost`) so that the fill stage has something to key on.
+1. Insert the leaf (`JobPost`) so that the `fill-form` stage has something to key
+   on.
 2. Insert placeholder ancestors (`JobSource`, and where relevant a
    `JobListSource`) so the leaf's mandatory foreign keys are satisfied. A
    placeholder is a row with only its identifying columns filled and its
    enrichment columns left null, exactly as `track` and `listing` already
    create them.
-3. Enqueue the relevant `(task, entity)` rows: the leaf's own new task (`fill`)
-   plus the ancestors' enrichment tasks (`sourcing` on the company, `viewing` on
-   the post; `evaluate` follows automatically because `viewing` enqueues it on
-   completion).
+3. Enqueue the relevant `(task, entity)` rows: the leaf's own new task
+   (`fill-form`) plus the ancestors' enrichment tasks (`sourcing` on the company,
+   `viewing` on the post; `evaluate` follows automatically because `viewing`
+   enqueues it on completion).
 
 No new ordering code is required. Because each enrichment task's own
 `qualifiedForX`/`inScopeForX` gate governs when it may run, the placeholders sit
 patiently until their prerequisites are met, and the normal `start-pipeline`
-loops fill them in. The leaf's `fill` task depends only on the live form and the
-user's profile — not on any ancestor column — so it can run first, which is what
-the user means by "execute the child first and do the parent later." The fill
-stage and the enrichment stages proceed independently.
+loops fill them in. The leaf's `fill-form` task depends only on the live form and
+the user's profile — not on any ancestor column — so it can run first, which is
+what the user means by "execute the child first and do the parent later." The
+`fill-form` stage and the enrichment stages proceed independently.
 
-Concretely, running `fill-resume` on a new URL produces this ordering:
+Concretely, running `fill-form` on a new URL produces this ordering:
 
 ```
 create JobPost (leaf)                     ── child first
 create placeholder JobSource (parent)     ── parent as placeholder
-enqueue fill      on the JobPost          ── the child's own task runs first
+enqueue fill-form on the JobPost          ── the child's own task runs first
 enqueue sourcing  on the JobSource        ── parent enrichment, backfilled later
 enqueue viewing   on the JobPost          ── leaf-content enrichment
    └ viewing, on completion, enqueues evaluate on the JobPost
 ```
 
-## New pipeline stage: `fill`
+## New pipeline stage: `fill-form`
 
-`fill` is a new pipeline task keyed on `ofJobPostId`. It is the direct analog of
-`scripting`: its job is to _generate and store_ the fill script, not to perform
-the interactive fill. Splitting generation from the interactive fill mirrors the
-`scripting` / `run-scripts` split and keeps the expensive, cacheable LLM work
-separate from the cheap, human-facing execution.
+`fill-form` is a new pipeline task keyed on `ofJobPostId`. It is the direct
+analog of `scripting`: its job is to _generate and store_ the fill-form script,
+not to perform the interactive fill. Splitting generation from the interactive
+fill mirrors the `scripting` / `run-scripts` split and keeps the expensive,
+cacheable LLM work separate from the cheap, human-facing execution.
 
-### What `fill` generates
+### What `fill-form` generates
 
-`fill` opens the job post's application form and asks the LLM, through the same
-`feedbackLoop`/`Memory` mechanism `generateParserScript` uses, to emit
+`fill-form` opens the job post's application form and asks the LLM, through the
+same `feedbackLoop`/`Memory` mechanism `generateParserScript` uses, to emit
 browser-side JavaScript defining two functions:
 
 - `async function discoverFields()` — returns the application form's fillable
@@ -227,56 +229,57 @@ never submit, so the validation contract forbids clicking submit and treats any
 navigation away from the form as a failure.
 
 The validated script string is stored in a new nullable TEXT column,
-`JobPost.fillScript`, via `db.updateTable('JobPost').set({ fillScript })`,
-exactly as `scripting` writes `JobListSource.parserScript`. On success `fill`
-records `done`; when the LLM concludes the form cannot be filled (no form found,
-auth wall, captcha) it records an appropriate terminal no-result state and the
-column is left null.
+`JobPost.fillFormScript`, via
+`db.updateTable('JobPost').set({ fillFormScript })`, exactly as `scripting`
+writes `JobListSource.parserScript`. On success `fill-form` records `done`; when
+the LLM concludes the form cannot be filled (no form found, auth wall, captcha)
+it records an appropriate terminal no-result state and the column is left null.
 
-### Gates for `fill`
+### Gates for `fill-form`
 
-- `qualifiedForFill` — trivially true. Every `JobPost` has a `url` by schema, so
-  there is no upstream data prerequisite. (`fill` deliberately does _not_ require
-  `viewing` to have run, because the form fields are read from the live page, not
-  from the stored `description`.)
-- `inScopeForFill` — the post is in an active source tree. Because `fill` is
-  triggered explicitly per post by a human, it does not need the title-relevancy
-  gate that `viewing` uses; a post the user chose to fill is in scope by virtue
-  of being chosen. As with `track`, the bootstrap seeds `JobPostEval` so the post
-  is not filtered out elsewhere.
-- `TASK_PARENTS` — no entry. `fill` shares the `ofJobPostId` key with `viewing`
-  and `evaluate`, but it does not read any column they write, so it must not be
-  gated behind them; the three run independently on the same post.
+- `qualifiedForFillForm` — trivially true. Every `JobPost` has a `url` by schema,
+  so there is no upstream data prerequisite. (`fill-form` deliberately does _not_
+  require `viewing` to have run, because the form fields are read from the live
+  page, not from the stored `description`.)
+- `inScopeForFillForm` — the post is in an active source tree. Because
+  `fill-form` is triggered explicitly per post by a human, it does not need the
+  title-relevancy gate that `viewing` uses; a post the user chose to fill is in
+  scope by virtue of being chosen. As with `track`, the bootstrap seeds
+  `JobPostEval` so the post is not filtered out elsewhere.
+- `TASK_PARENTS` — no entry. `fill-form` shares the `ofJobPostId` key with
+  `viewing` and `evaluate`, but it does not read any column they write, so it
+  must not be gated behind them; the three run independently on the same post.
 
-### Whether `fill` runs under `start-pipeline`
+### Whether `fill-form` runs under `start-pipeline`
 
-Generation of the fill script is safe to run unattended and headless, so `fill`
-_could_ be added as a seventh loop in `start-pipeline`. The recommendation is to
-**not** add it to the default orchestrator, because generating a fill script for
-every post in the backlog is rarely what the user wants and would burn LLM
-budget on posts they will never apply to. Instead, `fill` is queued and run on
-demand by the `fill-resume` command. The stage is still a first-class pipeline
-task (so `jobfinder pipeline fill --job-post-id <id> --start` and `jobfinder
-reset fill` work), it is simply not part of the always-on drain loop. This is a
-one-line decision in `start-pipeline.ts`'s `TASKS` list and can be revisited.
+Generation of the fill-form script is safe to run unattended and headless, so
+`fill-form` _could_ be added as a seventh loop in `start-pipeline`. The
+recommendation is to **not** add it to the default orchestrator, because
+generating a fill-form script for every post in the backlog is rarely what the
+user wants and would burn LLM budget on posts they will never apply to. Instead,
+`fill-form` is queued and run on demand by the top-level `fill-form` command. The
+stage is still a first-class pipeline task (so `jobfinder pipeline fill-form
+--job-post-id <id> --start` and `jobfinder reset fill-form` work), it is simply
+not part of the always-on drain loop. This is a one-line decision in
+`start-pipeline.ts`'s `TASKS` list and can be revisited.
 
 ## The interactive fill
 
-Storing a `fillScript` does not by itself fill anything; it is the cached logic.
-The actual fill is performed by a small runner analogous to `runParserScript`,
-`src/llm/runFillScript.ts`:
+Storing a `fillFormScript` does not by itself fill anything; it is the cached
+logic. The actual fill is performed by a small runner analogous to
+`runParserScript`, `src/llm/runFillFormScript.ts`:
 
 1. Open the application form in a **headed** browser. The command forces a
    headed context regardless of `USE_HEADLESS_BROWSER`, because the entire point
    is for the human to see and review the populated form.
 2. Load the user's applicant profile (see below).
-3. Execute the stored `fillScript`'s `fillForm(profile)` against the live form
-   via `pageEval` + `new Function`, and collect the returned field report.
+3. Execute the stored `fillFormScript`'s `fillForm(profile)` against the live
+   form via `pageEval` + `new Function`, and collect the returned field report.
 4. Print a summary of what was filled (field, value set, status) and leave the
    browser window open, positioned on the form, for the human to review and
    submit manually. It never clicks submit.
 
-The runner is invoked by the `fill-resume` command rather than by the
+The runner is invoked by the top-level `fill-form` command rather than by the
 `start-pipeline` orchestrator, because it is inherently interactive.
 
 ## Applicant profile: the fill input
@@ -303,12 +306,15 @@ here", cover-letter boxes) from the résumé narrative and attach the résumé f
 The profile file follows the existing `*.local.md` gitignore convention so real
 personal data is never committed.
 
-## The command: `jobfinder fill-resume <jobPostIdOrUrl>`
+## The command: `jobfinder fill-form <jobPostIdOrUrl>`
 
 A new top-level command registered in `src/cli/cli.ts`, in
-`src/cli/commands/fill-resume.ts`. (The name mirrors the existing kebab-case
-commands such as `run-scripts` and `start-pipeline`; `autofill` is a reasonable
-alternative if preferred.)
+`src/cli/commands/fill-form.ts`. Its CLI name intentionally matches the
+`fill-form` pipeline stage: `jobfinder fill-form` is the human-facing entry point
+that bootstraps and drives the interactive fill, while `jobfinder pipeline
+fill-form` is the plumbing-level single-stage command that only generates the
+script. They sit at different levels of the command tree, so the shared name is
+not a conflict.
 
 Behavior:
 
@@ -325,19 +331,19 @@ Behavior:
    `upsertJobSourceByName` and `upsertJobPost` are currently private to
    `track.ts` and should be factored into a shared bootstrap module (for example
    `src/db/bootstrapJobPost.ts`) so both commands use one implementation.
-3. **Ensure the fill script exists.** If `JobPost.fillScript` is null (or
-   `--regenerate` was passed), run the `fill` generation now via the exported
-   `runFill(...)` with the single-post selector, so generation happens inline and
-   the user sees its progress. If a script is already cached, skip straight to
+3. **Ensure the fill-form script exists.** If `JobPost.fillFormScript` is null (or
+   `--regenerate` was passed), run the `fill-form` generation now via the exported
+   `runFillForm(...)` with the single-post selector, so generation happens inline
+   and the user sees its progress. If a script is already cached, skip straight to
    the fill.
 4. **Perform the interactive fill.** Open the headed browser and run
-   `runFillScript(...)`, then leave the window open with a printed summary.
+   `runFillFormScript(...)`, then leave the window open with a printed summary.
 
 Options:
 
-- `--regenerate` — discard the cached `fillScript` and generate a fresh one
+- `--regenerate` — discard the cached `fillFormScript` and generate a fresh one
   (the analog of `scripting --job-list-source-id <id>` after a prompt change).
-- `--generate-only` — generate and store the fill script without opening the
+- `--generate-only` — generate and store the fill-form script without opening the
   interactive fill (useful for pre-warming, and it can run headless).
 - `--no-bootstrap` — when given a URL that does not resolve to an existing post,
   fail rather than creating entities. The default is to bootstrap.
@@ -350,17 +356,18 @@ completion` is run; no completion wiring is required.
 
 A single migration adds the generated-script column to `JobPost`:
 
-- `migrations/<timestamp>_add_job_post_fill_script.ts` — add
-  `fillScript TEXT` (nullable) to `JobPost`, mirroring `JobListSource.parserScript`.
+- `migrations/<timestamp>_add_job_post_fill_form_script.ts` — add
+  `fillFormScript TEXT` (nullable) to `JobPost`, mirroring
+  `JobListSource.parserScript`.
 
 No change to `PipelineState` is needed: it already carries an `ofJobPostId`
-foreign key, which the new `fill` task reuses. After the migration, regenerate
-the Kysely types and schema review with `npm run db:codegen` and `npm run
-db:schema-review`, per the `write-db-migrations` skill.
+foreign key, which the new `fill-form` task reuses. After the migration,
+regenerate the Kysely types and schema review with `npm run db:codegen` and
+`npm run db:schema-review`, per the `write-db-migrations` skill.
 
 If the structured applicant profile grows beyond a handful of fields, or if the
 generation needs to persist the discovered field list for debugging, an adjacent
-`fillFieldsDiscovered TEXT` JSON column on `JobPost` (analogous to
+`fillFormFieldsDiscovered TEXT` JSON column on `JobPost` (analogous to
 `JobListSource.locations`/`divisions`) can be added in the same migration, but it
 is optional and not required for the core feature.
 
@@ -368,22 +375,25 @@ is optional and not required for the core feature.
 
 New files:
 
-- `migrations/<timestamp>_add_job_post_fill_script.ts` — the `JobPost.fillScript`
-  column.
-- `src/prompts/generateFillScript.ts` — the system prompt defining the fill
-  script contract (the `discoverFields()` / `fillForm(profile)` signatures, the
-  `new Function` execution environment, the no-submit invariant, and guidance for
-  following an apply link and handling common ATS forms such as Greenhouse,
-  Lever, Ashby, and Workday). Modeled on `src/prompts/generateParserScript.ts`.
-- `src/llm/generateFillScript.ts` — the generation feedback loop returning
-  `{ fillScript }`, validated by executing the candidate against the live form.
-  Modeled on `src/llm/generateParserScript.ts`.
-- `src/llm/runFillScript.ts` — the runtime harness that executes a stored
-  `fillScript` against the live form and returns the field report without
+- `migrations/<timestamp>_add_job_post_fill_form_script.ts` — the
+  `JobPost.fillFormScript` column.
+- `src/prompts/generateFillFormScript.ts` — the system prompt defining the
+  fill-form script contract (the `discoverFields()` / `fillForm(profile)`
+  signatures, the `new Function` execution environment, the no-submit invariant,
+  and guidance for following an apply link and handling common ATS forms such as
+  Greenhouse, Lever, Ashby, and Workday). Modeled on
+  `src/prompts/generateParserScript.ts`.
+- `src/llm/generateFillFormScript.ts` — the generation feedback loop returning
+  `{ fillFormScript }`, validated by executing the candidate against the live
+  form. Modeled on `src/llm/generateParserScript.ts`.
+- `src/llm/runFillFormScript.ts` — the runtime harness that executes a stored
+  `fillFormScript` against the live form and returns the field report without
   submitting. Modeled on `src/llm/runParserScript.ts`.
-- `src/cli/commands/pipeline/fill.ts` — the `fill` stage (`queueFill` / `runFill`),
+- `src/cli/commands/pipeline/fill-form.ts` — the `fill-form` stage
+  (`queueFillForm` / `runFillForm`, factory `createFillFormStageCommand`),
   modeled on `src/cli/commands/pipeline/scripting.ts`.
-- `src/cli/commands/fill-resume.ts` — the top-level manual command.
+- `src/cli/commands/fill-form.ts` — the top-level manual command (factory
+  `createFillFormCommand`).
 - `src/db/bootstrapJobPost.ts` — the shared bottom-up bootstrap helpers factored
   out of `track.ts`.
 - `src/utils/applicantProfile.ts` (or an addition to `src/utils/userInterests.ts`)
@@ -391,34 +401,36 @@ New files:
 
 Changed files:
 
-- `src/db/pipelineState.ts` — add `'fill'` to the `PipelineTask` union, an entry
-  in `FK_BY_TASK` (`fill: 'ofJobPostId'`), a place in `TASK_ORDER`, and a
-  `case 'fill'` in `requeueAllInScope`'s switch. No `TASK_PARENTS` entry, and no
-  `PARENT_SCOPE_BY_TASK` entry, because `fill` is never a parent of another task.
-- `src/db/pipelineQualified.ts` — add `qualifiedForFill` (always true) and
-  `inScopeForFill` (active tree).
-- `src/cli/commands/pipeline.ts` — register `createFillCommand()`.
-- `src/cli/cli.ts` — register `createFillResumeCommand()`.
-- `src/cli/commands/reset.ts` — add `'fill'` to `STAGE_CHOICES` so
-  `jobfinder reset fill` can requeue fills after a prompt change.
+- `src/db/pipelineState.ts` — add `'fill-form'` to the `PipelineTask` union, an
+  entry in `FK_BY_TASK` (`'fill-form': 'ofJobPostId'`), a place in `TASK_ORDER`,
+  and a `case 'fill-form'` in `requeueAllInScope`'s switch. No `TASK_PARENTS`
+  entry, and no `PARENT_SCOPE_BY_TASK` entry, because `fill-form` is never a
+  parent of another task.
+- `src/db/pipelineQualified.ts` — add `qualifiedForFillForm` (always true) and
+  `inScopeForFillForm` (active tree).
+- `src/cli/commands/pipeline.ts` — register `createFillFormStageCommand()`.
+- `src/cli/cli.ts` — register the top-level `createFillFormCommand()`.
+- `src/cli/commands/reset.ts` — add `'fill-form'` to `STAGE_CHOICES` so
+  `jobfinder reset fill-form` can requeue fills after a prompt change.
 - `src/cli/commands/track.ts` — import the bootstrap helpers from the new shared
   module instead of defining them privately.
 - `jobfinder.config.js`, `src/utils/config.ts`, and the `examples/*.config.js`
-  files — optionally add `LLM_FILL_MODEL` (it can default to reusing
+  files — optionally add `LLM_FILL_FORM_MODEL` (it can default to reusing
   `LLM_CODING_MODEL`) and document the new `profile.md` data file. Note that the
   interactive fill overrides `USE_HEADLESS_BROWSER` to run headed.
-- `start-pipeline.ts` — no change under the recommendation (fill is on-demand);
-  a one-line addition to `TASKS` if the team later wants unattended generation.
+- `start-pipeline.ts` — no change under the recommendation (`fill-form` is
+  on-demand); a one-line addition to `TASKS` if the team later wants unattended
+  generation.
 
 Out of scope for the first cut but natural follow-ups: a TUI affordance (a
-keybinding on the job-post detail screen to trigger `fill-resume` for the
-selected post and a column showing whether a `fillScript` is cached), and tests
+keybinding on the job-post detail screen to trigger `fill-form` for the selected
+post and a column showing whether a `fillFormScript` is cached), and tests
 covering the bootstrap ordering and the no-submit invariant.
 
 ## Risks and open questions
 
 - **Form interaction is harder than scraping.** The parser-script prompt is
-  read-only and explicitly forbids navigation; a fill script must type into
+  read-only and explicitly forbids navigation; a fill-form script must type into
   inputs, operate custom dropdown widgets, and often follow an apply link to a
   different ATS domain. React-controlled inputs ignore a naive `input.value =
 ...` assignment, so the generated `fillForm` must set values through the native
@@ -442,5 +454,3 @@ covering the bootstrap ordering and the no-submit invariant.
   salary, start date, demographic questions). The applicant profile should carry
   sensible defaults or explicit "leave blank" markers so `fillForm` does not
   invent answers; anything it cannot fill confidently is left for the human.
-- **Command name.** `fill-resume` is proposed; `autofill` is an alternative. This
-  is cosmetic and easy to change before release.
