@@ -33,6 +33,29 @@ function activeSortScore(r: JobPostRow, sort: JobPostSortKey): number | null {
 function buildColumns(sort: JobPostSortKey): Column<JobPostRow>[] {
   return [
     {
+      // Manual priority-bump marker: '▲' on a bumped post (see `jobfinder
+      // job bump` / the `b` key), '·' otherwise. Rendered in yellow so bumped
+      // rows stand out at a glance.
+      label: 'pri',
+      value: r => (r.priorityBumpedAt ? '▲' : '·'),
+      min: 3,
+      max: 3,
+      render: (r, width) => {
+        const pad = ' '.repeat(Math.max(0, width - 1));
+        return r.priorityBumpedAt ? (
+          <>
+            <Text color='yellow'>▲</Text>
+            {pad}
+          </>
+        ) : (
+          <>
+            <Text dimColor>·</Text>
+            {pad}
+          </>
+        );
+      },
+    },
+    {
       label: 'overall',
       value: r => fmtScore(activeSortScore(r, sort)),
       min: 1,

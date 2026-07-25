@@ -9,6 +9,7 @@ import {
   type JobPostSortKey,
   type SourceRow,
   listJobPosts,
+  toggleJobPostBump,
   toggleJobPostTag,
 } from 'src/tui/queries.js';
 import { useLiveData } from 'src/tui/useLiveData.js';
@@ -121,6 +122,12 @@ export function SourceJobsScreen({
       return;
     }
 
+    if (input === 'b') {
+      const row = jobPosts?.[cursor];
+      if (row) void toggleJobPostBump(row.id);
+      return;
+    }
+
     if (key.upArrow) {
       onCursorChange(Math.max(0, cursor - 1));
       return;
@@ -202,7 +209,8 @@ export function SourceJobsScreen({
           <Text color='cyan'>↑↓</Text> nav · <Text color='cyan'>Enter</Text>{' '}
           open · <Text color='cyan'>s</Text> sort · <Text color='cyan'>l</Text>{' '}
           open url · <Text color='cyan'>t/T</Text> tag/untag ·{' '}
-          <Text color='cyan'>Esc/q</Text> back
+          <Text color='cyan'>b</Text> bump · <Text color='cyan'>Esc/q</Text>{' '}
+          back
         </Text>
       </Box>
       {tagPickerMode != null && (

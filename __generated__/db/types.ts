@@ -38,6 +38,7 @@ export interface JobPost {
   ofJobSourceId: string;
   postedAt: Timestamp | null;
   postedAtSource: string | null;
+  priorityBumpedAt: string | null;
   salaryCurrency: string | null;
   salaryInterval: string | null;
   salaryMax: number | null;

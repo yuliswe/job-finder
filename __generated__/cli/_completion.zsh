@@ -56,12 +56,20 @@ _jobfinder_pipeline_evaluate() {
     '--start[start]'
 }
 
+_jobfinder_pipeline_fill_form() {
+  _arguments -s -S \
+    '--all[all]' \
+    '--include-failed[include-failed]' \
+    '--job-post-id[job-post-id]:job-post-id:' \
+    '--start[start]'
+}
+
 _jobfinder_pipeline() {
   local state line
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(seeding approve-seeds sourcing listing scripting run-scripts viewing evaluate)' \
+    '1:subcommand:(seeding approve-seeds sourcing listing scripting run-scripts viewing evaluate fill-form)' \
     '*:: :->args'
 
   case $state in
@@ -75,6 +83,7 @@ _jobfinder_pipeline() {
     run-scripts) _jobfinder_pipeline_run_scripts ;;
     viewing) _jobfinder_pipeline_viewing ;;
     evaluate) _jobfinder_pipeline_evaluate ;;
+    fill-form) _jobfinder_pipeline_fill_form ;;
       esac
       ;;
   esac
@@ -82,7 +91,7 @@ _jobfinder_pipeline() {
 
 _jobfinder_reset() {
   _arguments -s -S \
-    '1:stage:(sourcing listing scripting run-scripts viewing evaluate)' \
+    '1:stage:(sourcing listing scripting run-scripts viewing evaluate fill-form)' \
     '--all[all]' \
     '--no-result[no-result]' \
     '--failed[failed]'
@@ -133,12 +142,18 @@ _jobfinder_job_include() {
     '1:id-or-url:'
 }
 
+_jobfinder_job_bump() {
+  _arguments -s -S \
+    '1:jobPostId:' \
+    '--clear[clear]'
+}
+
 _jobfinder_job() {
   local state line
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(exclude include)' \
+    '1:subcommand:(exclude include bump)' \
     '*:: :->args'
 
   case $state in
@@ -146,9 +161,21 @@ _jobfinder_job() {
       case $line[1] in
     exclude) _jobfinder_job_exclude ;;
     include) _jobfinder_job_include ;;
+    bump) _jobfinder_job_bump ;;
       esac
       ;;
   esac
+}
+
+_jobfinder_fill_form() {
+  _arguments -s -S \
+    '1:jobPostIdOrUrl:' \
+    '--regenerate[regenerate]' \
+    '--generate-only[generate-only]' \
+    '--no-bootstrap[no-bootstrap]' \
+    '--headed[headed]' \
+    '--headless[headless]' \
+    '--screenshot[screenshot]:screenshot:'
 }
 
 _jobfinder_tui() {
@@ -168,7 +195,7 @@ _jobfinder() {
   typeset -A opt_args
 
   _arguments -C \
-    '1:subcommand:(init pipeline reset start-pipeline export track job tui completion help-menu-dump)' \
+    '1:subcommand:(init pipeline reset start-pipeline export track job fill-form tui completion help-menu-dump)' \
     '*:: :->args'
 
   case $state in
@@ -181,6 +208,7 @@ _jobfinder() {
     export) _jobfinder_export ;;
     track) _jobfinder_track ;;
     job) _jobfinder_job ;;
+    fill-form) _jobfinder_fill_form ;;
     tui) _jobfinder_tui ;;
     completion) _normal ;;
     help-menu-dump) _jobfinder_help_menu_dump ;;
