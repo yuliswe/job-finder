@@ -1,7 +1,9 @@
 import { Command } from 'commander';
 
-import { db } from 'src/db/index.js';
-import { newId } from 'src/db/id.js';
+import {
+  upsertJobPost,
+  upsertJobSourceByName,
+} from 'src/db/bootstrapJobPost.js';
 import { enqueuePipelineTask } from 'src/db/pipelineState.js';
 import { classifyTrackedUrl } from 'src/llm/classifyTrackedUrl.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
@@ -59,6 +61,7 @@ async function runTrack(
     const jobPostId = await upsertJobPost({
       url,
       ofJobSourceId: jobSourceId,
+      reason: 'Manually tracked via `jobfinder track`.',
     });
 
     await enqueuePipelineTask({
@@ -81,67 +84,4 @@ async function runTrack(
   terminal.log(
     `Tracked job list for "${companyName}" — queued sourcing and listing on JobSource ${jobSourceId}.`
   );
-}
-
-/** Insert a JobSource by name, or return the existing one's id when the
- * UNIQUE(name) constraint already holds a row. */
-async function upsertJobSourceByName(name: string): Promise<string> {
-  const existing = await db
-    .selectFrom('JobSource')
-    .select('id')
-    .where('name', '=', name)
-    .executeTakeFirst();
-
-  if (existing) return existing.id;
-
-  const id = newId();
-  await db.insertInto('JobSource').values({ id, name }).execute();
-  return id;
-}
-
-/** Insert a JobPost with the tracked URL, or return the existing row's id
- * when the UNIQUE(url) constraint already holds one. `title` is a
- * placeholder — the viewing task overwrites it from the page itself.
- *
- * Also seeds a JobPostEval with `titleRelavency = 1.0` so the viewing
- * picker's `inScopeForViewing` check (which requires an eval row above
- * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`) actually picks it up. Tracked
- * URLs are user-curated, so they bypass the relevance gate by design. */
-async function upsertJobPost(args: {
-  url: string;
-  ofJobSourceId: string;
-}): Promise<string> {
-  const { url, ofJobSourceId } = args;
-
-  const existing = await db
-    .selectFrom('JobPost')
-    .select('id')
-    .where('url', '=', url)
-    .executeTakeFirst();
-
-  if (existing) return existing.id;
-
-  const id = newId();
-
-  await db
-    .insertInto('JobPost')
-    .values({
-      id,
-      url,
-      title: url,
-      ofJobSourceId,
-    })
-    .execute();
-
-  await db
-    .insertInto('JobPostEval')
-    .values({
-      id: newId(),
-      ofJobPostId: id,
-      titleRelavency: 1.0,
-      titleRelavencyReason: 'Manually tracked via `jobfinder track`.',
-    })
-    .execute();
-
-  return id;
 }

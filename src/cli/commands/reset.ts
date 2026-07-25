@@ -19,6 +19,7 @@ const STAGE_CHOICES: readonly RequeueableTask[] = [
   'run-scripts',
   'viewing',
   'evaluate',
+  'fill-form',
 ];
 
 type ResetOptions = {

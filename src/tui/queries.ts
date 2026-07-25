@@ -14,7 +14,6 @@ import {
   FAILED_STATES,
   PIPELINE_STATE,
   type PipelineTask,
-  TASK_ORDER,
   TERMINAL_NO_RESULT_STATES,
   TERMINAL_SUCCESS_STATES,
 } from 'src/db/pipelineState.js';
@@ -196,12 +195,26 @@ export async function getPipelineStats(): Promise<PipelineStageStats[]> {
   //   done / noResult / failed = in-scope; bucketed by latest pipeline state;
   //   queued = in-scope; latest state is queued/started/user_interrupted, OR
   //            no LatestPipelineState row exists yet (not-yet-enqueued).
-  return Promise.all(TASK_ORDER.map(stageStats));
+  return Promise.all(BAR_TASKS.map(stageStats));
 }
+
+/** The stages drawn in the pipeline progress bar. This is the automated
+ * top-down pipeline only — `fill-form` is a human-triggered, per-post stage
+ * that `start-pipeline` never runs, so it is deliberately excluded from the bar. */
+type BarTask = PipelineStageStats['task'];
+const BAR_TASKS: readonly BarTask[] = [
+  'seeding',
+  'sourcing',
+  'listing',
+  'scripting',
+  'run-scripts',
+  'viewing',
+  'evaluate',
+];
 
 type RawBucket = { inScope: number; state: string | null; n: number };
 
-async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
+async function stageStats(task: BarTask): Promise<PipelineStageStats> {
   const buckets = await stageRawBuckets(task);
 
   let outOfScope = 0;
@@ -246,7 +259,7 @@ async function stageStats(task: PipelineTask): Promise<PipelineStageStats> {
   };
 }
 
-async function stageRawBuckets(task: PipelineTask): Promise<RawBucket[]> {
+async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
   // Each branch starts from the parent table and pulls the latest pipeline
   // state per row via a correlated scalar subquery on `PipelineState` —
   // which lets SQLite use the `PipelineState_task_of*_createdAt_idx` index

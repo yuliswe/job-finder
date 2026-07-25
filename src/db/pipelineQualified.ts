@@ -132,6 +132,14 @@ export function qualifiedForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
   ]);
 }
 
+/** Fill-form has no row-level data prereq — every JobPost has a `url` by
+ * schema, which is all the stage reads. It deliberately does NOT require
+ * viewing to have run: the form fields come from the live application page,
+ * not from the stored `description`. */
+export function qualifiedForFillForm(_eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return ALWAYS_TRUE;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // `inScopeForX` — pure-scope predicates. See the header comment at the top
 // of this file for the qualified-vs-inscope distinction and worked examples.
@@ -253,6 +261,14 @@ export function inScopeForEvaluate(eb: ExpressionBuilder<DB, 'JobPost'>) {
     eb('JobPost.skillRequirements', 'is not', null),
     locationRelevancyInScope(eb),
   ]);
+}
+
+/** A JobPost is in scope for fill-form iff its source tree is active. Unlike
+ * viewing, fill-form has no title-relevancy gate: it is triggered explicitly
+ * per post by a human via `jobfinder fill-form`, so a post the user chose to
+ * fill is in scope by virtue of being chosen. */
+export function inScopeForFillForm(eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return jobPostInActiveSource(eb);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

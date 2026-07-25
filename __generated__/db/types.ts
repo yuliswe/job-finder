@@ -27,6 +27,7 @@ export interface JobPost {
   company: string | null;
   createdAt: Generated<Timestamp>;
   description: string | null;
+  fillFormScript: string | null;
   id: string;
   isManuallyExcluded: Generated<Bool>;
   isRemote: Bool | null;

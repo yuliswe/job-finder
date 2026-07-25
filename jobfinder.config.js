@@ -236,6 +236,18 @@ export const LLM_CV_TEMPLATE_MODEL = [
 ];
 
 /**
+ * The model used by the `fill-form` stage to generate the browser-side script
+ * that types the user's applicant profile into a job-application form. It reads
+ * the form's HTML plus the applicant profile and writes JavaScript defining
+ * `discoverFields()` and `fillForm(profile)`.
+ *
+ * Model requirements:
+ * - strong code generation (it writes DOM-manipulation JS)
+ * - large context window (whole form HTML + profile fit)
+ */
+export const LLM_FILL_FORM_MODEL = ['ollama-plugin/gemma4:31b-mlx'];
+
+/**
  * Directory where tailored resume PDFs (generated via the TUI's `p` shortcut
  * on the job-detail screen) are written. Created on demand. May be relative
  * (resolved against the CWD where you run `jobfinder`) or absolute. Default:

@@ -5,6 +5,7 @@ import { db, sqlite } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
   inScopeForEvaluate,
+  inScopeForFillForm,
   inScopeForListing,
   inScopeForRunScripts,
   inScopeForScripting,
@@ -26,7 +27,8 @@ export type PipelineTask =
   | 'scripting'
   | 'run-scripts'
   | 'viewing'
-  | 'evaluate';
+  | 'evaluate'
+  | 'fill-form';
 
 type PipelineFk =
   | 'ofSourceSeedId'
@@ -42,10 +44,16 @@ export const FK_BY_TASK: Record<PipelineTask, PipelineFk> = {
   'run-scripts': 'ofJobListSourceId',
   viewing: 'ofJobPostId',
   evaluate: 'ofJobPostId',
+  'fill-form': 'ofJobPostId',
 };
 
 /** Pipeline order:
  *   seeding → sourcing → listing → scripting → run-scripts → viewing → evaluate
+ *
+ * `fill-form` is appended last. It keys on `ofJobPostId` like `viewing` and
+ * `evaluate`, but it is an independent, human-triggered branch off a JobPost —
+ * it reads the live application form rather than any column those stages write,
+ * so it has no `TASK_PARENTS` entry and is not gated behind them.
  */
 export const TASK_ORDER: readonly PipelineTask[] = [
   'seeding',
@@ -55,6 +63,7 @@ export const TASK_ORDER: readonly PipelineTask[] = [
   'run-scripts',
   'viewing',
   'evaluate',
+  'fill-form',
 ];
 
 /**
@@ -394,6 +403,16 @@ export async function requeueAllInScope(
           .selectFrom('JobPost')
           .select('JobPost.id as id')
           .where(inScopeForEvaluate)
+          .execute();
+
+        return rows.map(r => r.id);
+      }
+
+      case 'fill-form': {
+        const rows = await db
+          .selectFrom('JobPost')
+          .select('JobPost.id as id')
+          .where(inScopeForFillForm)
           .execute();
 
         return rows.map(r => r.id);
