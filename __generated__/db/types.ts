@@ -28,9 +28,11 @@ export interface JobPost {
   createdAt: Generated<Timestamp>;
   description: string | null;
   id: string;
+  isManuallyExcluded: Generated<Bool>;
   isRemote: Bool | null;
   jobType: string | null;
   location: string | null;
+  manualExclusionReason: string | null;
   ofJobListSourceId: string | null;
   ofJobSourceId: string;
   postedAt: Timestamp | null;

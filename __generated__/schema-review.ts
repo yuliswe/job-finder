@@ -53,6 +53,7 @@ type JobPost = {
   createdAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   updatedAt: Timestamp | DEFAULT<"strftime('%Y-%m-%dT%H:%M:%fZ', 'now')">;
   // ── fields ──
+  isManuallyExcluded: Bool | DEFAULT<0>;
   title: Text;
   url: Text;
   company?: Text;
@@ -60,6 +61,7 @@ type JobPost = {
   isRemote?: Bool;
   jobType?: Text;
   location?: Text;
+  manualExclusionReason?: Text;
   postedAt?: Timestamp;
   postedAtSource?: Text;
   salaryCurrency?: Text;
@@ -74,6 +76,7 @@ type JobPost = {
   ofJobListSourceId?: Text | ON_DELETE.SET_NULL | JobListSource['id'];
   // ── indexes ──
   _indexes: {
+    isManuallyExcluded: [JobPost['isManuallyExcluded']];
     createdAt: [JobPost['createdAt']];
     postedAt: [JobPost['postedAt']];
     ofJobListSourceId: [JobPost['ofJobListSourceId']];

@@ -205,6 +205,23 @@ jobfinder export jobs ./shortlist.csv --sort 'excl. location'
 
 The sort keys are `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
 
+## `job exclude` / `job include`
+
+Manually override a single post's scope. Scope is otherwise derived entirely from active-tree membership and the LLM relevancy scores; `job exclude` is the one signal a human controls directly. Excluding a post pushes it out of scope for the viewing and evaluate stages (so `start-pipeline` and the stage pickers skip it) and hides it from the TUI's default `in` filter, exactly as a below-threshold relevancy score would. `job include` reverses it, after which the usual active-tree and relevancy gates apply again. A post is identified by its `JobPost.id` or its `url`.
+
+```bash
+# Exclude by url, recording why
+jobfinder job exclude https://acme.example/jobs/123 --reason 'duplicate posting'
+
+# Exclude by id
+jobfinder job exclude 019f97e6-5c19-7658-9b61-5524a71c5485
+
+# Undo the exclusion
+jobfinder job include https://acme.example/jobs/123
+```
+
+An excluded post stays out of scope even across a `pipeline evaluate --all` requeue — a manual exclusion outranks a bulk requeue — so `job include` (or the TUI's `x` key) is the only way back into scope. The same toggle is available in the TUI: press `x` on a post's detail screen.
+
 ## `tui`
 
 Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB. The dashboard opens on the Jobs tab; switch tabs and re-sort from inside the TUI.

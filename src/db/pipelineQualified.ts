@@ -188,12 +188,22 @@ export function inScopeForRunScripts(
   ]);
 }
 
-/** A JobPost is in scope for viewing iff its tree is active AND its title
- * cleared the relevancy threshold (low-relevancy posts are skipped by
- * design). */
+/** True iff the user has NOT manually pushed this post out of scope via
+ * `jobfinder job exclude` or the TUI. A manual exclusion is the one stored
+ * scope signal a human controls directly; it is AND-combined into
+ * `inScopeForViewing` so it cascades to `inScopeForEvaluate` and every
+ * pipeline picker, exactly as a below-threshold relevancy score would. */
+export function notManuallyExcluded(eb: ExpressionBuilder<DB, 'JobPost'>) {
+  return eb('JobPost.isManuallyExcluded', '=', Bool.False);
+}
+
+/** A JobPost is in scope for viewing iff its tree is active, the user has not
+ * manually excluded it, AND its title cleared the relevancy threshold
+ * (low-relevancy posts are skipped by design). */
 export function inScopeForViewing(eb: ExpressionBuilder<DB, 'JobPost'>) {
   return eb.and([
     jobPostInActiveSource(eb),
+    notManuallyExcluded(eb),
     eb.exists(
       eb
         .selectFrom('JobPostEval')
