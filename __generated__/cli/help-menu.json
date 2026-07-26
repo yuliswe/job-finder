@@ -14,17 +14,17 @@
       "usage": "[options] [command]",
       "commands": [
         {
-          "name": "seeding",
+          "name": "explore-hiring-companies",
           "description": "Seed SourceSeed table from <DATA_DIR>/interests.md via an LLM-driven jobspy call",
           "usage": "[options]"
         },
         {
           "name": "approve-seeds",
-          "description": "For each SourceSeed name without a matching JobSource, create a JobSource (url left null) and queue sourcing on it. Run `pipeline sourcing` afterwards to discover the URLs.",
+          "description": "For each SourceSeed name without a matching JobSource, create a JobSource (url left null) and queue research-company on it. Run `pipeline research-company` afterwards to discover the URLs.",
           "usage": "[options]"
         },
         {
-          "name": "sourcing",
+          "name": "research-company",
           "description": "For every active JobSource with `url IS NULL`, ask the LLM (with web search) for the company URL, verify it by opening the page, and fill it in. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
@@ -48,8 +48,8 @@
           ]
         },
         {
-          "name": "listing",
-          "description": "For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in). By default only queues the selected rows; pass --start to process them now.",
+          "name": "identify-job-list-url",
+          "description": "For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline learn-to-use-job-list` fills it in). By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -72,7 +72,7 @@
           ]
         },
         {
-          "name": "scripting",
+          "name": "learn-to-use-job-list",
           "description": "Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
@@ -96,7 +96,7 @@
           ]
         },
         {
-          "name": "run-scripts",
+          "name": "apply-filters",
           "description": "For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
@@ -130,7 +130,7 @@
           ]
         },
         {
-          "name": "viewing",
+          "name": "view-job-detail",
           "description": "For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
@@ -154,8 +154,8 @@
           ]
         },
         {
-          "name": "evaluate",
-          "description": "For each currently-queued viewed JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.",
+          "name": "evaluate-skill-match",
+          "description": "For each currently-queued fetched JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.",
           "usage": "[options]",
           "options": [
             {
@@ -213,12 +213,12 @@
           "description": "Pipeline stage whose tasks to requeue.",
           "required": true,
           "choices": [
-            "sourcing",
-            "listing",
-            "scripting",
-            "run-scripts",
-            "viewing",
-            "evaluate",
+            "research-company",
+            "identify-job-list-url",
+            "learn-to-use-job-list",
+            "apply-filters",
+            "view-job-detail",
+            "evaluate-skill-match",
             "fill-form"
           ]
         }
@@ -241,7 +241,7 @@
     },
     {
       "name": "start-pipeline",
-      "description": "Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. viewing and evaluate are prioritized: the upstream tasks (sourcing/listing/scripting/run-scripts) defer their next iteration while either of those two still has work, so the current backlog is viewed and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.",
+      "description": "Run research-company, identify-job-list-url, learn-to-use-job-list, apply-filters, view-job-detail, and evaluate-skill-match concurrently in independent loops until every queue drains. view-job-detail and evaluate-skill-match are prioritized: the upstream tasks (research-company/identify-job-list-url/learn-to-use-job-list/apply-filters) defer their next iteration while either of those two still has work, so the current backlog is fetched and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.",
       "usage": "[options]",
       "options": [
         {
@@ -291,7 +291,7 @@
     },
     {
       "name": "track",
-      "description": "Classify <url> via LLM as a job post / job list / neither. For a job post, enqueue sourcing on the company and viewing on the post. For a job list, enqueue sourcing and listing on the company. Exits non-zero when the URL is neither.",
+      "description": "Classify <url> via LLM as a job post / job list / neither. For a job post, enqueue research-company on the company and view-job-detail on the post. For a job list, enqueue research-company and identify-job-list-url on the company. Exits non-zero when the URL is neither.",
       "usage": "[options] <url>",
       "arguments": [
         {
@@ -339,7 +339,7 @@
         },
         {
           "name": "bump",
-          "description": "Manually prioritize a JobPost so it clears the viewing and evaluate stages ahead of the rest. The pickers order by the bump timestamp (most recently bumped first), so bumping several posts stacks them by recency. Pass --clear to remove the bump.",
+          "description": "Manually prioritize a JobPost so it clears the view-job-detail and evaluate stages ahead of the rest. The pickers order by the bump timestamp (most recently bumped first), so bumping several posts stacks them by recency. Pass --clear to remove the bump.",
           "usage": "[options] <jobPostId>",
           "arguments": [
             {
@@ -359,7 +359,7 @@
     },
     {
       "name": "fill-form",
-      "description": "Open a job application form and auto-fill it from your applicant profile (data/profile.local.md), WITHOUT submitting. Given a JobPost id it fills that post; given a URL it find-or-creates the post (bootstrapping a placeholder company + queuing sourcing/viewing) first. Caches the generated fill script on JobPost.fillFormScript.",
+      "description": "Open a job application form and auto-fill it from your applicant profile (data/profile.local.md), WITHOUT submitting. Given a JobPost id it fills that post; given a URL it find-or-creates the post (bootstrapping a placeholder company + queuing research-company/view-job-detail) first. Caches the generated fill script on JobPost.fillFormScript.",
       "usage": "[options] <jobPostIdOrUrl>",
       "arguments": [
         {

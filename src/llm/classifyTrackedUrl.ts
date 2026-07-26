@@ -1,7 +1,7 @@
 import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_VIEWING_MODEL } from 'src/utils/config.js';
+import { LLM_VIEW_JOB_DETAIL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -81,8 +81,8 @@ Classify the page and extract the hiring company name.`,
           ),
         }),
         maxAttempts: 3,
-        models: LLM_VIEWING_MODEL,
-        metadata: { configKey: 'LLM_VIEWING_MODEL' },
+        models: LLM_VIEW_JOB_DETAIL_MODEL,
+        metadata: { configKey: 'LLM_VIEW_JOB_DETAIL_MODEL' },
         logger: terminal,
         validate: parsed => {
           if (parsed.pageType !== 'none' && !parsed.companyName?.trim()) {

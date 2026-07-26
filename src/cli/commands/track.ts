@@ -12,7 +12,7 @@ import { terminal } from 'src/utils/terminal.js';
 export function createTrackCommand(): Command {
   return new Command('track')
     .description(
-      'Classify <url> via LLM as a job post / job list / neither. For a job post, enqueue sourcing on the company and viewing on the post. For a job list, enqueue sourcing and listing on the company. Exits non-zero when the URL is neither.'
+      'Classify <url> via LLM as a job post / job list / neither. For a job post, enqueue research-company on the company and view-job-detail on the post. For a job list, enqueue research-company and identify-job-list-url on the company. Exits non-zero when the URL is neither.'
     )
     .argument('<url>', 'URL of a job posting or a careers / jobs index page.')
     .action(async (url: string) => {
@@ -53,7 +53,7 @@ async function runTrack(
   const jobSourceId = await upsertJobSourceByName(companyName);
 
   await enqueuePipelineTask({
-    task: 'sourcing',
+    task: 'research-company',
     entity: { ofJobSourceId: jobSourceId },
   });
 
@@ -65,23 +65,23 @@ async function runTrack(
     });
 
     await enqueuePipelineTask({
-      task: 'viewing',
+      task: 'view-job-detail',
       entity: { ofJobPostId: jobPostId },
     });
 
     terminal.log(
-      `Tracked job post for "${companyName}" — queued sourcing on JobSource ${jobSourceId} and viewing on JobPost ${jobPostId}.`
+      `Tracked job post for "${companyName}" — queued research-company on JobSource ${jobSourceId} and view-job-detail on JobPost ${jobPostId}.`
     );
     return;
   }
 
   // pageType === 'job_list'
   await enqueuePipelineTask({
-    task: 'listing',
+    task: 'identify-job-list-url',
     entity: { ofJobSourceId: jobSourceId },
   });
 
   terminal.log(
-    `Tracked job list for "${companyName}" — queued sourcing and listing on JobSource ${jobSourceId}.`
+    `Tracked job list for "${companyName}" — queued research-company and identify-job-list-url on JobSource ${jobSourceId}.`
   );
 }

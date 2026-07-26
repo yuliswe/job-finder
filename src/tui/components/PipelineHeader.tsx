@@ -10,19 +10,19 @@ const PULSE_MS = 500;
 const PULSE_COLOR = '#ff8800';
 
 const TASK_INFO: Record<PipelineStageStats['task'], string> = {
-  seeding:
+  'explore-hiring-companies':
     'Seed URLs added to SourceSeed. Each seed is fetched and parsed to discover job-source companies.',
-  sourcing:
+  'research-company':
     'For each processed seed, extract company/career pages and persist them as JobSource rows.',
-  listing:
+  'identify-job-list-url':
     'For each JobSource, locate paginated job-listing pages and record them as JobListSource rows.',
-  scripting:
+  'learn-to-use-job-list':
     'Generate a per-site parserScript that knows how to extract individual jobs from a JobListSource.',
-  'run-scripts':
+  'apply-filters':
     'Execute each JobListSource parserScript to materialize JobPost rows for every listed job.',
-  viewing:
+  'view-job-detail':
     'Fetch each JobPost detail page so the full description and metadata are available (sets isProcessed).',
-  evaluate:
+  'evaluate-skill-match':
     'Score every viewed JobPost (titleRelavency, interestScore, skillScore) into JobPostEval.',
 };
 

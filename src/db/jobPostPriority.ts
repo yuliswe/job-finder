@@ -1,7 +1,7 @@
 import { db } from 'src/db/index.js';
 
 /** Set or clear the manual priority bump on a JobPost. `bumpedAt` is an ISO
- * timestamp to prioritize the post, or `null` to clear it. The viewing and
+ * timestamp to prioritize the post, or `null` to clear it. The view-job-detail and
  * evaluate pickers order by this column (DESC NULLS LAST), so a bumped post is
  * picked ahead of the backlog and a more recent bump outranks an older one
  * ("stackable by recency"). Throws when no JobPost has the given id. */

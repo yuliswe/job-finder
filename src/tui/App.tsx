@@ -61,10 +61,10 @@ export function App({
 
   // Scope filter for each tab. Both tabs share the same 'in' | 'all' | 'out'
   // shape (see ScopeFilter):
-  //   - Sources keys off inScopeForListing (active + interestScore >=
-  //     PIPELINE_LISTING_MIN_INTEREST_SCORE).
-  //   - Jobs keys off inScopeForViewing (active tree + titleRelavency >=
-  //     PIPELINE_VIEWING_MIN_TITLE_RELEVANCY).
+  //   - Sources keys off inScopeForIdentifyJobListUrl (active + interestScore >=
+  //     PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE).
+  //   - Jobs keys off inScopeForViewJobDetail (active tree + titleRelavency >=
+  //     PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY).
   // 'o' toggles in ↔ all, Shift+O toggles in ↔ out. Out-of-scope rows
   // surfaced by 'all' render dim; 'out' shows them as the only rows.
   const [sourcesScopeFilter, setSourcesScopeFilter] =

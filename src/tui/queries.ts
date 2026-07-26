@@ -2,9 +2,9 @@ import { type ExpressionBuilder, sql } from 'kysely';
 
 import type { DB } from '__generated__/db/types.js';
 import {
-  PIPELINE_LISTING_MIN_INTEREST_SCORE,
-  PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY,
-  PIPELINE_VIEWING_MIN_TITLE_RELEVANCY,
+  PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE,
+  PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY,
+  PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY,
 } from 'src/utils/config.js';
 import { jobPostInActiveSource } from 'src/db/activeSource.js';
 import { Bool } from 'src/db/customTypes.js';
@@ -19,27 +19,27 @@ import {
   TERMINAL_SUCCESS_STATES,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForEvaluate,
-  inScopeForListing,
-  inScopeForRunScripts,
-  inScopeForScripting,
-  inScopeForSourcing,
-  inScopeForViewing,
+  inScopeForEvaluateSkillMatch,
+  inScopeForIdentifyJobListUrl,
+  inScopeForApplyFilters,
+  inScopeForLearnToUseJobList,
+  inScopeForResearchCompany,
+  inScopeForViewJobDetail,
   locationRelevancyInScope,
 } from 'src/db/pipelineQualified.js';
 import type { SkillBreakdownEntry } from 'src/llm/evaluateJobPost.js';
-import type { SkillRequirements } from 'src/llm/viewJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobDetail.js';
 import { bumpLocalRevision } from 'src/tui/useLiveData.js';
 
 export type PipelineStageStats = {
   task:
-    | 'seeding'
-    | 'sourcing'
-    | 'listing'
-    | 'scripting'
-    | 'run-scripts'
-    | 'viewing'
-    | 'evaluate';
+    | 'explore-hiring-companies'
+    | 'research-company'
+    | 'identify-job-list-url'
+    | 'learn-to-use-job-list'
+    | 'apply-filters'
+    | 'view-job-detail'
+    | 'evaluate-skill-match';
   /** Parent-table rows we deliberately skip (inactive tree, below relevancy
    * threshold). Not drawn in the bar; surfaced in the count summary text. */
   outOfScope: number;
@@ -80,9 +80,9 @@ export type JobPostRow = {
   salaryCurrency: string | null;
   titleRelavency: number | null;
   titleRelavencyReason: string | null;
-  /** Viewing-stage score in [0, 1] of how well the posting's location fits the
-   * user's stated preferences. null until viewing scores it. Below
-   * `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY` puts the post out of scope for
+  /** view-job-detail-stage score in [0, 1] of how well the posting's location fits the
+   * user's stated preferences. null until view-job-detail scores it. Below
+   * `PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY` puts the post out of scope for
    * evaluate (see `locationRelevancyInScope`). */
   locationRelevancy: number | null;
   locationRelevancyReason: string | null;
@@ -99,17 +99,17 @@ export type JobPostRow = {
   overallScore: number | null;
   description: string | null;
   summary: string | null;
-  /** True iff the post is out of scope for the viewing/evaluate pipeline —
+  /** True iff the post is out of scope for the view-job-detail/evaluate pipeline —
    * the user manually excluded it, OR its source tree has been deactivated,
-   * OR `titleRelavency` came back below `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`,
+   * OR `titleRelavency` came back below `PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY`,
    * OR `locationRelevancy` came back below
-   * `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`. Null relevancy is NOT
+   * `PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY`. Null relevancy is NOT
    * considered out-of-scope (treated as "not yet evaluated", same as the
-   * listing-scope rule treats null interestScore on Sources). The TUI uses
+   * identify-job-list-url scope rule treats null interestScore on Sources). The TUI uses
    * this to dim out-of-scope rows when they're surfaced via the 'all' or
    * 'out' scope filter. */
-  isOutOfScopeForViewing: boolean;
-  /** Human-readable cause when `isOutOfScopeForViewing` is true (e.g.
+  isOutOfScopeForViewJobDetail: boolean;
+  /** Human-readable cause when `isOutOfScopeForViewJobDetail` is true (e.g.
    * `'manually excluded'`, `'deactivated'`, `'low title relevancy'`,
    * `'location mismatch'`), else `null`. Surfaced in the detail panel; see
    * `jobPostOutOfScopeReason`. */
@@ -129,7 +129,7 @@ export type JobPostRow = {
   tags: string[];
   /** ISO timestamp of the last manual priority bump, or `null` when the post
    * has never been bumped. A non-null value lifts the post ahead of the
-   * backlog in the viewing/evaluate pickers; see `toggleJobPostBump`. */
+   * backlog in the view-job-detail/evaluate pickers; see `toggleJobPostBump`. */
   priorityBumpedAt: string | null;
 };
 
@@ -151,17 +151,17 @@ export type SourceRow = {
   /** Mirrors `listIsActive` — strict JobListSource.isActive, `null` when the
    * source has no JobListSource yet. */
   isActive: number | null;
-  /** True iff the source was either deactivated OR sourcing scored it below
-   * `PIPELINE_LISTING_MIN_INTEREST_SCORE`. Null-score rows (sourcing hasn't
+  /** True iff the source was either deactivated OR research-company scored it below
+   * `PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE`. Null-score rows (research-company hasn't
    * completed yet) are NOT considered out-of-scope — they're surfaced as
    * backlog regardless of the toggle. The TUI uses this to dim out-of-scope
    * rows when they're shown via `includeOutOfScope`. */
-  isOutOfScopeForListing: boolean;
-  /** Human-readable cause when `isOutOfScopeForListing` is true (e.g.
+  isOutOfScopeForIdentifyJobListUrl: boolean;
+  /** Human-readable cause when `isOutOfScopeForIdentifyJobListUrl` is true (e.g.
    * `'deactivated'`, `'low interest'`), else `null`. Surfaced in the detail
    * panel; see `sourceOutOfScopeReason`. */
   outOfScopeReason: string | null;
-  /** LLM-generated reason from the listing BFS when it gave up on this
+  /** LLM-generated reason from the identify-job-list-url BFS when it gave up on this
    * source (`abortSearch=true`). Null when the BFS hasn't aborted or hasn't
    * run yet. Surfaced in the status column when present. */
   abortListingReason: string | null;
@@ -193,7 +193,7 @@ export type JobPostSortKey =
 export type SourceSortKey = 'interest' | 'posts' | 'name';
 
 export async function getPipelineStats(): Promise<PipelineStageStats[]> {
-  // Each bar's denominator is its parent table's row count (e.g., scripting →
+  // Each bar's denominator is its parent table's row count (e.g., learn-to-use-job-list →
   // every JobListSource). Parent rows partition into 5 buckets:
   //   outOfScope = fails `inScopeForX` (deliberately skipped — inactive tree,
   //                below relevancy threshold);
@@ -208,13 +208,13 @@ export async function getPipelineStats(): Promise<PipelineStageStats[]> {
  * that `start-pipeline` never runs, so it is deliberately excluded from the bar. */
 type BarTask = PipelineStageStats['task'];
 const BAR_TASKS: readonly BarTask[] = [
-  'seeding',
-  'sourcing',
-  'listing',
-  'scripting',
-  'run-scripts',
-  'viewing',
-  'evaluate',
+  'explore-hiring-companies',
+  'research-company',
+  'identify-job-list-url',
+  'learn-to-use-job-list',
+  'apply-filters',
+  'view-job-detail',
+  'evaluate-skill-match',
 ];
 
 type RawBucket = { inScope: number; state: string | null; n: number };
@@ -271,7 +271,7 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
   // for an O(log N) lookup per parent row. The earlier implementation
   // LEFT JOINed the `LatestPipelineState` view, which forced SQLite to
   // materialize the whole view (ROW_NUMBER() OVER (...) + TEMP B-TREE sort)
-  // on every refresh — ~1.7 s for the sourcing stage alone, hence the TUI
+  // on every refresh — ~1.7 s for the research-company stage alone, hence the TUI
   // freeze on every DB write. The rewrite drops total time for all 7 stages
   // from ~2.3 s to ~50 ms.
   //
@@ -279,7 +279,7 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
   // not-yet-enqueued case. The bucket-aggregator above treats null as
   // pending, same as before.
   switch (task) {
-    case 'seeding':
+    case 'explore-hiring-companies':
       // Every SourceSeed is in scope — no skip rule.
       return db
         .selectFrom('SourceSeed')
@@ -290,13 +290,13 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
         ])
         .groupBy([sql`"state"`])
         .execute() as Promise<RawBucket[]>;
-    case 'sourcing':
+    case 'research-company':
       return db
         .selectFrom('JobSource')
         .select(eb => [
           eb
             .case()
-            .when(inScopeForSourcing(eb))
+            .when(inScopeForResearchCompany(eb))
             .then(1)
             .else(0)
             .end()
@@ -306,13 +306,13 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
         ])
         .groupBy([sql`"inScope"`, sql`"state"`])
         .execute() as Promise<RawBucket[]>;
-    case 'listing':
+    case 'identify-job-list-url':
       return db
         .selectFrom('JobSource')
         .select(eb => [
           eb
             .case()
-            .when(inScopeForListing(eb))
+            .when(inScopeForIdentifyJobListUrl(eb))
             .then(1)
             .else(0)
             .end()
@@ -322,17 +322,17 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
         ])
         .groupBy([sql`"inScope"`, sql`"state"`])
         .execute() as Promise<RawBucket[]>;
-    case 'scripting':
-    case 'run-scripts':
+    case 'learn-to-use-job-list':
+    case 'apply-filters':
       return db
         .selectFrom('JobListSource')
         .select(eb => [
           eb
             .case()
             .when(
-              task === 'scripting'
-                ? inScopeForScripting(eb)
-                : inScopeForRunScripts(eb)
+              task === 'learn-to-use-job-list'
+                ? inScopeForLearnToUseJobList(eb)
+                : inScopeForApplyFilters(eb)
             )
             .then(1)
             .else(0)
@@ -348,17 +348,17 @@ async function stageRawBuckets(task: BarTask): Promise<RawBucket[]> {
         ])
         .groupBy([sql`"inScope"`, sql`"state"`])
         .execute() as Promise<RawBucket[]>;
-    case 'viewing':
-    case 'evaluate':
+    case 'view-job-detail':
+    case 'evaluate-skill-match':
       return db
         .selectFrom('JobPost')
         .select(eb => [
           eb
             .case()
             .when(
-              task === 'viewing'
-                ? inScopeForViewing(eb)
-                : inScopeForEvaluate(eb)
+              task === 'view-job-detail'
+                ? inScopeForViewJobDetail(eb)
+                : inScopeForEvaluateSkillMatch(eb)
             )
             .then(1)
             .else(0)
@@ -406,7 +406,7 @@ function latestPipelineStateFor<
 }
 
 /** The `latestPipelineStateFor` correlated subquery specialized to JobPost and
- * aliased to `alias`, so `listJobPosts` can pull the latest viewing and
+ * aliased to `alias`, so `listJobPosts` can pull the latest view-job-detail and
  * evaluate states onto one row. Takes the join-scoped expression builder from
  * `listJobPosts` directly — `JobPost.id` is already in that scope, so unlike
  * the generic helper above it needs no cast. Index-backed via
@@ -416,7 +416,7 @@ function latestJobPostState<A extends string>(
     DB,
     'JobPost' | 'JobPostEval' | 'JobSource' | 'JobListSource'
   >,
-  task: 'viewing' | 'evaluate',
+  task: 'view-job-detail' | 'evaluate-skill-match',
   alias: A
 ) {
   return eb
@@ -436,7 +436,7 @@ export async function listJobPosts(args: {
   /** If set, only return JobPosts belonging to this JobSource. Used by the
    * source-jobs screen. */
   ofJobSourceId?: string;
-  /** Filter relative to `inScopeForViewing`. Default `'in'` matches the
+  /** Filter relative to `inScopeForViewJobDetail`. Default `'in'` matches the
    * historical TUI behavior (active tree + cleared title-relevancy
    * threshold). `'all'` drops both filters and the table dims out-of-scope
    * rows. `'out'` returns only out-of-scope rows for auditing. */
@@ -455,7 +455,7 @@ export async function listJobPosts(args: {
   if (scope === 'in') {
     base = base
       .where(jobPostInActiveSource)
-      .where(inScopeForViewing)
+      .where(inScopeForViewJobDetail)
       .where(locationRelevancyInScope);
   } else if (scope === 'out') {
     // Out-of-scope = manually excluded, OR NOT in active source tree, OR title
@@ -471,7 +471,7 @@ export async function listJobPosts(args: {
           eb(
             'JobPostEval.titleRelavency',
             '<',
-            PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+            PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY
           ),
         ]),
         eb.and([
@@ -479,7 +479,7 @@ export async function listJobPosts(args: {
           eb(
             'JobPostEval.locationRelevancy',
             '<',
-            PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+            PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY
           ),
         ]),
       ])
@@ -555,7 +555,7 @@ export async function listJobPosts(args: {
       break;
   }
 
-  // `isOutOfScopeForViewing` needs the active-tree check, which we don't
+  // `isOutOfScopeForViewJobDetail` needs the active-tree check, which we don't
   // have on the row directly. Re-evaluate cheaply per row by joining the
   // source's active state into the select.
   const qWithScope = q
@@ -565,7 +565,7 @@ export async function listJobPosts(args: {
       'JobSource.isActive as sourceIsActive',
       'JobListSource.isActive as listSourceIsActive',
     ])
-    // Latest viewing/evaluate pipeline state per post, so the status column
+    // Latest view-job-detail/evaluate pipeline state per post, so the status column
     // reflects a `jobfinder reset <stage>` (which appends a fresh `queued`
     // PipelineState row without clearing the prior run's description /
     // interestScore). Each is an index-backed O(log N) correlated subquery on
@@ -574,8 +574,8 @@ export async function listJobPosts(args: {
     // `LatestPipelineState` view, which would materialize the whole view
     // (ROW_NUMBER + TEMP B-TREE) on every 1s TUI refresh.
     .select(eb => [
-      latestJobPostState(eb, 'viewing', 'viewingState'),
-      latestJobPostState(eb, 'evaluate', 'evaluateState'),
+      latestJobPostState(eb, 'view-job-detail', 'viewJobDetailState'),
+      latestJobPostState(eb, 'evaluate-skill-match', 'evaluateSkillMatchState'),
     ]);
 
   const rows = await qWithScope.limit(limit).execute();
@@ -586,8 +586,8 @@ export async function listJobPosts(args: {
       tagsJson,
       sourceIsActive,
       listSourceIsActive,
-      viewingState,
-      evaluateState,
+      viewJobDetailState,
+      evaluateSkillMatchState,
       isManuallyExcluded: isManuallyExcludedRaw,
       ...rest
     } = r;
@@ -608,7 +608,7 @@ export async function listJobPosts(args: {
       locationRelevancy: r.locationRelevancy,
     });
 
-    const isOutOfScopeForViewing = outOfScopeReason != null;
+    const isOutOfScopeForViewJobDetail = outOfScopeReason != null;
 
     return {
       ...rest,
@@ -624,7 +624,7 @@ export async function listJobPosts(args: {
         r.skillScore != null && r.interestScore != null
           ? r.skillScore * r.interestScore * (r.locationScore ?? 1)
           : null,
-      isOutOfScopeForViewing,
+      isOutOfScopeForViewJobDetail,
       outOfScopeReason,
       status: computeJobPostStatus({
         manuallyExcluded,
@@ -633,8 +633,8 @@ export async function listJobPosts(args: {
         locationRelevancy: r.locationRelevancy,
         description: r.description,
         interestScore: r.interestScore,
-        viewingState,
-        evaluateState,
+        viewJobDetailState,
+        evaluateSkillMatchState,
       }),
       tags: parseJsonArray<string>(tagsJson) ?? [],
     };
@@ -702,7 +702,7 @@ export async function toggleJobPostExcluded(
 
 /** Toggle the manual priority bump on a JobPost: stamp `priorityBumpedAt` with
  * the current time when it is unset, or clear it when already bumped. A bumped
- * post is picked ahead of the backlog in the viewing/evaluate stages, and
+ * post is picked ahead of the backlog in the view-job-detail/evaluate stages, and
  * re-stamping a second post lifts it above the first ("stackable by
  * recency"). Bumps the local revision so the TUI refetches immediately. */
 export async function toggleJobPostBump(jobPostId: string): Promise<void> {
@@ -730,8 +730,8 @@ function fmtStatus(
   return reason ? `${state}: ${stage} (${reason})` : `${state}: ${stage}`;
 }
 
-/** Why a JobPost fails `inScopeForViewing`, or `null` when it is in scope.
- * Drives both the `isOutOfScopeForViewing` flag and the `outOfScopeReason`
+/** Why a JobPost fails `inScopeForViewJobDetail`, or `null` when it is in scope.
+ * Drives both the `isOutOfScopeForViewJobDetail` flag and the `outOfScopeReason`
  * the detail panel surfaces, so the two can never disagree. The reasons are
  * checked in priority order so that a manual exclusion shadows a deactivated
  * source tree, which in turn shadows the relevancy checks.
@@ -750,16 +750,16 @@ function jobPostOutOfScopeReason(args: {
   if (!inActiveTree) return 'deactivated';
   if (
     titleRelavency != null &&
-    titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+    titleRelavency < PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY
   ) {
     return 'low title relevancy';
   }
 
-  // Location is scored at viewing time, so this only fires once the post has
-  // been viewed. A below-threshold score keeps it out of `evaluate`.
+  // Location is scored at view-job-detail time, so this only fires once the post has
+  // been fetched. A below-threshold score keeps it out of `evaluate`.
   if (
     locationRelevancy != null &&
-    locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+    locationRelevancy < PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY
   ) {
     return 'location mismatch';
   }
@@ -789,8 +789,8 @@ function pendingStageLabel(state: string | null): string | null {
  * status prefers an active pipeline state for the earliest not-yet-done stage
  * over what the result columns imply, so a `reset` that requeues a row is
  * reflected even though the prior run's description / interestScore are still
- * populated. Viewing is checked before evaluate because a row requeued for
- * viewing will be re-viewed before it is re-evaluated. */
+ * populated. View-job-detail is checked before evaluate because a row requeued for
+ * view-job-detail will be re-fetched before it is re-evaluated. */
 function computeJobPostStatus(args: {
   manuallyExcluded: boolean;
   inActiveTree: boolean;
@@ -798,8 +798,8 @@ function computeJobPostStatus(args: {
   locationRelevancy: number | null;
   description: string | null;
   interestScore: number | null;
-  viewingState: string | null;
-  evaluateState: string | null;
+  viewJobDetailState: string | null;
+  evaluateSkillMatchState: string | null;
 }): string {
   const {
     manuallyExcluded,
@@ -808,37 +808,44 @@ function computeJobPostStatus(args: {
     locationRelevancy,
     description,
     interestScore,
-    viewingState,
-    evaluateState,
+    viewJobDetailState,
+    evaluateSkillMatchState,
   } = args;
 
   if (manuallyExcluded)
-    return fmtStatus('Out-of-scope', 'viewing', 'manually excluded');
-  if (!inActiveTree) return fmtStatus('Out-of-scope', 'viewing', 'deactivated');
+    return fmtStatus('Out-of-scope', 'view-job-detail', 'manually excluded');
+  if (!inActiveTree)
+    return fmtStatus('Out-of-scope', 'view-job-detail', 'deactivated');
   if (
     titleRelavency != null &&
-    titleRelavency < PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+    titleRelavency < PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY
   ) {
-    return fmtStatus('Out-of-scope', 'viewing', 'low title relevancy');
+    return fmtStatus('Out-of-scope', 'view-job-detail', 'low title relevancy');
   }
 
-  // Location is scored at viewing time, so this only fires once the post has
-  // been viewed. A below-threshold score keeps it out of `evaluate`.
+  // Location is scored at view-job-detail time, so this only fires once the post has
+  // been fetched. A below-threshold score keeps it out of `evaluate`.
   if (
     locationRelevancy != null &&
-    locationRelevancy < PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+    locationRelevancy < PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY
   ) {
-    return fmtStatus('Out-of-scope', 'evaluate', 'location mismatch');
+    return fmtStatus(
+      'Out-of-scope',
+      'evaluate-skill-match',
+      'location mismatch'
+    );
   }
 
-  const viewingLabel = pendingStageLabel(viewingState);
-  if (viewingLabel) return fmtStatus(viewingLabel, 'viewing');
-  if (!description) return fmtStatus('Queued', 'viewing');
+  const viewJobDetailLabel = pendingStageLabel(viewJobDetailState);
+  if (viewJobDetailLabel)
+    return fmtStatus(viewJobDetailLabel, 'view-job-detail');
+  if (!description) return fmtStatus('Queued', 'view-job-detail');
 
-  const evaluateLabel = pendingStageLabel(evaluateState);
-  if (evaluateLabel) return fmtStatus(evaluateLabel, 'evaluate');
-  if (interestScore == null) return fmtStatus('Queued', 'evaluate');
-  return fmtStatus('Done', 'evaluate');
+  const evaluateSkillMatchLabel = pendingStageLabel(evaluateSkillMatchState);
+  if (evaluateSkillMatchLabel)
+    return fmtStatus(evaluateSkillMatchLabel, 'evaluate-skill-match');
+  if (interestScore == null) return fmtStatus('Queued', 'evaluate-skill-match');
+  return fmtStatus('Done', 'evaluate-skill-match');
 }
 
 /** The DB stores `postedAtSource` as plain text, but we constrain it to the
@@ -862,8 +869,8 @@ function parseJsonArray<T>(json: string | null): T[] | null {
 
 /** Shared 3-state scope filter, used by both the Sources tab and the Jobs
  * tab. The exact meaning of in/out depends on the tab — Sources keys off
- * `inScopeForListing` (active + interestScore >= threshold), Jobs keys off
- * `inScopeForViewing` (in active source tree + titleRelavency >= threshold).
+ * `inScopeForIdentifyJobListUrl` (active + interestScore >= threshold), Jobs keys off
+ * `inScopeForViewJobDetail` (in active source tree + titleRelavency >= threshold).
  *
  *   - `'in'`  → only in-scope rows (matches the original TUI behavior).
  *   - `'all'` → in-scope PLUS out-of-scope, with the latter rendered dim.
@@ -880,7 +887,7 @@ export async function listSources(args: {
   scope?: ScopeFilter;
 }): Promise<SourceRow[]> {
   // One row per JobSource. approve-seeds promotes SourceSeed names into
-  // JobSource rows (url=null until sourcing fills it in), so there's no
+  // JobSource rows (url=null until research-company fills it in), so there's no
   // need to surface unsourced seeds separately anymore.
   //
   // LEFT JOIN picks the most recent JobListSource per source via an inline
@@ -888,7 +895,7 @@ export async function listSources(args: {
   // several we surface only the latest by createdAt. `jobPostCount` is a
   // scalar subquery so it counts every relevant post under the source
   // regardless of which JobListSource it belongs to. Threshold gates posts
-  // the same way the viewing bar / SourceJobsScreen do.
+  // the same way the view-job-detail bar / SourceJobsScreen do.
   const { sort, scope = 'in' } = args;
   let query = db.selectFrom('JobSource').leftJoin(
     eb =>
@@ -924,7 +931,7 @@ export async function listSources(args: {
   // Default ('in'): hide low-interest. Null score = not yet sourced — still
   // surface those so the user can see backlog progress. 'all' drops the
   // low-interest filter. 'out' inverts: only rows that are out-of-scope
-  // for listing — low-interest OR deactivated.
+  // for identify-job-list-url — low-interest OR deactivated.
   if (scope === 'in') {
     query = query.where(eb =>
       eb.or([
@@ -932,7 +939,7 @@ export async function listSources(args: {
         eb(
           'JobSource.interestScore',
           '>=',
-          PIPELINE_LISTING_MIN_INTEREST_SCORE
+          PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE
         ),
       ])
     );
@@ -945,7 +952,7 @@ export async function listSources(args: {
           eb(
             'JobSource.interestScore',
             '<',
-            PIPELINE_LISTING_MIN_INTEREST_SCORE
+            PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE
           ),
         ]),
       ])
@@ -974,17 +981,17 @@ export async function listSources(args: {
         .where(
           'JobPostEval.titleRelavency',
           '>=',
-          PIPELINE_VIEWING_MIN_TITLE_RELEVANCY
+          PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY
         )
-        // Exclude posts viewing has scored as a location mismatch, matching the
-        // Jobs 'in' scope. Null (not yet viewed) still counts as backlog.
+        // Exclude posts view-job-detail has scored as a location mismatch, matching the
+        // Jobs 'in' scope. Null (not yet fetched) still counts as backlog.
         .where(eb2 =>
           eb2.or([
             eb2('JobPostEval.locationRelevancy', 'is', null),
             eb2(
               'JobPostEval.locationRelevancy',
               '>=',
-              PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY
+              PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY
             ),
           ])
         )
@@ -1012,7 +1019,7 @@ export async function listSources(args: {
     const sourceIsActive = r.sourceIsActive ?? 0;
     const score = r.sourceInterestScore;
     const outOfScopeReason = sourceOutOfScopeReason({ score, sourceIsActive });
-    const isOutOfScopeForListing = outOfScopeReason != null;
+    const isOutOfScopeForIdentifyJobListUrl = outOfScopeReason != null;
 
     const hasScript = r.listParserScript ? 1 : 0;
     const jobPostCount = Number(r.jobPostCount ?? 0);
@@ -1032,7 +1039,7 @@ export async function listSources(args: {
       hasScript,
       jobPostCount,
       isActive: r.listIsActive ?? null,
-      isOutOfScopeForListing,
+      isOutOfScopeForIdentifyJobListUrl,
       outOfScopeReason,
       abortListingReason: r.abortListingReason,
       status: computeSourceStatus({
@@ -1047,8 +1054,8 @@ export async function listSources(args: {
   });
 }
 
-/** Why a source fails `inScopeForListing`, or `null` when it is in scope.
- * Mirrors the `isOutOfScopeForListing` predicate: a deactivated source is
+/** Why a source fails `inScopeForIdentifyJobListUrl`, or `null` when it is in scope.
+ * Mirrors the `isOutOfScopeForIdentifyJobListUrl` predicate: a deactivated source is
  * out-of-scope regardless of score, and a scored source drops out when its
  * interest falls below the threshold. A source that hasn't been scored yet
  * (`score == null`) is not out-of-scope unless it is also deactivated. Drives
@@ -1061,7 +1068,10 @@ function sourceOutOfScopeReason(args: {
 }): string | null {
   const { score, sourceIsActive } = args;
   if (sourceIsActive !== 1) return 'deactivated';
-  if (score != null && score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
+  if (
+    score != null &&
+    score < PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE
+  ) {
     return 'low interest';
   }
 
@@ -1070,7 +1080,7 @@ function sourceOutOfScopeReason(args: {
 
 /** Single-line pipeline status for a source, rendered as `<state>: <stage>`.
  * Derived from the same fields the rest of SourceRow exposes and checked in
- * priority order — earlier states (still pre-sourcing) shadow later ones, and
+ * priority order — earlier states (still pre-research-company) shadow later ones, and
  * out-of-scope verdicts shadow any queued interpretation. */
 function computeSourceStatus(args: {
   score: number | null;
@@ -1089,32 +1099,32 @@ function computeSourceStatus(args: {
     abortListingReason,
   } = args;
 
-  if (score == null) return fmtStatus('Queued', 'sourcing');
+  if (score == null) return fmtStatus('Queued', 'research-company');
   if (sourceIsActive !== 1) {
-    return fmtStatus('Out-of-scope', 'listing', 'deactivated');
+    return fmtStatus('Out-of-scope', 'identify-job-list-url', 'deactivated');
   }
 
-  if (score < PIPELINE_LISTING_MIN_INTEREST_SCORE) {
-    return fmtStatus('Out-of-scope', 'listing', 'low interest');
+  if (score < PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE) {
+    return fmtStatus('Out-of-scope', 'identify-job-list-url', 'low interest');
   }
 
   if (listId == null) {
     // BFS already gave up — surface the LLM's reason instead of the bland
-    // "Queued: listing" so the user knows it won't auto-retry.
+    // "Queued: identify-job-list-url" so the user knows it won't auto-retry.
     if (abortListingReason) {
-      return fmtStatus('Aborted', 'listing', abortListingReason);
+      return fmtStatus('Aborted', 'identify-job-list-url', abortListingReason);
     }
 
-    return fmtStatus('Queued', 'listing');
+    return fmtStatus('Queued', 'identify-job-list-url');
   }
 
-  if (hasScript === 0) return fmtStatus('Queued', 'scripting');
-  if (jobPostCount === 0) return fmtStatus('Queued', 'run-scripts');
-  return fmtStatus('Done', 'run-scripts');
+  if (hasScript === 0) return fmtStatus('Queued', 'learn-to-use-job-list');
+  if (jobPostCount === 0) return fmtStatus('Queued', 'apply-filters');
+  return fmtStatus('Done', 'apply-filters');
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
-  // Rows whose listing hasn't produced a JobListSource yet have nothing to
+  // Rows whose identify-job-list-url has not produced a JobListSource yet have nothing to
   // toggle — `active` strictly mirrors JobListSource.isActive.
   if (!row.listId) return;
   const next = row.isActive ? Bool.False : Bool.True;

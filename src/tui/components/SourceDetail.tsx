@@ -17,7 +17,7 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
       <Text wrap='truncate-end'>
         id: <Text bold>{row.sourceId}</Text>
       </Text>
-      {row.isOutOfScopeForListing && (
+      {row.isOutOfScopeForIdentifyJobListUrl && (
         <Text>
           out-of-scope:{' '}
           <Text bold color='yellow'>

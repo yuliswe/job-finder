@@ -42,7 +42,7 @@ export type TableProps<T> = {
   active?: boolean;
   /** Per-row dim predicate. Rows where this returns true render in dim color
    * (still inversed when selected, so the cursor stays legible). Used by the
-   * Sources tab to mark out-of-scope-for-listing rows. */
+   * Sources tab to mark out-of-scope-for-identify-job-list-url rows. */
   isDim?: (r: T) => boolean;
   /** String drawn between adjacent columns in both the header and the rows.
    * Defaults to a 2-char gap; pass ' │ ' to draw vertical cell dividers. */

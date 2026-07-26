@@ -2,7 +2,7 @@ import * as v from 'valibot';
 
 import { LLM_EVALUATION_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import type { SkillRequirements } from 'src/llm/viewJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobDetail.js';
 import { EVALUATE_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/evaluateJobPost.js';
 import { terminal } from 'src/utils/terminal';
 
@@ -28,7 +28,7 @@ export type JobPostEvaluation = {
  * Ask the LLM to score a single job posting against the user's interests + CV
  * along three axes (interest, skill, location). The set of skills under
  * consideration comes from the posting-derived `skillRequirements` (extracted
- * at viewing time, CV-free); here the LLM only scores the user's experience
+ * at view-job-detail time, CV-free); here the LLM only scores the user's experience
  * with each. Location is scored against the location preferences expressed
  * in the interests file vs the posting's location + remote status.
  */

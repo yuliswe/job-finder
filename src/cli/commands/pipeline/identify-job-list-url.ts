@@ -17,8 +17,8 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForListing,
-  qualifiedForListing,
+  inScopeForIdentifyJobListUrl,
+  qualifiedForIdentifyJobListUrl,
 } from 'src/db/pipelineQualified.js';
 import { findJobListPage } from 'src/llm/discoverJobListSource.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
@@ -26,21 +26,21 @@ import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
-type ListingOptions = {
+type IdentifyJobListUrlOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobSourceId?: string;
   /** Process the selected rows now. Without it the command only queues
    * them for a later `--start` / `jobfinder start-pipeline`. */
   start?: boolean;
-  /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
+  /** Suppress "nothing to do" / "0 rows" log lines. See ResearchCompanyOptions. */
   suppressNothingToDoLog?: boolean;
 };
 
-export function createListingCommand(): Command {
-  return new Command('listing')
+export function createIdentifyJobListUrlCommand(): Command {
+  return new Command('identify-job-list-url')
     .description(
-      'For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline scripting` fills it in). By default only queues the selected rows; pass --start to process them now.'
+      'For each currently-queued JobSource, BFS the company site to find its job-listing page; insert a JobListSource row with a placeholder parserScript (`pipeline learn-to-use-job-list` fills it in). By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -62,21 +62,23 @@ export function createListingCommand(): Command {
       '--start',
       'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
     )
-    .action(async (opts: ListingOptions) => {
+    .action(async (opts: IdentifyJobListUrlOptions) => {
       if (opts.start) {
-        await withBrowserInstance(context => runListing(context, opts));
+        await withBrowserInstance(context =>
+          runIdentifyJobListUrl(context, opts)
+        );
         return;
       }
 
-      await queueListing(opts);
+      await queueIdentifyJobListUrl(opts);
     });
 }
 
 /** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
  * return the rows the mode selects. Shared by the queue-only default path
  * and the --start processing path. */
-async function pickListingTargets(
-  opts: ListingOptions
+async function pickIdentifyJobListUrlTargets(
+  opts: IdentifyJobListUrlOptions
 ): Promise<{ id: string; name: string; url: string }[]> {
   if (opts.jobSourceId) {
     const exists = await db
@@ -90,17 +92,17 @@ async function pickListingTargets(
     }
 
     await enqueuePipelineTask({
-      task: 'listing',
+      task: 'identify-job-list-url',
       entity: { ofJobSourceId: opts.jobSourceId },
     });
   }
 
   const mode = pipelineModeFromOptions(opts);
-  if (mode === 'all') await requeueAllInScope('listing');
+  if (mode === 'all') await requeueAllInScope('identify-job-list-url');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
-    task: 'listing',
+    task: 'identify-job-list-url',
     parentIdRef: 'JobSource.id',
     mode,
   });
@@ -108,15 +110,15 @@ async function pickListingTargets(
   let query = db
     .selectFrom('JobSource')
     .select(['id', 'name', 'url'])
-    .where(qualifiedForListing)
-    .where(inScopeForListing)
-    // Hold listing while a fresh sourcing is still pending on the same source,
-    // so we never crawl a stale url/interestScore that sourcing is about to
+    .where(qualifiedForIdentifyJobListUrl)
+    .where(inScopeForIdentifyJobListUrl)
+    // Hold identify-job-list-url while a fresh research-company is still pending on the same source,
+    // so we never crawl a stale url/interestScore that research-company is about to
     // overwrite. Applied in every mode (correctness, not a state filter); the
     // explicit --job-source-id branch below bypasses it as a manual override.
     .where(
       parentsSettledForPipelineTask({
-        task: 'listing',
+        task: 'identify-job-list-url',
         parentIdRef: 'JobSource.id',
       })
     );
@@ -142,11 +144,11 @@ async function pickListingTargets(
   });
 }
 
-export async function queueListing(
-  opts: ListingOptions
+export async function queueIdentifyJobListUrl(
+  opts: IdentifyJobListUrlOptions
 ): Promise<{ queued: number }> {
   const mode = pipelineModeFromOptions(opts);
-  const targets = await pickListingTargets(opts);
+  const targets = await pickIdentifyJobListUrlTargets(opts);
 
   // The default mode only selects rows that are already queued, --all
   // bulk-requeues inside the picker, and --job-source-id enqueues its row
@@ -155,25 +157,25 @@ export async function queueListing(
   if (mode === 'include-failed') {
     for (const target of targets) {
       await enqueuePipelineTask({
-        task: 'listing',
+        task: 'identify-job-list-url',
         entity: { ofJobSourceId: target.id },
       });
     }
   }
 
   terminal.log(
-    `${targets.length} JobSource row(s) queued for listing. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+    `${targets.length} JobSource row(s) queued for identify-job-list-url. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
   );
 
   return { queued: targets.length };
 }
 
-export async function runListing(
+export async function runIdentifyJobListUrl(
   context: BrowserContext,
-  opts: ListingOptions
+  opts: IdentifyJobListUrlOptions
 ): Promise<{ processed: number }> {
-  await reapStaleStartedStates('listing');
-  const sources = await pickListingTargets(opts);
+  await reapStaleStartedStates('identify-job-list-url');
+  const sources = await pickIdentifyJobListUrlTargets(opts);
 
   const results = await Promise.all(
     sources.map(source => tabLimit(() => listOneSource({ context, source })))
@@ -197,7 +199,7 @@ async function listOneSource(args: {
 }): Promise<{ jobListSourceInserted: number } | undefined> {
   const { context, source } = args;
   return processOne({
-    task: 'listing',
+    task: 'identify-job-list-url',
     entity: { ofJobSourceId: source.id },
     label: source.name,
     work: async (): Promise<{ jobListSourceInserted: number }> => {
@@ -224,7 +226,7 @@ async function listOneSource(args: {
         );
 
         await recordPipelineState({
-          task: 'listing',
+          task: 'identify-job-list-url',
           state: PIPELINE_STATE.NO_LISTING_FOUND,
           reason: `LLM aborted: ${outcome.reason}`,
           entity: { ofJobSourceId: source.id },
@@ -238,7 +240,7 @@ async function listOneSource(args: {
         );
 
         await recordPipelineState({
-          task: 'listing',
+          task: 'identify-job-list-url',
           state: PIPELINE_STATE.NO_LISTING_FOUND,
           entity: { ofJobSourceId: source.id },
         });
@@ -261,7 +263,7 @@ async function listOneSource(args: {
       const wasInserted = (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
 
       await recordPipelineState({
-        task: 'listing',
+        task: 'identify-job-list-url',
         state: PIPELINE_STATE.DONE,
         reason: wasInserted ? 'inserted' : 'updated',
         entity: { ofJobSourceId: source.id },
@@ -269,7 +271,7 @@ async function listOneSource(args: {
 
       if (wasInserted) {
         await enqueuePipelineTask({
-          task: 'scripting',
+          task: 'learn-to-use-job-list',
           entity: { ofJobListSourceId: newListId },
         });
       }

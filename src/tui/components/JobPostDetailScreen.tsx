@@ -295,13 +295,13 @@ async function generateAndOpenCvPdf(
   try {
     if (!row.description) {
       throw new Error(
-        'JobPost has no description — run `jobfinder pipeline viewing` first'
+        'JobPost has no description — run `jobfinder pipeline view-job-detail` first'
       );
     }
 
     if (!row.skillRequirements || row.skillRequirements.length === 0) {
       throw new Error(
-        'JobPost has no skillRequirements — run `jobfinder pipeline viewing` first'
+        'JobPost has no skillRequirements — run `jobfinder pipeline view-job-detail` first'
       );
     }
 
@@ -449,8 +449,8 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
     });
   }
 
-  // Viewing-stage location gate. Surfaced so a post filtered out for a location
-  // mismatch (below PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY) explains itself.
+  // view-job-detail-stage location gate. Surfaced so a post filtered out for a location
+  // mismatch (below PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY) explains itself.
   if (row.locationRelevancyReason) {
     reasons.push({
       label: 'location fit',
@@ -545,7 +545,7 @@ function buildScrollLines(row: JobPostRow, width: number): ReactNode[] {
   } else {
     out.push(
       <Text dimColor key={out.length}>
-        (no description — run `jobfinder pipeline viewing`)
+        (no description — run `jobfinder pipeline view-job-detail`)
       </Text>
     );
   }
@@ -586,7 +586,7 @@ function pushBreakdownReason(
 /** Soft-wrap `text` at `width`, splitting on whitespace. Preserves existing
  * line breaks (including blank lines between paragraphs). Normalizes
  * `\r\n` / `\r` to `\n` first, and converts JSON-style literal `\n` / `\t`
- * sequences (some viewJobPost results land in the DB pre-escaped) into the
+ * sequences (some viewJobDetail results land in the DB pre-escaped) into the
  * actual whitespace characters. */
 function wrapToWidth(text: string, width: number): string[] {
   if (!text) return [];

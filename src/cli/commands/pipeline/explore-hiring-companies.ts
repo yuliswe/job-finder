@@ -8,11 +8,14 @@ import { db } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import { PIPELINE_STATE, recordPipelineState } from 'src/db/pipelineState.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { DATA_DIR, LLM_SEEDING_MODEL } from 'src/utils/config.js';
 import {
-  SEEDING_SUMMARY_SYSTEM_PROMPT,
-  SEEDING_SYSTEM_PROMPT,
-} from 'src/prompts/seeding.js';
+  DATA_DIR,
+  LLM_EXPLORE_HIRING_COMPANIES_MODEL,
+} from 'src/utils/config.js';
+import {
+  EXPLORE_HIRING_COMPANIES_SUMMARY_SYSTEM_PROMPT,
+  EXPLORE_HIRING_COMPANIES_SYSTEM_PROMPT,
+} from 'src/prompts/explore-hiring-companies.js';
 import {
   JobspyError,
   scrapeJobs,
@@ -47,18 +50,18 @@ const MAX_ATTEMPTS = 10;
  * even if the LLM keeps saying it isn't done. Coverage has clearly plateaued. */
 const MAX_CONSECUTIVE_ZERO_NEW = 50;
 
-export function createSeedingCommand(): Command {
-  return new Command('seeding')
+export function createExploreHiringCompaniesCommand(): Command {
+  return new Command('explore-hiring-companies')
     .description(
       'Seed SourceSeed table from <DATA_DIR>/interests.md via an LLM-driven jobspy call'
     )
-    .action(() => runSeeding());
+    .action(() => runExploreHiringCompanies());
 }
 
-async function runSeeding(): Promise<void> {
-  if (LLM_SEEDING_MODEL.length === 0) {
+async function runExploreHiringCompanies(): Promise<void> {
+  if (LLM_EXPLORE_HIRING_COMPANIES_MODEL.length === 0) {
     throw new Error(
-      'LLM_SEEDING_MODEL is empty — set it in jobfinder.config.js'
+      'LLM_EXPLORE_HIRING_COMPANIES_MODEL is empty — set it in jobfinder.config.js'
     );
   }
 
@@ -66,7 +69,7 @@ async function runSeeding(): Promise<void> {
   const cv = await readSeedFile(join(DATA_DIR, 'cv.md'));
 
   // jobspy needs a location to scope the search (Indeed in particular returns
-  // garbage when called without one), and the downstream `viewing` stage
+  // garbage when called without one), and the downstream `view-job-detail` stage
   // scores `locationScore` against the interests file. Bail early with an
   // actionable message rather than letting an interests-without-location
   // file produce noisy results.
@@ -78,7 +81,7 @@ async function runSeeding(): Promise<void> {
     terminal.warn(`  Reason: ${locCheck.reason}`);
 
     terminal.warn(
-      'Add a location (e.g. "Toronto, ON", "remote in Canada", "anywhere in EU") and re-run `jobfinder pipeline seeding`.'
+      'Add a location (e.g. "Toronto, ON", "remote in Canada", "anywhere in EU") and re-run `jobfinder pipeline explore-hiring-companies`.'
     );
     return;
   }
@@ -100,14 +103,14 @@ async function runSeeding(): Promise<void> {
     [
       '',
       `Review ${join(DATA_DIR, 'interests.md')} and ${join(DATA_DIR, 'cv.md')} against the summary above.`,
-      '  - Re-run `jobfinder pipeline seeding` after editing to refresh, or',
-      '  - Run `jobfinder pipeline approve-seeds` to queue these seeds for sourcing.',
+      '  - Re-run `jobfinder pipeline explore-hiring-companies` after editing to refresh, or',
+      '  - Run `jobfinder pipeline approve-seeds` to queue these seeds for research-company.',
     ].join('\n')
   );
 }
 
-/** Drop SourceSeed rows the user never approved (no sourcing pipeline_state
- * row exists for them), along with their seeding-task state. Approved seeds
+/** Drop SourceSeed rows the user never approved (no research-company pipeline_state
+ * row exists for them), along with their explore-hiring-companies-task state. Approved seeds
  * — and their downstream lineage — are preserved. */
 async function clearSourceSeeds(): Promise<void> {
   const unapproved = await db
@@ -115,7 +118,7 @@ async function clearSourceSeeds(): Promise<void> {
     .leftJoin('LatestPipelineState', join =>
       join
         .onRef('LatestPipelineState.ofSourceSeedId', '=', 'SourceSeed.id')
-        .on('LatestPipelineState.task', '=', 'sourcing')
+        .on('LatestPipelineState.task', '=', 'research-company')
     )
     .select('SourceSeed.id as id')
     .where('LatestPipelineState.id', 'is', null)
@@ -148,7 +151,10 @@ async function printLlmSummary(inserted: JobResult[]): Promise<void> {
       `- ${j.title} @ ${j.company ?? 'Unknown'} (${j.location ?? 'n/a'}) [${j.site}]`
   );
 
-  const memory = new Memory([{ system: SEEDING_SUMMARY_SYSTEM_PROMPT }]);
+  const memory = new Memory([
+    { system: EXPLORE_HIRING_COMPANIES_SUMMARY_SYSTEM_PROMPT },
+  ]);
+
   const { result } = await feedbackLoop({
     memory,
     initialPrompt: `Seeded postings (${inserted.length}):\n\n${lines.join('\n')}`,
@@ -167,8 +173,8 @@ async function printLlmSummary(inserted: JobResult[]): Promise<void> {
       ),
     }),
     maxAttempts: 3,
-    models: LLM_SEEDING_MODEL,
-    metadata: { configKey: 'LLM_SEEDING_MODEL' },
+    models: LLM_EXPLORE_HIRING_COMPANIES_MODEL,
+    metadata: { configKey: 'LLM_EXPLORE_HIRING_COMPANIES_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),
   });
@@ -184,7 +190,9 @@ async function discoverSeedJobs(args: {
 }): Promise<JobResult[]> {
   const { interests, cv } = args;
 
-  const memory = new Memory([{ system: SEEDING_SYSTEM_PROMPT }]);
+  const memory = new Memory([
+    { system: EXPLORE_HIRING_COMPANIES_SYSTEM_PROMPT },
+  ]);
 
   // Accumulate across attempts so we keep results from earlier searches even
   // as the LLM tries different terms/sites. Dedup by job_url. `inserted`
@@ -260,8 +268,8 @@ async function discoverSeedJobs(args: {
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_SEEDING_MODEL,
-    metadata: { configKey: 'LLM_SEEDING_MODEL' },
+    models: LLM_EXPLORE_HIRING_COMPANIES_MODEL,
+    metadata: { configKey: 'LLM_EXPLORE_HIRING_COMPANIES_MODEL' },
     logger: terminal,
     validate: args => runAttempt(args, state, accumulated, inserted),
   });
@@ -384,7 +392,7 @@ async function runAttempt(
 /** Ask the LLM to scan `interests` for any location preference (city,
  * region, country, "remote", "remote in X", etc.). Returns the boolean
  * verdict plus a short list of matched phrases for the log. Throws on LLM
- * failure — `runSeeding` will surface that as a normal error. */
+ * failure — `runExploreHiringCompanies` will surface that as a normal error. */
 async function checkInterestsLocation(interests: string): Promise<{
   hasLocation: boolean;
   locationsFound: string[];
@@ -421,8 +429,8 @@ async function checkInterestsLocation(interests: string): Promise<{
       ),
     }),
     maxAttempts: 2,
-    models: LLM_SEEDING_MODEL,
-    metadata: { configKey: 'LLM_SEEDING_MODEL' },
+    models: LLM_EXPLORE_HIRING_COMPANIES_MODEL,
+    metadata: { configKey: 'LLM_EXPLORE_HIRING_COMPANIES_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),
   });
@@ -443,13 +451,13 @@ async function readSeedFile(path: string): Promise<string> {
   return readFile(path, 'utf-8');
 }
 
-// Sourcing is NOT auto-enqueued: the user reviews the inserted seeds (and
+// Research-company is NOT auto-enqueued: the user reviews the inserted seeds (and
 // their interests/CV) and runs `pipeline approve-seeds` to release them.
 async function seedOne(args: {
   job: JobResult;
 }): Promise<{ inserted: boolean }> {
   const { job } = args;
-  // No company name = no anchor for the downstream approve-seeds/sourcing
+  // No company name = no anchor for the downstream approve-seeds/research-company
   // flow (which keys off SourceSeed.name to create JobSource rows). Drop
   // these instead of polluting the table with 'Unknown' aggregations.
   if (!job.company) return { inserted: false };
@@ -460,7 +468,7 @@ async function seedOne(args: {
   // (across runs OR within the same sweep) will often surface the same
   // posting URL, and many postings will share a company name — do-nothing
   // on any unique conflict and skip the pipeline-state write when the row
-  // already exists, so its original `seeding/done` history stays intact.
+  // already exists, so its original `explore-hiring-companies/done` history stays intact.
   const result = await db
     .insertInto('SourceSeed')
     .values({
@@ -476,7 +484,7 @@ async function seedOne(args: {
   if (!wasInserted) return { inserted: false };
 
   await recordPipelineState({
-    task: 'seeding',
+    task: 'explore-hiring-companies',
     state: PIPELINE_STATE.DONE,
     entity: { ofSourceSeedId: id },
   });

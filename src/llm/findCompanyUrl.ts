@@ -1,7 +1,7 @@
 import type { BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_SOURCING_MODEL } from 'src/utils/config.js';
+import { LLM_RESEARCH_COMPANY_MODEL } from 'src/utils/config.js';
 import { normalizeJobSourceUrl } from 'src/db/normalizeJobSourceUrl.js';
 import { Memory } from 'src/llm/base.js';
 import { verifyCompanyMatch } from 'src/llm/verifyCompanyMatch.js';
@@ -77,8 +77,8 @@ Company name: ${name}`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_SOURCING_MODEL,
-    metadata: { configKey: 'LLM_SOURCING_MODEL' },
+    models: LLM_RESEARCH_COMPANY_MODEL,
+    metadata: { configKey: 'LLM_RESEARCH_COMPANY_MODEL' },
     logger: terminal,
     validate: async parsed => {
       if (parsed.interestScore < 0 || parsed.interestScore > 1) {

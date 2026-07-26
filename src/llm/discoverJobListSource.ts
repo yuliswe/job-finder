@@ -2,9 +2,9 @@ import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
 import {
-  LLM_LISTING_MODEL,
-  PIPELINE_LISTING_BFS_MAX_DEPTH,
-  PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE,
+  LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+  PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH,
+  PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE,
 } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { CLASSIFY_AND_RANK_LINKS_SYSTEM_PROMPT } from 'src/prompts/classifyAndRankLinks.js';
@@ -22,8 +22,8 @@ export type FindJobListPageResult =
 /**
  * Starting from `startUrl`, BFS the same-domain links the LLM ranks as most
  * likely to lead to a job-listing page (depth root = 0, capped at
- * `PIPELINE_LISTING_BFS_MAX_DEPTH` and at most
- * `PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE` pages visited overall).
+ * `PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH` and at most
+ * `PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE` pages visited overall).
  *
  * Returns:
  *   - `{ kind: 'found', url }`         — first page the LLM classified AND
@@ -46,7 +46,7 @@ export async function findJobListPage(args: {
   // so `shift()` always returns the currently-most-promising URL.
   // Cross-page comparison: a high-scoring child of an earlier page wins
   // over a low-scoring child of a later page. Sort-on-insert is O(n log n)
-  // per insert, but n is bounded by PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE
+  // per insert, but n is bounded by PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE
   // (50 by default), so a heap library would be over-engineering.
   const queue: { url: string; depth: number; score: number }[] = [];
 
@@ -62,9 +62,11 @@ export async function findJobListPage(args: {
   queue.push({ url: normalizedStart, depth: 0, score: 1 });
 
   while (queue.length > 0) {
-    if (visited.size >= PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE) {
+    if (
+      visited.size >= PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE
+    ) {
       terminal.warn(
-        `Priority-queue node budget exhausted (${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE} pages visited) for ${normalizedStart} — giving up`
+        `Priority-queue node budget exhausted (${PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE} pages visited) for ${normalizedStart} — giving up`
       );
       break;
     }
@@ -74,7 +76,7 @@ export async function findJobListPage(args: {
     visited.add(url);
 
     terminal.log(
-      `[listing PQ depth=${depth} score=${score.toFixed(2)} visited=${visited.size}/${PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE}] ${url}`
+      `[identify-job-list-url PQ depth=${depth} score=${score.toFixed(2)} visited=${visited.size}/${PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE}] ${url}`
     );
 
     let page: PageSnapshot;
@@ -132,7 +134,7 @@ export async function findJobListPage(args: {
       }
     }
 
-    if (depth < PIPELINE_LISTING_BFS_MAX_DEPTH) {
+    if (depth < PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH) {
       let enqueued = 0;
       for (const candidate of decision.candidateLinks) {
         const norm = normalizeUrl(candidate.url);
@@ -252,8 +254,8 @@ ${page.links.join('\n')}`,
       ),
     }),
     maxAttempts: MAX_CRAWL_DECISION_ATTEMPTS,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+    metadata: { configKey: 'LLM_IDENTIFY_JOB_LIST_URL_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (
@@ -333,8 +335,8 @@ async function verifyIsJobPost(args: {
       ),
     }),
     maxAttempts: 1,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+    metadata: { configKey: 'LLM_IDENTIFY_JOB_LIST_URL_MODEL' },
     logger: terminal,
     validate: parsed => ({ valid: true, result: parsed }),
   });

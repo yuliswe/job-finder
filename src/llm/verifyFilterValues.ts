@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_LISTING_MODEL } from 'src/utils/config.js';
+import { LLM_IDENTIFY_JOB_LIST_URL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { VERIFY_FILTER_VALUES_SYSTEM_PROMPT } from 'src/prompts/verifyFilterValues.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -66,8 +66,8 @@ Classify each array.`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+    metadata: { configKey: 'LLM_IDENTIFY_JOB_LIST_URL_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (!parsed.locationsReason.trim() || !parsed.divisionsReason.trim()) {

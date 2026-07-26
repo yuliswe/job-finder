@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_LISTING_MODEL } from 'src/utils/config.js';
+import { LLM_IDENTIFY_JOB_LIST_URL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { BATCH_EVALUATE_JOB_TITLES_RELEVANCY_SYSTEM_PROMPT } from 'src/prompts/batchEvaluateJobTitlesRelevancy.js';
 import { terminal } from 'src/utils/terminal';
@@ -95,8 +95,8 @@ Score each entry by TITLE relevance only. Return one score per index, in order.`
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+    metadata: { configKey: 'LLM_IDENTIFY_JOB_LIST_URL_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (parsed.scores.length !== batch.length) {
