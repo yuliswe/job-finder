@@ -11,8 +11,6 @@ import { Bool } from 'src/db/customTypes.js';
 import { db } from 'src/db/index.js';
 import { setJobPostPriorityBump } from 'src/db/jobPostPriority.js';
 import {
-  ELIGIBLE_FOR_PICKUP_STATES,
-  FAILED_STATES,
   PIPELINE_STATE,
   type PipelineTask,
   TERMINAL_NO_RESULT_STATES,
@@ -219,6 +217,29 @@ const BAR_TASKS: readonly BarTask[] = [
 
 type RawBucket = { inScope: number; state: string | null; n: number };
 
+/** The bucket a stage's latest `PipelineState` falls into. This is the single
+ * classifier shared by the pipeline bar (`stageStats`) and the per-row status
+ * column (`pendingStageLabel`) so the two can never disagree about what counts
+ * as pending versus a terminal outcome — the drift between them is exactly the
+ * bug this consolidates away.
+ *
+ * `null` (no state row yet) is the not-yet-enqueued backlog, treated as
+ * `queued`. `user_interrupted` is checked before the no-result set it also
+ * belongs to because a Ctrl+C is pending work, not an outcome. Any unrecognized
+ * state (including `created`) is treated as `failed`, matching the bar's
+ * historical fall-through. */
+type StateBucket = 'queued' | 'started' | 'done' | 'noResult' | 'failed';
+
+function classifyPipelineState(state: string | null): StateBucket {
+  if (state == null) return 'queued';
+  if (state === PIPELINE_STATE.USER_INTERRUPTED) return 'queued';
+  if (TERMINAL_SUCCESS_STATES.has(state)) return 'done';
+  if (TERMINAL_NO_RESULT_STATES.has(state)) return 'noResult';
+  if (state === PIPELINE_STATE.QUEUED) return 'queued';
+  if (state === PIPELINE_STATE.STARTED) return 'started';
+  return 'failed';
+}
+
 async function stageStats(task: BarTask): Promise<PipelineStageStats> {
   const buckets = await stageRawBuckets(task);
 
@@ -235,20 +256,23 @@ async function stageStats(task: BarTask): Promise<PipelineStageStats> {
       continue;
     }
 
-    if (b.state == null) {
-      queued += n;
-      continue;
+    switch (classifyPipelineState(b.state)) {
+      case 'queued':
+        queued += n;
+        break;
+      case 'started':
+        started += n;
+        break;
+      case 'done':
+        done += n;
+        break;
+      case 'noResult':
+        noResult += n;
+        break;
+      case 'failed':
+        failed += n;
+        break;
     }
-
-    // user_interrupted is terminal in the data model (won't be auto-re-picked)
-    // but the TUI buckets it under `queued` so it shows as pending in the bar
-    // rather than a yellow "no-result" — a Ctrl+C is not really an outcome.
-    if (b.state === PIPELINE_STATE.USER_INTERRUPTED) queued += n;
-    else if (TERMINAL_SUCCESS_STATES.has(b.state)) done += n;
-    else if (TERMINAL_NO_RESULT_STATES.has(b.state)) noResult += n;
-    else if (b.state === PIPELINE_STATE.QUEUED) queued += n;
-    else if (b.state === PIPELINE_STATE.STARTED) started += n;
-    else failed += n;
   }
 
   return {
@@ -767,21 +791,39 @@ function jobPostOutOfScopeReason(args: {
   return null;
 }
 
-/** Label a stage should carry when the given value is its latest
- * `PipelineState`, or `null` when the state is terminal-done (success or a
- * no-result outcome) so the caller falls back to what the JobPost/JobPostEval
- * result columns imply. Surfacing queued/started/failed here is what makes a
+/** Label a stage should carry given its latest `PipelineState`, or `null` when
+ * the caller should fall back to what the JobPost/JobPostEval result columns
+ * imply. Returns null only in the two cases where the result columns are the
+ * better source of truth: `null` state (never enqueued — the genuine backlog,
+ * where an empty result column really does mean "queued") and terminal-`done`
+ * success (where the populated result column implies the next step).
+ *
+ * Every other state gets an explicit label drawn from the same
+ * {@link classifyPipelineState} buckets the pipeline bar uses. Crucially a
+ * terminal no-result (`not_a_job_posting`, `no_source_found`, …) now reads as
+ * `No result` instead of falling through to the result-column inference, which
+ * would mislabel it `Queued` — the row has run and terminated, exactly as the
+ * bar's `noResult` bucket records, so the status column must not claim it is
+ * still pending. Surfacing queued/started/failed here is also what makes a
  * `jobfinder reset <stage>` — which appends a fresh `queued` row without
  * clearing the prior run's result columns — show up in the status cell
- * immediately. `user_interrupted` reads as `Queued`, matching the pipeline
- * bar's convention (`stageStats`) that a Ctrl+C is pending work, not an
- * outcome. */
+ * immediately. */
 function pendingStageLabel(state: string | null): string | null {
-  if (state == null) return null;
-  if (ELIGIBLE_FOR_PICKUP_STATES.has(state)) return 'Queued';
-  if (state === PIPELINE_STATE.STARTED) return 'Started';
-  if (FAILED_STATES.has(state)) return 'Failed';
-  return null;
+  switch (classifyPipelineState(state)) {
+    case 'queued':
+      // A null state is the not-yet-enqueued backlog: defer to the result
+      // columns (an empty one there genuinely means queued). An explicit
+      // queued / user_interrupted row is surfaced directly.
+      return state == null ? null : 'Queued';
+    case 'started':
+      return 'Started';
+    case 'failed':
+      return 'Failed';
+    case 'noResult':
+      return 'No result';
+    case 'done':
+      return null;
+  }
 }
 
 /** Single-line pipeline status for a JobPost, rendered as `<state>: <stage>`.
@@ -997,6 +1039,50 @@ export async function listSources(args: {
         )
         .select(eb2 => eb2.fn.countAll<number>().as('n'))
         .as('jobPostCount'),
+      // Latest pipeline state per source stage, so `computeSourceStatus` can
+      // tell a stage that is genuinely pending from one that ran and reached a
+      // terminal failed / no-result outcome — the same distinction the
+      // pipeline bar draws. Without these it inferred "Queued" from an empty
+      // result column alone and mislabeled failed / no-result rows as pending.
+      // research-company / identify-job-list-url key off JobSource; the two
+      // list stages key off the active JobListSource (`list`). Each is an
+      // index-backed O(log N) correlated subquery, matching `latestJobPostState`.
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.state')
+        .whereRef('PipelineState.ofJobSourceId', '=', 'JobSource.id')
+        .where('PipelineState.task', '=', 'research-company')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('researchCompanyState'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.state')
+        .whereRef('PipelineState.ofJobSourceId', '=', 'JobSource.id')
+        .where('PipelineState.task', '=', 'identify-job-list-url')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('identifyJobListUrlState'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.state')
+        .whereRef('PipelineState.ofJobListSourceId', '=', 'list.id')
+        .where('PipelineState.task', '=', 'learn-to-use-job-list')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('learnToUseJobListState'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.state')
+        .whereRef('PipelineState.ofJobListSourceId', '=', 'list.id')
+        .where('PipelineState.task', '=', 'apply-filters')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('applyFiltersState'),
     ])
     .$call(q => {
       switch (sort) {
@@ -1049,6 +1135,10 @@ export async function listSources(args: {
         hasScript,
         jobPostCount,
         abortListingReason: r.abortListingReason,
+        researchCompanyState: r.researchCompanyState,
+        identifyJobListUrlState: r.identifyJobListUrlState,
+        learnToUseJobListState: r.learnToUseJobListState,
+        applyFiltersState: r.applyFiltersState,
       }),
     };
   });
@@ -1079,9 +1169,14 @@ function sourceOutOfScopeReason(args: {
 }
 
 /** Single-line pipeline status for a source, rendered as `<state>: <stage>`.
- * Derived from the same fields the rest of SourceRow exposes and checked in
- * priority order — earlier states (still pre-research-company) shadow later ones, and
- * out-of-scope verdicts shadow any queued interpretation. */
+ * Walks the source's stages in order and, for each, prefers the stage's latest
+ * `PipelineState` (via {@link pendingStageLabel}) over what the result column
+ * implies — so a stage that ran and reached a terminal failed / no-result
+ * outcome reads as `Failed` / `No result`, matching the pipeline bar's buckets,
+ * rather than being mislabeled `Queued` from its still-empty result column.
+ * Only when a stage has no active/terminal state (never enqueued, or done) does
+ * the empty result column stand in as the "queued" signal. Out-of-scope
+ * verdicts still shadow everything downstream of research-company. */
 function computeSourceStatus(args: {
   score: number | null;
   sourceIsActive: number;
@@ -1089,6 +1184,10 @@ function computeSourceStatus(args: {
   hasScript: number;
   jobPostCount: number;
   abortListingReason: string | null;
+  researchCompanyState: string | null;
+  identifyJobListUrlState: string | null;
+  learnToUseJobListState: string | null;
+  applyFiltersState: string | null;
 }): string {
   const {
     score,
@@ -1097,9 +1196,16 @@ function computeSourceStatus(args: {
     hasScript,
     jobPostCount,
     abortListingReason,
+    researchCompanyState,
+    identifyJobListUrlState,
+    learnToUseJobListState,
+    applyFiltersState,
   } = args;
 
+  const researchLabel = pendingStageLabel(researchCompanyState);
+  if (researchLabel) return fmtStatus(researchLabel, 'research-company');
   if (score == null) return fmtStatus('Queued', 'research-company');
+
   if (sourceIsActive !== 1) {
     return fmtStatus('Out-of-scope', 'identify-job-list-url', 'deactivated');
   }
@@ -1108,9 +1214,21 @@ function computeSourceStatus(args: {
     return fmtStatus('Out-of-scope', 'identify-job-list-url', 'low interest');
   }
 
+  const identifyLabel = pendingStageLabel(identifyJobListUrlState);
+  if (identifyLabel) {
+    // A terminal identify outcome (`No result` when BFS gave up, or `Failed`)
+    // carries the LLM's abort reason when there is one, so the user sees WHY it
+    // won't auto-retry — the enrichment the old `Aborted: …` branch provided.
+    const reason =
+      (identifyLabel === 'No result' || identifyLabel === 'Failed') &&
+      abortListingReason
+        ? abortListingReason
+        : undefined;
+
+    return fmtStatus(identifyLabel, 'identify-job-list-url', reason);
+  }
+
   if (listId == null) {
-    // BFS already gave up — surface the LLM's reason instead of the bland
-    // "Queued: identify-job-list-url" so the user knows it won't auto-retry.
     if (abortListingReason) {
       return fmtStatus('Aborted', 'identify-job-list-url', abortListingReason);
     }
@@ -1118,8 +1236,20 @@ function computeSourceStatus(args: {
     return fmtStatus('Queued', 'identify-job-list-url');
   }
 
+  const learnLabel = pendingStageLabel(learnToUseJobListState);
+  if (learnLabel) return fmtStatus(learnLabel, 'learn-to-use-job-list');
   if (hasScript === 0) return fmtStatus('Queued', 'learn-to-use-job-list');
-  if (jobPostCount === 0) return fmtStatus('Queued', 'apply-filters');
+
+  const applyLabel = pendingStageLabel(applyFiltersState);
+  if (applyLabel) return fmtStatus(applyLabel, 'apply-filters');
+  // A list with no posts is only "queued" while apply-filters has never run
+  // (no state row). Once it has run to `done`, zero posts is a terminal
+  // success — the list simply had nothing matching — which the bar counts as
+  // done; reporting it as pending is exactly the queued/0-queued mismatch this
+  // guards against. Unlike the upstream stages, done-with-empty-result is
+  // legitimate here, so this stage alone needs the state check.
+  if (applyFiltersState == null && jobPostCount === 0)
+    return fmtStatus('Queued', 'apply-filters');
   return fmtStatus('Done', 'apply-filters');
 }
 
