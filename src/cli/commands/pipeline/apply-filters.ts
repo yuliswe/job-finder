@@ -17,8 +17,8 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForRunScripts,
-  qualifiedForRunScripts,
+  inScopeForApplyFilters,
+  qualifiedForApplyFilters,
 } from 'src/db/pipelineQualified.js';
 import {
   batchEvaluateJobTitlesRelevancy,
@@ -32,7 +32,7 @@ import { getUserInterests } from 'src/utils/userInterests.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
-type RunScriptsOptions = {
+type ApplyFiltersOptions = {
   division?: string;
   location?: string;
   all?: boolean;
@@ -41,12 +41,12 @@ type RunScriptsOptions = {
   /** Process the selected rows now. Without it the command only queues
    * them for a later `--start` / `jobfinder start-pipeline`. */
   start?: boolean;
-  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  /** Suppress "nothing to do" / "0 rows" logs. See ResearchCompanyOptions. */
   suppressNothingToDoLog?: boolean;
 };
 
-export function createRunScriptsCommand(): Command {
-  return new Command('run-scripts')
+export function createApplyFiltersCommand(): Command {
+  return new Command('apply-filters')
     .description(
       'For every JobListSource with a validated parserScript, ask the LLM to map the supplied (or interests-derived) division/location to the page filter options, then run searchJobs and insert the matching jobs into JobPost. By default only queues the selected rows; pass --start to process them now.'
     )
@@ -78,20 +78,20 @@ export function createRunScriptsCommand(): Command {
       '--start',
       'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
     )
-    .action(async (opts: RunScriptsOptions) => {
+    .action(async (opts: ApplyFiltersOptions) => {
       if (opts.start) {
-        await withBrowserInstance(context => runRunScripts(context, opts));
+        await withBrowserInstance(context => runApplyFilters(context, opts));
         return;
       }
 
-      await queueRunScripts(opts);
+      await queueApplyFilters(opts);
     });
 }
 
 /** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
  * return the rows the mode selects. Shared by the queue-only default path
  * and the --start processing path. */
-async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
+async function pickApplyFiltersTargets(opts: ApplyFiltersOptions): Promise<
   {
     id: string;
     url: string;
@@ -113,17 +113,17 @@ async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
     }
 
     await enqueuePipelineTask({
-      task: 'run-scripts',
+      task: 'apply-filters',
       entity: { ofJobListSourceId: opts.jobListSourceId },
     });
   }
 
   const mode = pipelineModeFromOptions(opts);
-  if (mode === 'all') await requeueAllInScope('run-scripts');
+  if (mode === 'all') await requeueAllInScope('apply-filters');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
-    task: 'run-scripts',
+    task: 'apply-filters',
     parentIdRef: 'JobListSource.id',
     mode,
   });
@@ -131,16 +131,16 @@ async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
   let query = db
     .selectFrom('JobListSource')
     .select(['id', 'url', 'parserScript', 'ofJobSourceId'])
-    .where(qualifiedForRunScripts)
-    .where(inScopeForRunScripts)
-    // Hold run-scripts while a fresh scripting is still pending on the same
-    // list source, so we never execute a stale parserScript that scripting is
+    .where(qualifiedForApplyFilters)
+    .where(inScopeForApplyFilters)
+    // Hold apply-filters while a fresh learn-to-use-job-list is still pending on the same
+    // list source, so we never execute a stale parserScript that learn-to-use-job-list is
     // about to overwrite. Applied in every mode (correctness, not a state
     // filter); the explicit --job-list-source-id branch below bypasses it as a
     // manual override.
     .where(
       parentsSettledForPipelineTask({
-        task: 'run-scripts',
+        task: 'apply-filters',
         parentIdRef: 'JobListSource.id',
       })
     );
@@ -156,11 +156,11 @@ async function pickRunScriptsTargets(opts: RunScriptsOptions): Promise<
     : query.execute();
 }
 
-export async function queueRunScripts(
-  opts: RunScriptsOptions
+export async function queueApplyFilters(
+  opts: ApplyFiltersOptions
 ): Promise<{ queued: number }> {
   const mode = pipelineModeFromOptions(opts);
-  const targets = await pickRunScriptsTargets(opts);
+  const targets = await pickApplyFiltersTargets(opts);
 
   // The default mode only selects rows that are already queued, --all
   // bulk-requeues inside the picker, and --job-list-source-id enqueues its
@@ -169,25 +169,25 @@ export async function queueRunScripts(
   if (mode === 'include-failed') {
     for (const target of targets) {
       await enqueuePipelineTask({
-        task: 'run-scripts',
+        task: 'apply-filters',
         entity: { ofJobListSourceId: target.id },
       });
     }
   }
 
   terminal.log(
-    `${targets.length} JobListSource row(s) queued for run-scripts. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+    `${targets.length} JobListSource row(s) queued for apply-filters. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
   );
 
   return { queued: targets.length };
 }
 
-export async function runRunScripts(
+export async function runApplyFilters(
   context: BrowserContext,
-  opts: RunScriptsOptions
+  opts: ApplyFiltersOptions
 ): Promise<{ processed: number }> {
-  await reapStaleStartedStates('run-scripts');
-  const targets = await pickRunScriptsTargets(opts);
+  await reapStaleStartedStates('apply-filters');
+  const targets = await pickApplyFiltersTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {
@@ -217,7 +217,7 @@ export async function runRunScripts(
   const results = await Promise.all(
     targets.map(target =>
       tabLimit(() =>
-        runScriptsForTarget({
+        applyFiltersForTarget({
           context,
           target,
           args: { division, location },
@@ -263,7 +263,7 @@ async function resolveFilterPrefs(args: {
   };
 }
 
-async function runScriptsForTarget(args: {
+async function applyFiltersForTarget(args: {
   context: BrowserContext;
   target: {
     id: string;
@@ -279,7 +279,7 @@ async function runScriptsForTarget(args: {
   if (!parserScript) return; // filtered above but TS narrowing
 
   return processOne({
-    task: 'run-scripts',
+    task: 'apply-filters',
     entity: { ofJobListSourceId: target.id },
     label: target.url,
     work: async (): Promise<{ jobPostInserted: number }> => {
@@ -297,7 +297,7 @@ async function runScriptsForTarget(args: {
         terminal.error(`script_error for ${target.url}: ${result.error}`);
 
         await recordPipelineState({
-          task: 'run-scripts',
+          task: 'apply-filters',
           state: PIPELINE_STATE.SCRIPT_ERROR,
           reason: result.error,
           entity: { ofJobListSourceId: target.id },
@@ -311,7 +311,7 @@ async function runScriptsForTarget(args: {
         );
 
         await recordPipelineState({
-          task: 'run-scripts',
+          task: 'apply-filters',
           state: PIPELINE_STATE.NO_RESULT_FOUND,
           reason: `picked locations=${JSON.stringify(result.picked.locations)} divisions=${JSON.stringify(result.picked.divisions)}`,
           entity: { ofJobListSourceId: target.id },
@@ -338,7 +338,7 @@ async function runScriptsForTarget(args: {
       });
 
       await recordPipelineState({
-        task: 'run-scripts',
+        task: 'apply-filters',
         state: PIPELINE_STATE.DONE,
         reason: `${jobPostInserted}/${result.jobs.length} new JobPost rows`,
         entity: { ofJobListSourceId: target.id },
@@ -385,7 +385,7 @@ async function insertJobsWithScores(args: {
         jobPostId = newJobId;
 
         await enqueuePipelineTask({
-          task: 'viewing',
+          task: 'view-job-detail',
           entity: { ofJobPostId: newJobId },
         });
       } else {

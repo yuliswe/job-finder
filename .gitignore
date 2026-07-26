@@ -1,7 +1,7 @@
 .zcompdump
 .zsh_history
-.venv/
-.nodevenv/
+.venv
+.nodevenv
 node_modules/
 dist/
 build/

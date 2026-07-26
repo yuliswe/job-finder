@@ -3,7 +3,7 @@ import * as v from 'valibot';
 
 import {
   LLM_CODING_MODEL,
-  PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS,
+  PIPELINE_APPLY_FILTERS_SPAM_PREVENTION_JOB_COUNTS,
 } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { PICK_FILTER_OPTIONS_SYSTEM_PROMPT } from 'src/prompts/pickFilterOptions.js';
@@ -102,7 +102,7 @@ async function callDiscover(
 
   if (value === null) {
     throw new Error(
-      'Script does not define a top-level `discover` function. (The stored parserScript was generated against an older contract — regenerate via `jobfinder pipeline scripting --job-list-source-id <id>`.)'
+      'Script does not define a top-level `discover` function. (The stored parserScript was generated against an older contract — regenerate via `jobfinder pipeline learn-to-use-job-list --job-list-source-id <id>`.)'
     );
   }
 
@@ -256,7 +256,7 @@ Pick the best-matching options for each axis.`,
         `LLM (${ctx.model}): location tiers: ${tierSummary} | division(s): ${parsed.pickedDivisions.join(', ') || '(none)'}\nExplanation: ${parsed.reason}`
       );
 
-      const spamCap = PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS;
+      const spamCap = PIPELINE_APPLY_FILTERS_SPAM_PREVENTION_JOB_COUNTS;
       const accumulated = new Map<string, { jobTitle: string; url: string }>();
       const contributingTiers: string[][] = [];
 

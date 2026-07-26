@@ -10,15 +10,15 @@ import {
 import { terminal } from 'src/utils/terminal.js';
 
 /** The stages `reset` can requeue. Mirrors `RequeueableTask` (every pipeline
- * task except `seeding`, which generates new SourceSeed rows rather than
+ * task except `explore-hiring-companies`, which generates new SourceSeed rows rather than
  * re-picking existing ones). */
 const STAGE_CHOICES: readonly RequeueableTask[] = [
-  'sourcing',
-  'listing',
-  'scripting',
-  'run-scripts',
-  'viewing',
-  'evaluate',
+  'research-company',
+  'identify-job-list-url',
+  'learn-to-use-job-list',
+  'apply-filters',
+  'view-job-detail',
+  'evaluate-skill-match',
   'fill-form',
 ];
 

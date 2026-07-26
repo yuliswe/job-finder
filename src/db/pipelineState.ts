@@ -4,13 +4,13 @@ import type { DB } from '__generated__/db/types.js';
 import { db, sqlite } from 'src/db/index.js';
 import { newId } from 'src/db/id.js';
 import {
-  inScopeForEvaluate,
+  inScopeForEvaluateSkillMatch,
   inScopeForFillForm,
-  inScopeForListing,
-  inScopeForRunScripts,
-  inScopeForScripting,
-  inScopeForSourcing,
-  inScopeForViewing,
+  inScopeForIdentifyJobListUrl,
+  inScopeForApplyFilters,
+  inScopeForLearnToUseJobList,
+  inScopeForResearchCompany,
+  inScopeForViewJobDetail,
 } from 'src/db/pipelineQualified.js';
 import { terminal } from 'src/utils/terminal.js';
 
@@ -21,13 +21,13 @@ export type PipelineEntity =
   | { ofJobPostId: string };
 
 export type PipelineTask =
-  | 'seeding'
-  | 'sourcing'
-  | 'listing'
-  | 'scripting'
-  | 'run-scripts'
-  | 'viewing'
-  | 'evaluate'
+  | 'explore-hiring-companies'
+  | 'research-company'
+  | 'identify-job-list-url'
+  | 'learn-to-use-job-list'
+  | 'apply-filters'
+  | 'view-job-detail'
+  | 'evaluate-skill-match'
   | 'fill-form';
 
 type PipelineFk =
@@ -37,32 +37,32 @@ type PipelineFk =
   | 'ofJobPostId';
 
 export const FK_BY_TASK: Record<PipelineTask, PipelineFk> = {
-  seeding: 'ofSourceSeedId',
-  sourcing: 'ofJobSourceId',
-  listing: 'ofJobSourceId',
-  scripting: 'ofJobListSourceId',
-  'run-scripts': 'ofJobListSourceId',
-  viewing: 'ofJobPostId',
-  evaluate: 'ofJobPostId',
+  'explore-hiring-companies': 'ofSourceSeedId',
+  'research-company': 'ofJobSourceId',
+  'identify-job-list-url': 'ofJobSourceId',
+  'learn-to-use-job-list': 'ofJobListSourceId',
+  'apply-filters': 'ofJobListSourceId',
+  'view-job-detail': 'ofJobPostId',
+  'evaluate-skill-match': 'ofJobPostId',
   'fill-form': 'ofJobPostId',
 };
 
 /** Pipeline order:
- *   seeding → sourcing → listing → scripting → run-scripts → viewing → evaluate
+ *   explore-hiring-companies → research-company → identify-job-list-url → learn-to-use-job-list → apply-filters → view-job-detail → evaluate
  *
- * `fill-form` is appended last. It keys on `ofJobPostId` like `viewing` and
- * `evaluate`, but it is an independent, human-triggered branch off a JobPost —
+ * `fill-form` is appended last. It keys on `ofJobPostId` like `view-job-detail` and
+ * `evaluate-skill-match`, but it is an independent, human-triggered branch off a JobPost —
  * it reads the live application form rather than any column those stages write,
  * so it has no `TASK_PARENTS` entry and is not gated behind them.
  */
 export const TASK_ORDER: readonly PipelineTask[] = [
-  'seeding',
-  'sourcing',
-  'listing',
-  'scripting',
-  'run-scripts',
-  'viewing',
-  'evaluate',
+  'explore-hiring-companies',
+  'research-company',
+  'identify-job-list-url',
+  'learn-to-use-job-list',
+  'apply-filters',
+  'view-job-detail',
+  'evaluate-skill-match',
   'fill-form',
 ];
 
@@ -70,7 +70,7 @@ export const TASK_ORDER: readonly PipelineTask[] = [
  * Hardcoded same-entity dependency tree. A task listed here must not be picked
  * up for an entity ROW while any of its parent tasks is still pending on the
  * SAME row (see `parentsSettledForPipelineTask`). Only tasks that share an FK
- * column belong here — cross-entity ordering (e.g. sourcing → listing across
+ * column belong here — cross-entity ordering (e.g. research-company → identify-job-list-url across
  * different tables) is already enforced by the `qualifiedForX` / `inScopeForX`
  * data gates, so the dependency here is specifically for the case where a
  * parent's output column may already be populated from a prior run while a
@@ -79,28 +79,28 @@ export const TASK_ORDER: readonly PipelineTask[] = [
  *
  * The three consecutive same-FK pairs in `TASK_ORDER` are all gated here:
  *
- *   - `evaluate` ← `viewing` (both key on `ofJobPostId`): a re-queued `viewing`
- *     can coexist with a queued `evaluate` on the same JobPost, and without
- *     this gate `evaluate` would score the stale, about-to-be-overwritten
+ *   - `evaluate-skill-match` ← `view-job-detail` (both key on `ofJobPostId`): a re-queued `view-job-detail`
+ *     can coexist with a queued `evaluate-skill-match` on the same JobPost, and without
+ *     this gate `evaluate-skill-match` would score the stale, about-to-be-overwritten
  *     `description` / `skillRequirements`.
- *   - `listing` ← `sourcing` (both key on `ofJobSourceId`): a re-queued
- *     `sourcing` overwrites `url` / `interestScore`, which `listing` reads as
- *     its qualified / in-scope gate; without the gate `listing` could crawl a
- *     stale URL that `sourcing` is about to replace.
- *   - `run-scripts` ← `scripting` (both key on `ofJobListSourceId`): a
- *     re-queued `scripting` overwrites `parserScript`, which `run-scripts`
- *     executes; without the gate `run-scripts` could run the old script.
+ *   - `identify-job-list-url` ← `research-company` (both key on `ofJobSourceId`): a re-queued
+ *     `research-company` overwrites `url` / `interestScore`, which `identify-job-list-url` reads as
+ *     its qualified / in-scope gate; without the gate `identify-job-list-url` could crawl a
+ *     stale URL that `research-company` is about to replace.
+ *   - `apply-filters` ← `learn-to-use-job-list` (both key on `ofJobListSourceId`): a
+ *     re-queued `learn-to-use-job-list` overwrites `parserScript`, which `apply-filters`
+ *     executes; without the gate `apply-filters` could run the old script.
  *
  * Each of these is a re-queue race (via `reset <stage>`, `--<entity>-id`, or
- * `--all`) that `start-pipeline`'s concurrent task loops expose. `seeding` is
+ * `--all`) that `start-pipeline`'s concurrent task loops expose. `explore-hiring-companies` is
  * the only task with no same-FK neighbour, so it has no entry.
  */
 export const TASK_PARENTS: Partial<
   Record<PipelineTask, readonly PipelineTask[]>
 > = {
-  listing: ['sourcing'],
-  'run-scripts': ['scripting'],
-  evaluate: ['viewing'],
+  'identify-job-list-url': ['research-company'],
+  'apply-filters': ['learn-to-use-job-list'],
+  'evaluate-skill-match': ['view-job-detail'],
 };
 
 /** Config invariant: every declared parent must share the child's FK column,
@@ -325,13 +325,13 @@ export async function reapStaleStartedStates(
 }
 
 /** Tasks that operate on a pre-existing parent entity and can therefore be
- * requeued in bulk. `seeding` is excluded — it generates new SourceSeed rows
+ * requeued in bulk. `explore-hiring-companies` is excluded — it generates new SourceSeed rows
  * from interests/CV rather than picking up existing ones. */
-export type RequeueableTask = Exclude<PipelineTask, 'seeding'>;
+export type RequeueableTask = Exclude<PipelineTask, 'explore-hiring-companies'>;
 
 /** For `task`, insert a fresh 'queued' state for every parent entity that
  * passes `inScopeForX` (i.e. every row the pipeline considers in-scope,
- * including ones already done). For sourcing, every SourceSeed counts — see
+ * including ones already done). For research-company, every SourceSeed counts — see
  * `src/db/pipelineQualified.ts` for the qualified-vs-inscope distinction
  * with worked examples.
  *
@@ -348,61 +348,61 @@ export async function requeueAllInScope(
 ): Promise<number> {
   const ids = await (async (): Promise<string[]> => {
     switch (task) {
-      case 'sourcing': {
+      case 'research-company': {
         const rows = await db
           .selectFrom('JobSource')
           .select('JobSource.id as id')
-          .where(inScopeForSourcing)
+          .where(inScopeForResearchCompany)
           .execute();
 
         return rows.map(r => r.id);
       }
 
-      case 'listing': {
+      case 'identify-job-list-url': {
         const rows = await db
           .selectFrom('JobSource')
           .select('JobSource.id as id')
-          .where(inScopeForListing)
+          .where(inScopeForIdentifyJobListUrl)
           .execute();
 
         return rows.map(r => r.id);
       }
 
-      case 'scripting': {
+      case 'learn-to-use-job-list': {
         const rows = await db
           .selectFrom('JobListSource')
           .select('JobListSource.id as id')
-          .where(inScopeForScripting)
+          .where(inScopeForLearnToUseJobList)
           .execute();
 
         return rows.map(r => r.id);
       }
 
-      case 'run-scripts': {
+      case 'apply-filters': {
         const rows = await db
           .selectFrom('JobListSource')
           .select('JobListSource.id as id')
-          .where(inScopeForRunScripts)
+          .where(inScopeForApplyFilters)
           .execute();
 
         return rows.map(r => r.id);
       }
 
-      case 'viewing': {
+      case 'view-job-detail': {
         const rows = await db
           .selectFrom('JobPost')
           .select('JobPost.id as id')
-          .where(inScopeForViewing)
+          .where(inScopeForViewJobDetail)
           .execute();
 
         return rows.map(r => r.id);
       }
 
-      case 'evaluate': {
+      case 'evaluate-skill-match': {
         const rows = await db
           .selectFrom('JobPost')
           .select('JobPost.id as id')
-          .where(inScopeForEvaluate)
+          .where(inScopeForEvaluateSkillMatch)
           .execute();
 
         return rows.map(r => r.id);
@@ -523,7 +523,7 @@ export async function isPipelineTaskDone(args: {
  *
  * Example:
  *   db.selectFrom('JobSource').where(eligibleForPipelineTask({
- *     task: 'listing', parentIdRef: 'JobSource.id',
+ *     task: 'identify-job-list-url', parentIdRef: 'JobSource.id',
  *   }))
  */
 export function eligibleForPipelineTask<
@@ -598,9 +598,11 @@ type ParentScopePredicate = (eb: ExpressionBuilder<DB, 'JobPost'>) => unknown;
 const PARENT_SCOPE_BY_TASK: Partial<
   Record<PipelineTask, ParentScopePredicate>
 > = {
-  sourcing: inScopeForSourcing as unknown as ParentScopePredicate,
-  scripting: inScopeForScripting as unknown as ParentScopePredicate,
-  viewing: inScopeForViewing,
+  'research-company':
+    inScopeForResearchCompany as unknown as ParentScopePredicate,
+  'learn-to-use-job-list':
+    inScopeForLearnToUseJobList as unknown as ParentScopePredicate,
+  'view-job-detail': inScopeForViewJobDetail,
 };
 
 /**
@@ -614,15 +616,15 @@ const PARENT_SCOPE_BY_TASK: Partial<
  * in-scope conjunct keeps a force-queued but out-of-scope parent — which the
  * parent's own picker will never touch — from pinning the child forever. This
  * matters only for a pair whose child scope is NOT a subset of the parent
- * scope. For all three current linear-pipeline pairs (evaluate ← viewing,
- * listing ← sourcing, run-scripts ← scripting) the child's `inScopeForX`
+ * scope. For all three current linear-pipeline pairs (evaluate ← view-job-detail,
+ * identify-job-list-url ← research-company, apply-filters ← learn-to-use-job-list) the child's `inScopeForX`
  * already AND-embeds the parent's, so the conjunct is redundant-but-safe there;
  * it is kept so the generic mechanism stays correct for any future non-subset
  * pair.
  *
  * Example:
  *   db.selectFrom('JobPost').where(parentsSettledForPipelineTask({
- *     task: 'evaluate', parentIdRef: 'JobPost.id',
+ *     task: 'evaluate-skill-match', parentIdRef: 'JobPost.id',
  *   }))
  */
 export function parentsSettledForPipelineTask<

@@ -1,4 +1,4 @@
-export const SEEDING_SYSTEM_PROMPT = `You drive an adaptive sweep of python-jobspy to seed a user's job-search pipeline. The loop runs until you say it's done (set done=true) or until coverage clearly plateaus.
+export const EXPLORE_HIRING_COMPANIES_SYSTEM_PROMPT = `You drive an adaptive sweep of python-jobspy to seed a user's job-search pipeline. The loop runs until you say it's done (set done=true) or until coverage clearly plateaus.
 
 On each turn, output JSON matching the schema. Two modes:
 
@@ -26,7 +26,7 @@ When consecutive attempts return 0 new postings, START RELAXING — one knob at 
 
 Don't relax everything at once — each loosening should buy a fresh batch of new postings. Only declare done=true after you've exhausted both query variation AND filter relaxation.`;
 
-export const SEEDING_SUMMARY_SYSTEM_PROMPT = `You summarize a batch of freshly-seeded job postings for the user.
+export const EXPLORE_HIRING_COMPANIES_SUMMARY_SYSTEM_PROMPT = `You summarize a batch of freshly-seeded job postings for the user.
 
 The user is about to decide whether their interests.md and cv.md captured the right kind of jobs. Your job is to make that decision easy: describe what kinds of roles/levels/tech/locations dominate, and list the companies that are hiring. Be terse and factual — no recommendations.
 

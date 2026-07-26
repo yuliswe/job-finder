@@ -2,7 +2,7 @@ import * as v from 'valibot';
 
 import { LLM_CV_TEMPLATE_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import type { SkillRequirements } from 'src/llm/viewJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobDetail.js';
 import { FILL_CV_TEMPLATE_SYSTEM_PROMPT } from 'src/prompts/fillCvTemplate.js';
 import { terminal, type Terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserCvTemplate } from 'src/utils/userInterests.js';

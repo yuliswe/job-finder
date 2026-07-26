@@ -7,7 +7,7 @@ import { fetchWithTimeout } from 'src/utils/fetchWithTimeout.js';
  * field (a literal JSON Schema object, supported since Ollama v0.5).
  *
  * Selected per model by prefixing the model id with `ollama-plugin/`,
- * e.g. `LLM_VIEWING_MODEL = ['ollama-plugin/llama3.1']`. The dispatcher
+ * e.g. `LLM_VIEW_JOB_DETAIL_MODEL = ['ollama-plugin/llama3.1']`. The dispatcher
  * in `src/llm/base.ts` strips the prefix before calling `send`.
  *
  * Unsupported features (currently):

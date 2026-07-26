@@ -57,7 +57,7 @@ export function JobPostDetail({ row }: { row: JobPostRow | null }) {
         <Text>
           id: <Text bold>{row.id}</Text>
         </Text>
-        {row.isOutOfScopeForViewing && (
+        {row.isOutOfScopeForViewJobDetail && (
           <Text>
             out-of-scope:{' '}
             <Text bold color='yellow'>

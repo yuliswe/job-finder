@@ -14,10 +14,10 @@ const NOW = sql<string>`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
 /** Commands that act on a single JobPost by its id or url: the manual
  * out-of-scope override (`exclude` pushes a post out of scope for the
- * viewing/evaluate pipeline and the TUI's default `in` filter the same way a
+ * view-job-detail/evaluate pipeline and the TUI's default `in` filter the same way a
  * below-threshold relevancy score would; `include` reverses it) and the
  * manual priority bump (`bump` lifts a post ahead of the backlog in the
- * viewing/evaluate pickers). */
+ * view-job-detail/evaluate pickers). */
 export function createJobCommand(): Command {
   const job = new Command('job').description(
     'Act on a single job post (identified by its id or url).'

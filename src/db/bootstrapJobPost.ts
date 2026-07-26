@@ -4,7 +4,7 @@ import { newId } from 'src/db/id.js';
 /** Insert a JobSource by name, or return the existing one's id when the
  * UNIQUE(name) constraint already holds a row. This is the placeholder
  * "company" a bottom-up bootstrap (`track`, `fill-form`) creates before its
- * child JobPost; a later `sourcing` run fills in its url / summary / interest.
+ * child JobPost; a later `research-company` run fills in its url / summary / interest.
  */
 export async function upsertJobSourceByName(name: string): Promise<string> {
   const existing = await db
@@ -22,11 +22,11 @@ export async function upsertJobSourceByName(name: string): Promise<string> {
 
 /** Insert a JobPost with the given URL, or return the existing row's id when
  * the UNIQUE(url) constraint already holds one. `title` is a placeholder — the
- * viewing task overwrites it from the page itself.
+ * view-job-detail task overwrites it from the page itself.
  *
- * Also seeds a JobPostEval with `titleRelavency = 1.0` so the viewing picker's
- * `inScopeForViewing` check (which requires an eval row above
- * `PIPELINE_VIEWING_MIN_TITLE_RELEVANCY`) actually picks it up. Manually
+ * Also seeds a JobPostEval with `titleRelavency = 1.0` so the view-job-detail picker's
+ * `inScopeForViewJobDetail` check (which requires an eval row above
+ * `PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY`) actually picks it up. Manually
  * supplied URLs are user-curated, so they bypass the relevance gate by design.
  */
 export async function upsertJobPost(args: {

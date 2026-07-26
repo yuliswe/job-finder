@@ -1,4 +1,4 @@
-export const VIEW_JOB_POST_SYSTEM_PROMPT = `You parse a single job-posting page and return the structured fields the job-board UI needs.
+export const VIEW_JOB_DETAIL_SYSTEM_PROMPT = `You parse a single job-posting page and return the structured fields the job-board UI needs.
 
 You will receive:
 - The URL of the posting.

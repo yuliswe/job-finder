@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_LISTING_MODEL } from 'src/utils/config.js';
+import { LLM_IDENTIFY_JOB_LIST_URL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { EXTRACT_USER_FILTER_PREFS_SYSTEM_PROMPT } from 'src/prompts/extractUserFilterPrefs.js';
 import { terminal } from 'src/utils/terminal';
@@ -14,7 +14,7 @@ export type UserFilterPrefs = {
 
 /**
  * Ask the LLM to pull a `division` and `location` out of the user's
- * free-form interests text. Used by `pipeline run-scripts` to seed the
+ * free-form interests text. Used by `pipeline apply-filters` to seed the
  * filter-mapping step when the user doesn't supply `-d`/`-l` flags.
  */
 export async function extractUserFilterPrefs(args: {
@@ -53,8 +53,8 @@ Extract \`division\` and \`location\` per the schema.`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_LISTING_MODEL,
-    metadata: { configKey: 'LLM_LISTING_MODEL' },
+    models: LLM_IDENTIFY_JOB_LIST_URL_MODEL,
+    metadata: { configKey: 'LLM_IDENTIFY_JOB_LIST_URL_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (!parsed.division.trim()) {

@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_SOURCING_MODEL } from 'src/utils/config.js';
+import { LLM_RESEARCH_COMPANY_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { VERIFY_COMPANY_MATCH_SYSTEM_PROMPT } from 'src/prompts/verifyCompanyMatch.js';
 import { terminal } from 'src/utils/terminal.js';
@@ -46,8 +46,8 @@ ${pageText || '(empty)'}`,
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_SOURCING_MODEL,
-    metadata: { configKey: 'LLM_SOURCING_MODEL' },
+    models: LLM_RESEARCH_COMPANY_MODEL,
+    metadata: { configKey: 'LLM_RESEARCH_COMPANY_MODEL' },
     logger: terminal,
     validate: async parsed => {
       if (!parsed.reason.trim()) {

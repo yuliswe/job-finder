@@ -17,30 +17,30 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForViewing,
-  qualifiedForViewing,
+  inScopeForViewJobDetail,
+  qualifiedForViewJobDetail,
 } from 'src/db/pipelineQualified.js';
 import { evaluateJobLocationRelevancy } from 'src/llm/evaluateJobLocationRelevancy.js';
-import { viewJobPost } from 'src/llm/viewJobPost.js';
+import { viewJobDetail } from 'src/llm/viewJobDetail.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { getUserInterests } from 'src/utils/userInterests.js';
 import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
-type ViewingOptions = {
+type ViewJobDetailOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
   /** Process the selected rows now. Without it the command only queues
    * them for a later `--start` / `jobfinder start-pipeline`. */
   start?: boolean;
-  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  /** Suppress "nothing to do" / "0 rows" logs. See ResearchCompanyOptions. */
   suppressNothingToDoLog?: boolean;
 };
 
-export function createViewingCommand(): Command {
-  return new Command('viewing')
+export function createViewJobDetailCommand(): Command {
+  return new Command('view-job-detail')
     .description(
       'For each currently-queued JobPost, open the URL and ask the LLM to populate title/company/location/description/salary/etc. fields. By default only queues the selected rows; pass --start to process them now.'
     )
@@ -64,21 +64,21 @@ export function createViewingCommand(): Command {
       '--start',
       'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
     )
-    .action(async (opts: ViewingOptions) => {
+    .action(async (opts: ViewJobDetailOptions) => {
       if (opts.start) {
-        await withBrowserInstance(context => runViewing(context, opts));
+        await withBrowserInstance(context => runViewJobDetail(context, opts));
         return;
       }
 
-      await queueViewing(opts);
+      await queueViewJobDetail(opts);
     });
 }
 
 /** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
  * return the rows the mode selects. Shared by the queue-only default path
  * and the --start processing path. */
-async function pickViewingTargets(
-  opts: ViewingOptions
+async function pickViewJobDetailTargets(
+  opts: ViewJobDetailOptions
 ): Promise<{ id: string; url: string }[]> {
   if (opts.jobPostId) {
     const exists = await db
@@ -92,21 +92,21 @@ async function pickViewingTargets(
     }
 
     await enqueuePipelineTask({
-      task: 'viewing',
+      task: 'view-job-detail',
       entity: { ofJobPostId: opts.jobPostId },
     });
   }
 
-  // With --all, requeue every in-scope viewing row first. Going through
+  // With --all, requeue every in-scope view-job-detail row first. Going through
   // 'queued' (instead of just bypassing the eligibility filter) keeps the
   // TUI pipeline bar honest — the numerator sees them transition through
   // queued → started → done like any normal pickup.
   const mode = pipelineModeFromOptions(opts);
-  if (mode === 'all') await requeueAllInScope('viewing');
+  if (mode === 'all') await requeueAllInScope('view-job-detail');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
-    task: 'viewing',
+    task: 'view-job-detail',
     parentIdRef: 'JobPost.id',
     mode,
   });
@@ -114,8 +114,8 @@ async function pickViewingTargets(
   let query = db
     .selectFrom('JobPost')
     .select(['JobPost.id as id', 'JobPost.url as url'])
-    .where(qualifiedForViewing)
-    .where(inScopeForViewing)
+    .where(qualifiedForViewJobDetail)
+    .where(inScopeForViewJobDetail)
     // Manual priority bump: a bumped post sorts ahead of the backlog so it
     // lands in the first concurrency batch, and a more recent bump outranks an
     // older one. Unbumped rows (priorityBumpedAt IS NULL) sort last and keep
@@ -133,11 +133,11 @@ async function pickViewingTargets(
     : query.execute();
 }
 
-export async function queueViewing(
-  opts: ViewingOptions
+export async function queueViewJobDetail(
+  opts: ViewJobDetailOptions
 ): Promise<{ queued: number }> {
   const mode = pipelineModeFromOptions(opts);
-  const targets = await pickViewingTargets(opts);
+  const targets = await pickViewJobDetailTargets(opts);
 
   // The default mode only selects rows that are already queued, --all
   // bulk-requeues inside the picker, and --job-post-id enqueues its row
@@ -146,25 +146,25 @@ export async function queueViewing(
   if (mode === 'include-failed') {
     for (const target of targets) {
       await enqueuePipelineTask({
-        task: 'viewing',
+        task: 'view-job-detail',
         entity: { ofJobPostId: target.id },
       });
     }
   }
 
   terminal.log(
-    `${targets.length} JobPost row(s) queued for viewing. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+    `${targets.length} JobPost row(s) queued for view-job-detail. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
   );
 
   return { queued: targets.length };
 }
 
-export async function runViewing(
+export async function runViewJobDetail(
   context: BrowserContext,
-  opts: ViewingOptions
+  opts: ViewJobDetailOptions
 ): Promise<{ processed: number }> {
-  await reapStaleStartedStates('viewing');
-  const targets = await pickViewingTargets(opts);
+  await reapStaleStartedStates('view-job-detail');
+  const targets = await pickViewJobDetailTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {
@@ -174,9 +174,9 @@ export async function runViewing(
     return { processed: 0 };
   }
 
-  // Loaded once and shared across tabs: the viewing stage scores each post's
+  // Loaded once and shared across tabs: the view-job-detail stage scores each post's
   // location against the user's stated preferences to gate whether it proceeds
-  // to `evaluate` (see `inScopeForEvaluate`).
+  // to `evaluate` (see `inScopeForEvaluateSkillMatch`).
   const interests = await getUserInterests();
   if (!interests) {
     terminal.warn(
@@ -186,7 +186,7 @@ export async function runViewing(
 
   const results = await Promise.all(
     targets.map(target =>
-      tabLimit(() => viewOneTarget({ context, target, interests }))
+      tabLimit(() => viewJobDetailForOneTarget({ context, target, interests }))
     )
   );
 
@@ -202,26 +202,26 @@ export async function runViewing(
   return { processed: targets.length };
 }
 
-async function viewOneTarget(args: {
+async function viewJobDetailForOneTarget(args: {
   context: BrowserContext;
   target: { id: string; url: string };
   interests: string;
 }): Promise<{ jobPostUpdated: number } | undefined> {
   const { context, target, interests } = args;
   return processOne({
-    task: 'viewing',
+    task: 'view-job-detail',
     entity: { ofJobPostId: target.id },
     label: target.url,
     work: async (): Promise<{ jobPostUpdated: number }> => {
       terminal.log(`Viewing JobPost ${target.url}`);
 
-      const parsed = await viewJobPost({ context, url: target.url });
+      const parsed = await viewJobDetail({ context, url: target.url });
 
       if (!parsed) {
         await recordPipelineState({
-          task: 'viewing',
+          task: 'view-job-detail',
           state: PIPELINE_STATE.FAILED,
-          reason: 'viewJobPost returned null (page load or LLM call failed)',
+          reason: 'viewJobDetail returned null (page load or LLM call failed)',
           entity: { ofJobPostId: target.id },
         });
         return { jobPostUpdated: 0 };
@@ -232,7 +232,7 @@ async function viewOneTarget(args: {
         // error page, listings page, etc.). Treat this as a terminal verdict
         // so we stop re-attempting it on every pipeline run.
         await recordPipelineState({
-          task: 'viewing',
+          task: 'view-job-detail',
           state: PIPELINE_STATE.NOT_A_JOB_POSTING,
           reason: 'LLM reported the page is not a job posting',
           entity: { ofJobPostId: target.id },
@@ -266,7 +266,7 @@ async function viewOneTarget(args: {
       };
 
       // Only overwrite title if the LLM produced one — preserve the
-      // run-scripts title as a fallback otherwise.
+      // apply-filters title as a fallback otherwise.
       if (parsed.title) update.title = parsed.title;
 
       await db
@@ -276,10 +276,10 @@ async function viewOneTarget(args: {
         .execute();
 
       // Score the extracted location against the user's stated preferences and
-      // persist it on the eval row (which already exists from run-scripts with
-      // titleRelavency). `inScopeForEvaluate` gates on this via
-      // `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`, so a below-threshold post is
-      // viewed and recorded but never proceeds to evaluate / gets shown to the
+      // persist it on the eval row (which already exists from apply-filters with
+      // titleRelavency). `inScopeForEvaluateSkillMatch` gates on this via
+      // `PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY`, so a below-threshold post is
+      // fetched and recorded but never proceeds to evaluate / gets shown to the
       // user.
       const loc = await evaluateJobLocationRelevancy({
         interests,
@@ -305,13 +305,13 @@ async function viewOneTarget(args: {
         .execute();
 
       await recordPipelineState({
-        task: 'viewing',
+        task: 'view-job-detail',
         state: PIPELINE_STATE.DONE,
         entity: { ofJobPostId: target.id },
       });
 
       await enqueuePipelineTask({
-        task: 'evaluate',
+        task: 'evaluate-skill-match',
         entity: { ofJobPostId: target.id },
       });
 

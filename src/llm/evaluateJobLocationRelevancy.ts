@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { LLM_VIEWING_MODEL } from 'src/utils/config.js';
+import { LLM_VIEW_JOB_DETAIL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
 import { EVALUATE_JOB_LOCATION_RELEVANCY_SYSTEM_PROMPT } from 'src/prompts/evaluateJobLocationRelevancy.js';
 import { terminal } from 'src/utils/terminal';
@@ -14,10 +14,10 @@ export type JobLocationRelevancy = {
 
 /**
  * Ask the LLM how well a posting's location fits the user's location
- * preferences (as expressed in the interests file). Runs at viewing time,
+ * preferences (as expressed in the interests file). Runs at view-job-detail time,
  * right after the location + remote status have been extracted, so the score
- * can gate whether the post proceeds to `evaluate` (see `inScopeForEvaluate`
- * and `PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY`).
+ * can gate whether the post proceeds to `evaluate` (see `inScopeForEvaluateSkillMatch`
+ * and `PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY`).
  */
 export async function evaluateJobLocationRelevancy(args: {
   interests: string;
@@ -57,8 +57,8 @@ Score how well this posting's location fits the user's stated location preferenc
       ),
     }),
     maxAttempts: MAX_ATTEMPTS,
-    models: LLM_VIEWING_MODEL,
-    metadata: { configKey: 'LLM_VIEWING_MODEL' },
+    models: LLM_VIEW_JOB_DETAIL_MODEL,
+    metadata: { configKey: 'LLM_VIEW_JOB_DETAIL_MODEL' },
     logger: terminal,
     validate: parsed => {
       if (parsed.locationRelevancy < 0 || parsed.locationRelevancy > 1) {

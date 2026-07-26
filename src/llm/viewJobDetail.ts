@@ -1,9 +1,9 @@
 import { type BrowserContext } from 'patchright';
 import * as v from 'valibot';
 
-import { LLM_VIEWING_MODEL } from 'src/utils/config.js';
+import { LLM_VIEW_JOB_DETAIL_MODEL } from 'src/utils/config.js';
 import { feedbackLoop, Memory } from 'src/llm/base.js';
-import { VIEW_JOB_POST_SYSTEM_PROMPT } from 'src/prompts/viewJobPost.js';
+import { VIEW_JOB_DETAIL_SYSTEM_PROMPT } from 'src/prompts/viewJobDetail.js';
 import { goToPage, withBrowserTab } from 'src/utils/browser.js';
 import { cleanHtmlForLlm } from 'src/utils/html.js';
 import { terminal } from 'src/utils/terminal';
@@ -23,7 +23,7 @@ export type SkillRequirements = SkillRequirement[];
  * date). null when no `postedAt` is available. */
 export type PostedAtSource = 'job_post' | 'twbm' | null;
 
-export type ViewedJobPost = {
+export type ViewedJobDetail = {
   isJobPosting: boolean;
   title: string | null;
   company: string | null;
@@ -46,10 +46,10 @@ export type ViewedJobPost = {
  * fields parsed out of the job-posting page. Returns null if the page fails to
  * load or the LLM call fails terminally.
  */
-export async function viewJobPost(args: {
+export async function viewJobDetail(args: {
   context: BrowserContext;
   url: string;
-}): Promise<ViewedJobPost | null> {
+}): Promise<ViewedJobDetail | null> {
   const { context, url } = args;
 
   return withBrowserTab(context, async page => {
@@ -66,7 +66,7 @@ export async function viewJobPost(args: {
 
     try {
       const { result } = await feedbackLoop({
-        memory: new Memory([{ system: VIEW_JOB_POST_SYSTEM_PROMPT }]),
+        memory: new Memory([{ system: VIEW_JOB_DETAIL_SYSTEM_PROMPT }]),
         initialPrompt: `Posting URL: ${url}
 Page title: ${title}
 
@@ -180,8 +180,8 @@ Extract the fields. Return null for anything the page does not actually state.`,
           ),
         }),
         maxAttempts: 3,
-        models: LLM_VIEWING_MODEL,
-        metadata: { configKey: 'LLM_VIEWING_MODEL' },
+        models: LLM_VIEW_JOB_DETAIL_MODEL,
+        metadata: { configKey: 'LLM_VIEW_JOB_DETAIL_MODEL' },
         logger: terminal,
         validate: parsed => {
           // The LLM is telling us this URL isn't a job posting — accept and
@@ -226,7 +226,9 @@ Extract the fields. Return null for anything the page does not actually state.`,
 
       return { ...result, postedAtSource: null };
     } catch (err) {
-      terminal.error(`viewJobPost LLM call failed for ${url}: ${String(err)}`);
+      terminal.error(
+        `viewJobDetail LLM call failed for ${url}: ${String(err)}`
+      );
       return null;
     }
   });

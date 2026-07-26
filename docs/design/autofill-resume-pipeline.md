@@ -6,13 +6,13 @@ This document describes a new, human-triggered pipeline that opens a job
 posting's application form in a browser and fills it in from the user's résumé,
 stopping short of submitting it. The work is expressed as a new pipeline stage,
 `fill-form`, that generates a browser-side _fill-form script_ and stores it on
-the `JobPost` row, in exactly the way the existing `scripting` stage generates a
+the `JobPost` row, in exactly the way the existing `learn-to-use-job-list` stage generates a
 `parserScript` and stores it on `JobListSource`. A new top-level command,
 `jobfinder fill-form <jobPostIdOrUrl>`, is the manual entry point. When it is
 given a URL for a job post that does not yet exist, it bootstraps the missing
 entities from the leaf upward — it creates the `JobPost` first, then a
 placeholder company (`JobSource`) as its parent, and then enqueues the
-enrichment tasks (company sourcing, post viewing, post evaluation) so that the
+enrichment tasks (company research-company, post view-job-detail, post evaluation) so that the
 rest of the content is backfilled by the normal pipeline while the résumé is
 being filled in.
 
@@ -55,7 +55,7 @@ There is a single linear pipeline whose stages are called _tasks_, declared in
 `src/db/pipelineState.ts`:
 
 ```
-seeding → sourcing → listing → scripting → run-scripts → viewing → evaluate
+explore-hiring-companies → research-company → listing → learn-to-use-job-list → apply-filters → view-job-detail → evaluate
 ```
 
 The queue is not a separate object graph; it is the `PipelineState` table used
@@ -95,7 +95,7 @@ Which rows a stage picks up is decided by three predicate families in
 `src/db/pipelineQualified.ts`:
 
 - `qualifiedForX` — does the row have the upstream data this task reads (for
-  example `run-scripts` requires `parserScript IS NOT NULL`)?
+  example `apply-filters` requires `parserScript IS NOT NULL`)?
 - `inScopeForX` — should the pipeline ever touch this row (active tree
   membership plus design-time skips such as a relevancy threshold)?
 - `neededForX` — is there work left, defined only where the task writes a column
@@ -114,14 +114,14 @@ same-FK parent task is still pending on that row. Only tasks that share the
 child's foreign-key column may appear in `TASK_PARENTS`, and this invariant is
 asserted at module load.
 
-### Generated scripts: the `scripting` → `run-scripts` template
+### Generated scripts: the `learn-to-use-job-list` → `apply-filters` template
 
-The closest analog to résumé autofill already exists. `scripting`
+The closest analog to résumé autofill already exists. `learn-to-use-job-list`
 (`src/llm/generateParserScript.ts`) opens a listing page, asks the LLM through
 `feedbackLoop` to emit browser-side JavaScript defining `discover()` and
 `searchJobs(...)`, validates the candidate by running it inside the live page,
 and stores the validated source string in the `JobListSource.parserScript` TEXT
-column. `run-scripts` (`src/llm/runParserScript.ts`) later loads that string,
+column. `apply-filters` (`src/llm/runParserScript.ts`) later loads that string,
 opens the page, and executes it with `new Function(...)` inside
 `pageEval`/`page.evaluate` in `src/utils/browser.ts`.
 
@@ -144,16 +144,16 @@ into a live web form. They share the résumé source but are otherwise separate.
 entities: it classifies the URL, find-or-creates a `JobSource` by company name,
 find-or-creates a `JobPost` by URL (with a placeholder title and a
 `JobPostEval` seeded at `titleRelavency = 1.0` so a manually supplied URL
-bypasses the viewing relevancy gate), and enqueues `sourcing` on the company and
-`viewing` on the post. The new command generalizes this same bottom-up creation
+bypasses the view-job-detail relevancy gate), and enqueues `research-company` on the company and
+`view-job-detail` on the post. The new command generalizes this same bottom-up creation
 and adds the `fill-form` stage.
 
 ## The bottom-up bootstrap model
 
-The standard pipeline is top-down: seeding creates `SourceSeed` rows, each stage
+The standard pipeline is top-down: explore-hiring-companies creates `SourceSeed` rows, each stage
 enriches its entity and enqueues the next stage on the child it produces, and a
 `JobPost` only comes into existence at the far end of the chain, produced by
-`run-scripts` from a `JobListSource`.
+`apply-filters` from a `JobListSource`.
 
 This feature needs the opposite direction. The human starts from a leaf — a
 single application URL — and wants that leaf to become a first-class `JobPost`
@@ -170,8 +170,8 @@ mechanical steps:
    enrichment columns left null, exactly as `track` and `listing` already
    create them.
 3. Enqueue the relevant `(task, entity)` rows: the leaf's own new task
-   (`fill-form`) plus the ancestors' enrichment tasks (`sourcing` on the company,
-   `viewing` on the post; `evaluate` follows automatically because `viewing`
+   (`fill-form`) plus the ancestors' enrichment tasks (`research-company` on the company,
+   `view-job-detail` on the post; `evaluate` follows automatically because `view-job-detail`
    enqueues it on completion).
 
 No new ordering code is required. Because each enrichment task's own
@@ -188,17 +188,17 @@ Concretely, running `fill-form` on a new URL produces this ordering:
 create JobPost (leaf)                     ── child first
 create placeholder JobSource (parent)     ── parent as placeholder
 enqueue fill-form on the JobPost          ── the child's own task runs first
-enqueue sourcing  on the JobSource        ── parent enrichment, backfilled later
-enqueue viewing   on the JobPost          ── leaf-content enrichment
-   └ viewing, on completion, enqueues evaluate on the JobPost
+enqueue research-company  on the JobSource        ── parent enrichment, backfilled later
+enqueue view-job-detail   on the JobPost          ── leaf-content enrichment
+   └ view-job-detail, on completion, enqueues evaluate on the JobPost
 ```
 
 ## New pipeline stage: `fill-form`
 
 `fill-form` is a new pipeline task keyed on `ofJobPostId`. It is the direct
-analog of `scripting`: its job is to _generate and store_ the fill-form script,
+analog of `learn-to-use-job-list`: its job is to _generate and store_ the fill-form script,
 not to perform the interactive fill. Splitting generation from the interactive
-fill mirrors the `scripting` / `run-scripts` split and keeps the expensive,
+fill mirrors the `learn-to-use-job-list` / `apply-filters` split and keeps the expensive,
 cacheable LLM work separate from the cheap, human-facing execution.
 
 ### What `fill-form` generates
@@ -230,7 +230,7 @@ navigation away from the form as a failure.
 
 The validated script string is stored in a new nullable TEXT column,
 `JobPost.fillFormScript`, via
-`db.updateTable('JobPost').set({ fillFormScript })`, exactly as `scripting`
+`db.updateTable('JobPost').set({ fillFormScript })`, exactly as `learn-to-use-job-list`
 writes `JobListSource.parserScript`. On success `fill-form` records `done`; when
 the LLM concludes the form cannot be filled (no form found, auth wall, captcha)
 it records an appropriate terminal no-result state and the column is left null.
@@ -239,15 +239,15 @@ it records an appropriate terminal no-result state and the column is left null.
 
 - `qualifiedForFillForm` — trivially true. Every `JobPost` has a `url` by schema,
   so there is no upstream data prerequisite. (`fill-form` deliberately does _not_
-  require `viewing` to have run, because the form fields are read from the live
+  require `view-job-detail` to have run, because the form fields are read from the live
   page, not from the stored `description`.)
 - `inScopeForFillForm` — the post is in an active source tree. Because
   `fill-form` is triggered explicitly per post by a human, it does not need the
-  title-relevancy gate that `viewing` uses; a post the user chose to fill is in
+  title-relevancy gate that `view-job-detail` uses; a post the user chose to fill is in
   scope by virtue of being chosen. As with `track`, the bootstrap seeds
   `JobPostEval` so the post is not filtered out elsewhere.
 - `TASK_PARENTS` — no entry. `fill-form` shares the `ofJobPostId` key with
-  `viewing` and `evaluate`, but it does not read any column they write, so it
+  `view-job-detail` and `evaluate`, but it does not read any column they write, so it
   must not be gated behind them; the three run independently on the same post.
 
 ### Whether `fill-form` runs under `start-pipeline`
@@ -327,7 +327,7 @@ Behavior:
 2. **Bootstrap when creating from a URL.** Reuse the `track` logic — classify the
    URL to obtain the company name, upsert the `JobSource`, upsert the `JobPost`
    with a placeholder title and a `titleRelavency = 1.0` eval, and enqueue
-   `sourcing` on the company and `viewing` on the post. The `track` helpers
+   `research-company` on the company and `view-job-detail` on the post. The `track` helpers
    `upsertJobSourceByName` and `upsertJobPost` are currently private to
    `track.ts` and should be factored into a shared bootstrap module (for example
    `src/db/bootstrapJobPost.ts`) so both commands use one implementation.
@@ -342,7 +342,7 @@ Behavior:
 Options:
 
 - `--regenerate` — discard the cached `fillFormScript` and generate a fresh one
-  (the analog of `scripting --job-list-source-id <id>` after a prompt change).
+  (the analog of `learn-to-use-job-list --job-list-source-id <id>` after a prompt change).
 - `--generate-only` — generate and store the fill-form script without opening the
   interactive fill (useful for pre-warming, and it can run headless).
 - `--no-bootstrap` — when given a URL that does not resolve to an existing post,
@@ -391,7 +391,7 @@ New files:
   submitting. Modeled on `src/llm/runParserScript.ts`.
 - `src/cli/commands/pipeline/fill-form.ts` — the `fill-form` stage
   (`queueFillForm` / `runFillForm`, factory `createFillFormStageCommand`),
-  modeled on `src/cli/commands/pipeline/scripting.ts`.
+  modeled on `src/cli/commands/pipeline/learn-to-use-job-list.ts`.
 - `src/cli/commands/fill-form.ts` — the top-level manual command (factory
   `createFillFormCommand`).
 - `src/db/bootstrapJobPost.ts` — the shared bottom-up bootstrap helpers factored

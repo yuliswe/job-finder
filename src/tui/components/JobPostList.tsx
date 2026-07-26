@@ -118,8 +118,8 @@ export function JobPostList(props: {
       {...rest}
       columns={buildColumns(sort)}
       getKey={r => r.id}
-      isDim={r => r.isOutOfScopeForViewing}
-      emptyMessage='(no JobPost rows — run `jobfinder pipeline run-scripts`)'
+      isDim={r => r.isOutOfScopeForViewJobDetail}
+      emptyMessage='(no JobPost rows — run `jobfinder pipeline apply-filters`)'
     />
   );
 }

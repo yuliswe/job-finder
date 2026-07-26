@@ -30,7 +30,7 @@ type FillFormCommandOptions = {
 export function createFillFormCommand(): Command {
   return new Command('fill-form')
     .description(
-      'Open a job application form and auto-fill it from your applicant profile (data/profile.local.md), WITHOUT submitting. Given a JobPost id it fills that post; given a URL it find-or-creates the post (bootstrapping a placeholder company + queuing sourcing/viewing) first. Caches the generated fill script on JobPost.fillFormScript.'
+      'Open a job application form and auto-fill it from your applicant profile (data/profile.local.md), WITHOUT submitting. Given a JobPost id it fills that post; given a URL it find-or-creates the post (bootstrapping a placeholder company + queuing research-company/view-job-detail) first. Caches the generated fill script on JobPost.fillFormScript.'
     )
     .argument(
       '<jobPostIdOrUrl>',
@@ -266,17 +266,17 @@ async function bootstrapFromUrl(
   });
 
   await enqueuePipelineTask({
-    task: 'sourcing',
+    task: 'research-company',
     entity: { ofJobSourceId: jobSourceId },
   });
 
   await enqueuePipelineTask({
-    task: 'viewing',
+    task: 'view-job-detail',
     entity: { ofJobPostId: jobPostId },
   });
 
   terminal.log(
-    `Bootstrapped JobPost ${jobPostId} for "${companyName}" — queued sourcing on the company and viewing on the post (evaluate follows viewing).`
+    `Bootstrapped JobPost ${jobPostId} for "${companyName}" — queued research-company on the company and view-job-detail on the post (evaluate follows view-job-detail).`
   );
 
   return { id: jobPostId, url };

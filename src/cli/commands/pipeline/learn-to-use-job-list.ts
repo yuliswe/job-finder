@@ -18,8 +18,8 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForScripting,
-  qualifiedForScripting,
+  inScopeForLearnToUseJobList,
+  qualifiedForLearnToUseJobList,
 } from 'src/db/pipelineQualified.js';
 import { generateParserScript } from 'src/llm/generateParserScript.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
@@ -27,19 +27,19 @@ import { terminal } from 'src/utils/terminal.js';
 
 const tabLimit = pLimit(MAX_CONCURRENT_BROWSER_TABS);
 
-type ScriptingOptions = {
+type LearnToUseJobListOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobListSourceId?: string;
   /** Process the selected rows now. Without it the command only queues
    * them for a later `--start` / `jobfinder start-pipeline`. */
   start?: boolean;
-  /** Suppress "nothing to do" / "0 rows" log lines. See SourcingOptions. */
+  /** Suppress "nothing to do" / "0 rows" log lines. See ResearchCompanyOptions. */
   suppressNothingToDoLog?: boolean;
 };
 
-export function createScriptingCommand(): Command {
-  return new Command('scripting')
+export function createLearnToUseJobListCommand(): Command {
+  return new Command('learn-to-use-job-list')
     .description(
       'Generate and validate a parser script (listLocations + searchJobs) for each currently-queued JobListSource and store it in JobListSource.parserScript. By default only queues the selected rows; pass --start to process them now.'
     )
@@ -63,21 +63,23 @@ export function createScriptingCommand(): Command {
       '--start',
       'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
     )
-    .action(async (opts: ScriptingOptions) => {
+    .action(async (opts: LearnToUseJobListOptions) => {
       if (opts.start) {
-        await withBrowserInstance(context => runScripting(context, opts));
+        await withBrowserInstance(context =>
+          runLearnToUseJobList(context, opts)
+        );
         return;
       }
 
-      await queueScripting(opts);
+      await queueLearnToUseJobList(opts);
     });
 }
 
 /** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
  * return the rows the mode selects. Shared by the queue-only default path
  * and the --start processing path. */
-async function pickScriptingTargets(
-  opts: ScriptingOptions
+async function pickLearnToUseJobListTargets(
+  opts: LearnToUseJobListOptions
 ): Promise<{ id: string; url: string }[]> {
   if (opts.jobListSourceId) {
     const exists = await db
@@ -93,17 +95,17 @@ async function pickScriptingTargets(
     }
 
     await enqueuePipelineTask({
-      task: 'scripting',
+      task: 'learn-to-use-job-list',
       entity: { ofJobListSourceId: opts.jobListSourceId },
     });
   }
 
   const mode = pipelineModeFromOptions(opts);
-  if (mode === 'all') await requeueAllInScope('scripting');
+  if (mode === 'all') await requeueAllInScope('learn-to-use-job-list');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
-    task: 'scripting',
+    task: 'learn-to-use-job-list',
     parentIdRef: 'JobListSource.id',
     mode,
   });
@@ -111,8 +113,8 @@ async function pickScriptingTargets(
   let query = db
     .selectFrom('JobListSource')
     .select(['id', 'url'])
-    .where(qualifiedForScripting)
-    .where(inScopeForScripting);
+    .where(qualifiedForLearnToUseJobList)
+    .where(inScopeForLearnToUseJobList);
 
   if (stateFilter) query = query.where(stateFilter);
 
@@ -125,11 +127,11 @@ async function pickScriptingTargets(
     : query.execute();
 }
 
-export async function queueScripting(
-  opts: ScriptingOptions
+export async function queueLearnToUseJobList(
+  opts: LearnToUseJobListOptions
 ): Promise<{ queued: number }> {
   const mode = pipelineModeFromOptions(opts);
-  const targets = await pickScriptingTargets(opts);
+  const targets = await pickLearnToUseJobListTargets(opts);
 
   // The default mode only selects rows that are already queued, --all
   // bulk-requeues inside the picker, and --job-list-source-id enqueues its
@@ -138,25 +140,25 @@ export async function queueScripting(
   if (mode === 'include-failed') {
     for (const target of targets) {
       await enqueuePipelineTask({
-        task: 'scripting',
+        task: 'learn-to-use-job-list',
         entity: { ofJobListSourceId: target.id },
       });
     }
   }
 
   terminal.log(
-    `${targets.length} JobListSource row(s) queued for scripting. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+    `${targets.length} JobListSource row(s) queued for learn-to-use-job-list. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
   );
 
   return { queued: targets.length };
 }
 
-export async function runScripting(
+export async function runLearnToUseJobList(
   context: BrowserContext,
-  opts: ScriptingOptions
+  opts: LearnToUseJobListOptions
 ): Promise<{ processed: number }> {
-  await reapStaleStartedStates('scripting');
-  const targets = await pickScriptingTargets(opts);
+  await reapStaleStartedStates('learn-to-use-job-list');
+  const targets = await pickLearnToUseJobListTargets(opts);
 
   const results = await Promise.all(
     targets.map(target => tabLimit(() => scriptOneTarget({ context, target })))
@@ -182,12 +184,12 @@ async function scriptOneTarget(args: {
 }): Promise<{ jobListSourceUpdated: number } | undefined> {
   const { context, target } = args;
   return processOne({
-    task: 'scripting',
+    task: 'learn-to-use-job-list',
     entity: { ofJobListSourceId: target.id },
     label: target.url,
     work: async (): Promise<{ jobListSourceUpdated: number }> => {
       terminal.log(
-        `Scripting JobListSource ${target.url} (models=${LLM_CODING_MODEL.join(',')})`
+        `LearnToUseJobList JobListSource ${target.url} (models=${LLM_CODING_MODEL.join(',')})`
       );
 
       const generated = await generateParserScript({
@@ -202,7 +204,7 @@ async function scriptOneTarget(args: {
         );
 
         await recordPipelineState({
-          task: 'scripting',
+          task: 'learn-to-use-job-list',
           state: PIPELINE_STATE.ABORTED,
           reason:
             'generateParserScript returned null with LLM_CODING_MODEL (LLM aborted or exhausted attempts)',
@@ -222,13 +224,13 @@ async function scriptOneTarget(args: {
         .execute();
 
       await recordPipelineState({
-        task: 'scripting',
+        task: 'learn-to-use-job-list',
         state: PIPELINE_STATE.DONE,
         entity: { ofJobListSourceId: target.id },
       });
 
       await enqueuePipelineTask({
-        task: 'run-scripts',
+        task: 'apply-filters',
         entity: { ofJobListSourceId: target.id },
       });
 

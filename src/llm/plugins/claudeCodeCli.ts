@@ -56,7 +56,7 @@ type ClaudeCliEnvelope = {
  * `ANTHROPIC_AUTH_TOKEN`.
  *
  * Selected per model by prefixing the model id with `claudecode-plugin/`,
- * e.g. `LLM_VIEWING_MODEL = ['claudecode-plugin/claude-opus-4-8']`. The
+ * e.g. `LLM_VIEW_JOB_DETAIL_MODEL = ['claudecode-plugin/claude-opus-4-8']`. The
  * dispatcher in `src/llm/base.ts` strips the prefix before calling `send`.
  *
  * Trade-offs versus a direct API call:

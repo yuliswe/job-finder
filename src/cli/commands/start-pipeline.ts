@@ -2,12 +2,12 @@ import { Command, Option } from 'commander';
 import type { BrowserContext } from 'patchright';
 
 import { acquirePipelineLock } from 'src/cli/commands/pipeline/pipelineLock.js';
-import { runEvaluate } from 'src/cli/commands/pipeline/evaluate.js';
-import { runListing } from 'src/cli/commands/pipeline/listing.js';
-import { runRunScripts } from 'src/cli/commands/pipeline/run-scripts.js';
-import { runScripting } from 'src/cli/commands/pipeline/scripting.js';
-import { runSourcing } from 'src/cli/commands/pipeline/sourcing.js';
-import { runViewing } from 'src/cli/commands/pipeline/viewing.js';
+import { runEvaluateSkillMatch } from 'src/cli/commands/pipeline/evaluate-skill-match.js';
+import { runIdentifyJobListUrl } from 'src/cli/commands/pipeline/identify-job-list-url.js';
+import { runApplyFilters } from 'src/cli/commands/pipeline/apply-filters.js';
+import { runLearnToUseJobList } from 'src/cli/commands/pipeline/learn-to-use-job-list.js';
+import { runResearchCompany } from 'src/cli/commands/pipeline/research-company.js';
+import { runViewJobDetail } from 'src/cli/commands/pipeline/view-job-detail.js';
 import { withBrowserInstance } from 'src/utils/browser.js';
 import { terminal } from 'src/utils/terminal.js';
 
@@ -24,28 +24,31 @@ type IterationOpts = {
 const IDLE_POLL_MS = 5_000;
 
 type TaskName =
-  | 'sourcing'
-  | 'listing'
-  | 'scripting'
-  | 'run-scripts'
-  | 'viewing'
-  | 'evaluate';
+  | 'research-company'
+  | 'identify-job-list-url'
+  | 'learn-to-use-job-list'
+  | 'apply-filters'
+  | 'view-job-detail'
+  | 'evaluate-skill-match';
 
 const TASKS: readonly TaskName[] = [
-  'sourcing',
-  'listing',
-  'scripting',
-  'run-scripts',
-  'viewing',
-  'evaluate',
+  'research-company',
+  'identify-job-list-url',
+  'learn-to-use-job-list',
+  'apply-filters',
+  'view-job-detail',
+  'evaluate-skill-match',
 ];
 
-/** Tasks that surface results to the user (a viewed post's fields, then its
+/** Tasks that surface results to the user (a fetched post's fields, then its
  * scores). They run without deference. The remaining upstream tasks keep
  * generating more JobPosts to view/evaluate, so we let those two drain their
  * backlog before upstream produces more — see `PRIORITY_TASKS` usage in
  * `runLoop`. */
-const PRIORITY_TASKS: readonly TaskName[] = ['viewing', 'evaluate'];
+const PRIORITY_TASKS: readonly TaskName[] = [
+  'view-job-detail',
+  'evaluate-skill-match',
+];
 
 /** Per-task bookkeeping the global drain check consults after every iteration.
  * `lastSeenGen` is the value of `gen` observed at the end of the task's most
@@ -74,7 +77,7 @@ type StartPipelineOptions = {
 export function createStartPipelineCommand(): Command {
   return new Command('start-pipeline')
     .description(
-      'Run sourcing, listing, scripting, run-scripts, viewing, and evaluate concurrently in independent loops until every queue drains. viewing and evaluate are prioritized: the upstream tasks (sourcing/listing/scripting/run-scripts) defer their next iteration while either of those two still has work, so the current backlog is viewed and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.'
+      'Run research-company, identify-job-list-url, learn-to-use-job-list, apply-filters, view-job-detail, and evaluate-skill-match concurrently in independent loops until every queue drains. view-job-detail and evaluate-skill-match are prioritized: the upstream tasks (research-company/identify-job-list-url/learn-to-use-job-list/apply-filters) defer their next iteration while either of those two still has work, so the current backlog is fetched and evaluated before more JobPosts are generated. Each loop sleeps 5s only when its previous iteration found nothing to do.'
     )
     .addOption(
       new Option(
@@ -118,7 +121,7 @@ async function runAllLoops(opts: StartPipelineOptions): Promise<void> {
 
 async function runAllLoopsLocked(opts: StartPipelineOptions): Promise<void> {
   // `running: true` at init is a "not yet completed first iteration" sentinel.
-  // Without it, a fast no-browser task (evaluate) can finish its first
+  // Without it, a fast no-browser task (evaluate-skill-match) can finish its first
   // iteration before the browser-using tasks have even returned from
   // `withBrowserInstance`'s chromium launch — making the drain check pass
   // against state that's actually "hasn't started" rather than "drained".
@@ -154,26 +157,38 @@ async function runAllLoopsLocked(opts: StartPipelineOptions): Promise<void> {
     : { suppressNothingToDoLog: true };
 
   await Promise.all([
-    runLoopWithBrowser(orchestrator, 'sourcing', firstOpts, (ctx, iterOpts) =>
-      runSourcing(ctx, iterOpts)
-    ),
-    runLoopWithBrowser(orchestrator, 'listing', firstOpts, (ctx, iterOpts) =>
-      runListing(ctx, iterOpts)
-    ),
-    runLoopWithBrowser(orchestrator, 'scripting', firstOpts, (ctx, iterOpts) =>
-      runScripting(ctx, iterOpts)
+    runLoopWithBrowser(
+      orchestrator,
+      'research-company',
+      firstOpts,
+      (ctx, iterOpts) => runResearchCompany(ctx, iterOpts)
     ),
     runLoopWithBrowser(
       orchestrator,
-      'run-scripts',
+      'identify-job-list-url',
       firstOpts,
-      (ctx, iterOpts) => runRunScripts(ctx, iterOpts)
+      (ctx, iterOpts) => runIdentifyJobListUrl(ctx, iterOpts)
     ),
-    runLoopWithBrowser(orchestrator, 'viewing', firstOpts, (ctx, iterOpts) =>
-      runViewing(ctx, iterOpts)
+    runLoopWithBrowser(
+      orchestrator,
+      'learn-to-use-job-list',
+      firstOpts,
+      (ctx, iterOpts) => runLearnToUseJobList(ctx, iterOpts)
     ),
-    runLoop(orchestrator, 'evaluate', firstOpts, iterOpts =>
-      runEvaluate(iterOpts)
+    runLoopWithBrowser(
+      orchestrator,
+      'apply-filters',
+      firstOpts,
+      (ctx, iterOpts) => runApplyFilters(ctx, iterOpts)
+    ),
+    runLoopWithBrowser(
+      orchestrator,
+      'view-job-detail',
+      firstOpts,
+      (ctx, iterOpts) => runViewJobDetail(ctx, iterOpts)
+    ),
+    runLoop(orchestrator, 'evaluate-skill-match', firstOpts, iterOpts =>
+      runEvaluateSkillMatch(iterOpts)
     ),
   ]);
 
@@ -210,10 +225,10 @@ async function runLoop(
   let nextOpts: IterationOpts = firstOpts;
 
   while (!orchestrator.shutdown) {
-    // Deprioritized (upstream) tasks yield to viewing/evaluate: they don't
+    // Deprioritized (upstream) tasks yield to view-job-detail/evaluate-skill-match: they don't
     // start an iteration while either priority task is still running or its
     // most recent iteration processed work. This makes start-pipeline surface
-    // viewed/evaluated results for the current backlog before generating more
+    // fetched/evaluated results for the current backlog before generating more
     // JobPosts. `slot.running` stays false during the wait, but the priority
     // tasks' own `running` flags keep `isFullyDrained` from firing early.
     if (deprioritized) {
@@ -270,7 +285,7 @@ function isFullyDrained(orchestrator: Orchestrator): boolean {
   );
 }
 
-/** True while any priority (viewing/evaluate) task is mid-iteration or its most
+/** True while any priority (view-job-detail/evaluate-skill-match) task is mid-iteration or its most
  * recent iteration processed work — i.e. more may still be queued. Deprioritized
  * tasks defer their next iteration until this goes false. The `running: true`
  * init sentinel makes this report busy until both priority tasks have completed

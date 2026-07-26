@@ -92,12 +92,14 @@ export const DB_NAME = 'jobs.db';
  */
 
 /**
- * The model used by the seeding process.
+ * The model used by the explore-hiring-companies process.
  */
-export const LLM_SEEDING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
+export const LLM_EXPLORE_HIRING_COMPANIES_MODEL = [
+  'openrouter-plugin/openai/gpt-5-nano',
+];
 
 /**
- * The model used by the sourcing process.
+ * The model used by the research-company process.
  *
  * Model requirements:
  * - web-search capability
@@ -108,7 +110,9 @@ export const LLM_SEEDING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
  * company, and assign an interest score to the company based on the interest.md
  * file.
  */
-export const LLM_SOURCING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
+export const LLM_RESEARCH_COMPANY_MODEL = [
+  'openrouter-plugin/openai/gpt-5-nano',
+];
 
 /**
  * The model used by the listing process, asked to identify career pages on
@@ -121,7 +125,9 @@ export const LLM_SOURCING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
  * - output cost doesn't matter much
  *
  */
-export const LLM_LISTING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
+export const LLM_IDENTIFY_JOB_LIST_URL_MODEL = [
+  'openrouter-plugin/openai/gpt-5-nano',
+];
 
 /**
  * The model used by the coding process (writing custom parser scripts for
@@ -137,7 +143,7 @@ export const LLM_CODING_MODEL = [
 ];
 
 /**
- * The model used by the viewing process for extracting and cleaning text from
+ * The model used by the view-job-detail process for extracting and cleaning text from
  * HTML.
  *
  * Model requirements:
@@ -145,7 +151,9 @@ export const LLM_CODING_MODEL = [
  * - low input cost
  * - low output cost
  */
-export const LLM_VIEWING_MODEL = ['openrouter-plugin/openai/gpt-5-nano'];
+export const LLM_VIEW_JOB_DETAIL_MODEL = [
+  'openrouter-plugin/openai/gpt-5-nano',
+];
 
 /**
  * The model used by the evaluate process, asked to compare your skill set and
@@ -209,17 +217,17 @@ export const BROWSER_NAVIGATION_TIMEOUT_MS = 10_000;
 export const BROWSER_NAVIGATION_MIN_WAIT_MS = 5_000;
 
 /**
- * After sourcing, companies less than this interest score are tossed out to
+ * After research-company, companies less than this interest score are tossed out to
  * reduce spam.
  */
-export const PIPELINE_LISTING_MIN_INTEREST_SCORE = 0.5;
+export const PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE = 0.5;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum depth
  * of links to follow from the source URL. Depth 0 means only the source URL,
  * depth 1 means the source URL and all pages linked directly from it, etc.
  */
-export const PIPELINE_LISTING_BFS_MAX_DEPTH = 3;
+export const PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH = 3;
 
 /**
  * When crawling a source's website to find job-listing pages, the maximum
@@ -227,32 +235,32 @@ export const PIPELINE_LISTING_BFS_MAX_DEPTH = 3;
  * is to prevent the crawler from visiting an unbounded number of pages on large
  * websites with many same-domain links.
  */
-export const PIPELINE_LISTING_BFS_MAX_NODES_PER_SOURCE = 25;
+export const PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_NODES_PER_SOURCE = 25;
 
 /**
  * Toss out any job post whose title relevancy score is below this threshold
  * without even showing it to the user, to avoid overwhelming them with junk.
  *
- * The relavency score is a number between 0 and 1 that the viewing LLM assigns
+ * The relavency score is a number between 0 and 1 that the view-job-detail LLM assigns
  * to each job post based on how well the job post title matches the interest.md
  * file..
  */
-export const PIPELINE_VIEWING_MIN_TITLE_RELEVANCY = 0.5;
+export const PIPELINE_VIEW_JOB_DETAIL_MIN_TITLE_RELEVANCY = 0.5;
 
 /**
- * Posts whose viewing-stage locationScore falls below this threshold are
+ * Posts whose view-job-detail-stage locationScore falls below this threshold are
  * treated as out-of-scope by downstream stages (notably `evaluate`). The
- * viewing LLM produces a score in [0, 1] based on the posting's location +
+ * view-job-detail LLM produces a score in [0, 1] based on the posting's location +
  * remote status against the location preferences in interests.md.
  */
-export const PIPELINE_VIEWING_MIN_LOCATION_RELEVANCY = 0.5;
+export const PIPELINE_VIEW_JOB_DETAIL_MIN_LOCATION_RELEVANCY = 0.5;
 
 /**
  * If a single job listing page shows more jobs than this amount, ask the LLM to
  * restrict the filters to narrow it down, to avoid overwhelming the user with
  * too many listings at once.
  */
-export const PIPELINE_RUN_SCRIPTS_SPAM_PREVENTION_JOB_COUNTS = 50;
+export const PIPELINE_APPLY_FILTERS_SPAM_PREVENTION_JOB_COUNTS = 50;
 
 /**
  * User-defined color tags for JobPosts, surfaced as colored dots in the TUI.

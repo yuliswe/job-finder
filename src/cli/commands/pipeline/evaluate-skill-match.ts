@@ -15,11 +15,11 @@ import {
   requeueAllInScope,
 } from 'src/db/pipelineState.js';
 import {
-  inScopeForEvaluate,
-  qualifiedForEvaluate,
+  inScopeForEvaluateSkillMatch,
+  qualifiedForEvaluateSkillMatch,
 } from 'src/db/pipelineQualified.js';
 import { evaluateJobPost } from 'src/llm/evaluateJobPost.js';
-import type { SkillRequirements } from 'src/llm/viewJobPost.js';
+import type { SkillRequirements } from 'src/llm/viewJobDetail.js';
 import { terminal } from 'src/utils/terminal.js';
 import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
 
@@ -28,18 +28,18 @@ import { getUserCV, getUserInterests } from 'src/utils/userInterests.js';
 const CONCURRENCY = 5;
 const limit = pLimit(CONCURRENCY);
 
-type EvaluateOptions = {
+type EvaluateSkillMatchOptions = {
   all?: boolean;
   includeFailed?: boolean;
   jobPostId?: string;
   /** Process the selected rows now. Without it the command only queues
    * them for a later `--start` / `jobfinder start-pipeline`. */
   start?: boolean;
-  /** Suppress "nothing to do" / "0 rows" logs. See SourcingOptions. */
+  /** Suppress "nothing to do" / "0 rows" logs. See ResearchCompanyOptions. */
   suppressNothingToDoLog?: boolean;
 };
 
-type EvaluateTarget = {
+type EvaluateSkillMatchTarget = {
   id: string;
   title: string;
   description: string | null;
@@ -48,10 +48,10 @@ type EvaluateTarget = {
   skillRequirements: string | null;
 };
 
-export function createEvaluateCommand(): Command {
-  return new Command('evaluate')
+export function createEvaluateSkillMatchCommand(): Command {
+  return new Command('evaluate-skill-match')
     .description(
-      'For each currently-queued viewed JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.'
+      'For each currently-queued fetched JobPost, score interest + skill against data/interests.md and data/cv.md and upsert the result into JobPostEval. By default only queues the selected rows; pass --start to process them now.'
     )
     .addOption(
       new Option(
@@ -73,22 +73,22 @@ export function createEvaluateCommand(): Command {
       '--start',
       'Process the selected rows now. Without this flag the command only queues them for a later `--start` or `jobfinder start-pipeline`.'
     )
-    .action(async (opts: EvaluateOptions) => {
+    .action(async (opts: EvaluateSkillMatchOptions) => {
       if (opts.start) {
-        await runEvaluate(opts);
+        await runEvaluateSkillMatch(opts);
         return;
       }
 
-      await queueEvaluate(opts);
+      await queueEvaluateSkillMatch(opts);
     });
 }
 
 /** Enqueue any explicitly-requested row, apply --all's bulk requeue, and
  * return the rows the mode selects. Shared by the queue-only default path
  * and the --start processing path. */
-async function pickEvaluateTargets(
-  opts: EvaluateOptions
-): Promise<EvaluateTarget[]> {
+async function pickEvaluateSkillMatchTargets(
+  opts: EvaluateSkillMatchOptions
+): Promise<EvaluateSkillMatchTarget[]> {
   if (opts.jobPostId) {
     const exists = await db
       .selectFrom('JobPost')
@@ -101,17 +101,17 @@ async function pickEvaluateTargets(
     }
 
     await enqueuePipelineTask({
-      task: 'evaluate',
+      task: 'evaluate-skill-match',
       entity: { ofJobPostId: opts.jobPostId },
     });
   }
 
   const mode = pipelineModeFromOptions(opts);
-  if (mode === 'all') await requeueAllInScope('evaluate');
+  if (mode === 'all') await requeueAllInScope('evaluate-skill-match');
 
   // Picker = qualifiedForX ∩ inScopeForX + state filter chosen by mode.
   const stateFilter = pickerStateFilter({
-    task: 'evaluate',
+    task: 'evaluate-skill-match',
     parentIdRef: 'JobPost.id',
     mode,
   });
@@ -128,15 +128,15 @@ async function pickEvaluateTargets(
   let query = db
     .selectFrom('JobPost')
     .select(selectCols)
-    .where(qualifiedForEvaluate)
-    .where(inScopeForEvaluate)
-    // Hold evaluate while a fresh viewing is still pending on the same post, so
-    // we never score a stale description that viewing is about to overwrite.
+    .where(qualifiedForEvaluateSkillMatch)
+    .where(inScopeForEvaluateSkillMatch)
+    // Hold evaluate while a fresh view-job-detail is still pending on the same post, so
+    // we never score a stale description that view-job-detail is about to overwrite.
     // Applied in every mode (correctness, not a state filter); the explicit
     // --job-post-id branch below bypasses it as a deliberate manual override.
     .where(
       parentsSettledForPipelineTask({
-        task: 'evaluate',
+        task: 'evaluate-skill-match',
         parentIdRef: 'JobPost.id',
       })
     )
@@ -157,11 +157,11 @@ async function pickEvaluateTargets(
     : query.execute();
 }
 
-export async function queueEvaluate(
-  opts: EvaluateOptions
+export async function queueEvaluateSkillMatch(
+  opts: EvaluateSkillMatchOptions
 ): Promise<{ queued: number }> {
   const mode = pipelineModeFromOptions(opts);
-  const targets = await pickEvaluateTargets(opts);
+  const targets = await pickEvaluateSkillMatchTargets(opts);
 
   // The default mode only selects rows that are already queued, --all
   // bulk-requeues inside the picker, and --job-post-id enqueues its row
@@ -170,29 +170,29 @@ export async function queueEvaluate(
   if (mode === 'include-failed') {
     for (const target of targets) {
       await enqueuePipelineTask({
-        task: 'evaluate',
+        task: 'evaluate-skill-match',
         entity: { ofJobPostId: target.id },
       });
     }
   }
 
   terminal.log(
-    `${targets.length} JobPost row(s) queued for evaluate. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
+    `${targets.length} JobPost row(s) queued for evaluate-skill-match. Pass --start (or \`jobfinder start-pipeline\`) to process them.`
   );
 
   return { queued: targets.length };
 }
 
-export async function runEvaluate(
-  opts: EvaluateOptions
+export async function runEvaluateSkillMatch(
+  opts: EvaluateSkillMatchOptions
 ): Promise<{ processed: number }> {
-  await reapStaleStartedStates('evaluate');
-  const targets = await pickEvaluateTargets(opts);
+  await reapStaleStartedStates('evaluate-skill-match');
+  const targets = await pickEvaluateSkillMatchTargets(opts);
 
   if (targets.length === 0) {
     if (!opts.suppressNothingToDoLog) {
       terminal.log(
-        'No viewed JobPost rows with a description. Run `pipeline viewing` first.'
+        'No fetched JobPost rows with a description. Run `pipeline view-job-detail` first.'
       );
     }
 
@@ -214,7 +214,9 @@ export async function runEvaluate(
   }
 
   const results = await Promise.all(
-    targets.map(target => limit(() => evaluateOne({ target, interests, cv })))
+    targets.map(target =>
+      limit(() => evaluateSkillMatchOne({ target, interests, cv }))
+    )
   );
 
   const jobPostEvaluated = results.reduce(
@@ -231,14 +233,14 @@ export async function runEvaluate(
   return { processed: targets.length };
 }
 
-async function evaluateOne(args: {
-  target: EvaluateTarget;
+async function evaluateSkillMatchOne(args: {
+  target: EvaluateSkillMatchTarget;
   interests: string;
   cv: string;
 }): Promise<{ jobPostEvaluated: number } | undefined> {
   const { target, interests, cv } = args;
   return processOne({
-    task: 'evaluate',
+    task: 'evaluate-skill-match',
     entity: { ofJobPostId: target.id },
     label: `"${target.title}" (${target.id})`,
     work: async (): Promise<{ jobPostEvaluated: number }> => {
@@ -292,7 +294,7 @@ async function evaluateOne(args: {
         .execute();
 
       await recordPipelineState({
-        task: 'evaluate',
+        task: 'evaluate-skill-match',
         state: PIPELINE_STATE.DONE,
         entity: { ofJobPostId: target.id },
       });
