@@ -62,6 +62,19 @@ export function SourceDetail({ row }: { row: SourceRow | null }) {
           <Text dimColor>(no JobListSource yet)</Text>
         )}
       </Box>
+      {row.statusReason && (
+        <Box marginTop={1} flexDirection='column'>
+          <Text bold color={row.status.startsWith('Failed') ? 'red' : 'yellow'}>
+            {row.status}
+          </Text>
+          <Text
+            color={row.status.startsWith('Failed') ? 'red' : 'yellow'}
+            wrap='wrap'
+          >
+            {row.statusReason}
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

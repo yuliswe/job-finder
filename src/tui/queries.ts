@@ -166,6 +166,11 @@ export type SourceRow = {
   /** Single-line summary of where this source is in the pipeline. Computed
    * from the other fields; see `computeSourceStatus`. */
   status: string;
+  /** The `PipelineState.reason` behind a terminal `Failed` / `No result`
+   * status (e.g. the LLM error that exhausted research-company's retries),
+   * else `null`. Surfaced in the detail panel; the list's status cell is too
+   * narrow for it. */
+  statusReason: string | null;
 };
 
 export type ActivityRow = {
@@ -1083,6 +1088,46 @@ export async function listSources(args: {
         .orderBy('PipelineState.id', 'desc')
         .limit(1)
         .as('applyFiltersState'),
+      // The `reason` recorded with each stage's latest state, so the detail
+      // panel can explain a `Failed` / `No result` status (e.g. the LLM error
+      // that exhausted research-company's retries). Same latest-row ordering as
+      // the state subqueries above, so state and reason come from one row.
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.reason')
+        .whereRef('PipelineState.ofJobSourceId', '=', 'JobSource.id')
+        .where('PipelineState.task', '=', 'research-company')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('researchCompanyReason'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.reason')
+        .whereRef('PipelineState.ofJobSourceId', '=', 'JobSource.id')
+        .where('PipelineState.task', '=', 'identify-job-list-url')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('identifyJobListUrlReason'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.reason')
+        .whereRef('PipelineState.ofJobListSourceId', '=', 'list.id')
+        .where('PipelineState.task', '=', 'learn-to-use-job-list')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('learnToUseJobListReason'),
+      eb
+        .selectFrom('PipelineState')
+        .select('PipelineState.reason')
+        .whereRef('PipelineState.ofJobListSourceId', '=', 'list.id')
+        .where('PipelineState.task', '=', 'apply-filters')
+        .orderBy('PipelineState.createdAt', 'desc')
+        .orderBy('PipelineState.id', 'desc')
+        .limit(1)
+        .as('applyFiltersReason'),
     ])
     .$call(q => {
       switch (sort) {
@@ -1128,7 +1173,7 @@ export async function listSources(args: {
       isOutOfScopeForIdentifyJobListUrl,
       outOfScopeReason,
       abortListingReason: r.abortListingReason,
-      status: computeSourceStatus({
+      ...computeSourceStatus({
         score,
         sourceIsActive,
         listId: r.listId,
@@ -1139,6 +1184,10 @@ export async function listSources(args: {
         identifyJobListUrlState: r.identifyJobListUrlState,
         learnToUseJobListState: r.learnToUseJobListState,
         applyFiltersState: r.applyFiltersState,
+        researchCompanyReason: r.researchCompanyReason,
+        identifyJobListUrlReason: r.identifyJobListUrlReason,
+        learnToUseJobListReason: r.learnToUseJobListReason,
+        applyFiltersReason: r.applyFiltersReason,
       }),
     };
   });
@@ -1177,6 +1226,17 @@ function sourceOutOfScopeReason(args: {
  * Only when a stage has no active/terminal state (never enqueued, or done) does
  * the empty result column stand in as the "queued" signal. Out-of-scope
  * verdicts still shadow everything downstream of research-company. */
+/** The reason recorded with a stage's latest state is only meaningful to
+ * surface when that state is a terminal `Failed` / `No result` — those are the
+ * outcomes a user needs an explanation for. Returns null for any other label so
+ * the detail panel stays quiet on healthy / pending stages. */
+function terminalStatusReason(
+  label: string | null,
+  reason: string | null
+): string | null {
+  return label === 'Failed' || label === 'No result' ? (reason ?? null) : null;
+}
+
 function computeSourceStatus(args: {
   score: number | null;
   sourceIsActive: number;
@@ -1188,7 +1248,11 @@ function computeSourceStatus(args: {
   identifyJobListUrlState: string | null;
   learnToUseJobListState: string | null;
   applyFiltersState: string | null;
-}): string {
+  researchCompanyReason: string | null;
+  identifyJobListUrlReason: string | null;
+  learnToUseJobListReason: string | null;
+  applyFiltersReason: string | null;
+}): { status: string; statusReason: string | null } {
   const {
     score,
     sourceIsActive,
@@ -1200,18 +1264,40 @@ function computeSourceStatus(args: {
     identifyJobListUrlState,
     learnToUseJobListState,
     applyFiltersState,
+    researchCompanyReason,
+    identifyJobListUrlReason,
+    learnToUseJobListReason,
+    applyFiltersReason,
   } = args;
 
   const researchLabel = pendingStageLabel(researchCompanyState);
-  if (researchLabel) return fmtStatus(researchLabel, 'research-company');
-  if (score == null) return fmtStatus('Queued', 'research-company');
+  if (researchLabel)
+    return {
+      status: fmtStatus(researchLabel, 'research-company'),
+      statusReason: terminalStatusReason(researchLabel, researchCompanyReason),
+    };
+  if (score == null)
+    return {
+      status: fmtStatus('Queued', 'research-company'),
+      statusReason: null,
+    };
 
   if (sourceIsActive !== 1) {
-    return fmtStatus('Out-of-scope', 'identify-job-list-url', 'deactivated');
+    return {
+      status: fmtStatus('Out-of-scope', 'identify-job-list-url', 'deactivated'),
+      statusReason: null,
+    };
   }
 
   if (score < PIPELINE_IDENTIFY_JOB_LIST_URL_MIN_INTEREST_SCORE) {
-    return fmtStatus('Out-of-scope', 'identify-job-list-url', 'low interest');
+    return {
+      status: fmtStatus(
+        'Out-of-scope',
+        'identify-job-list-url',
+        'low interest'
+      ),
+      statusReason: null,
+    };
   }
 
   const identifyLabel = pendingStageLabel(identifyJobListUrlState);
@@ -1219,29 +1305,57 @@ function computeSourceStatus(args: {
     // A terminal identify outcome (`No result` when BFS gave up, or `Failed`)
     // carries the LLM's abort reason when there is one, so the user sees WHY it
     // won't auto-retry — the enrichment the old `Aborted: …` branch provided.
-    const reason =
+    const inlineReason =
       (identifyLabel === 'No result' || identifyLabel === 'Failed') &&
       abortListingReason
         ? abortListingReason
         : undefined;
 
-    return fmtStatus(identifyLabel, 'identify-job-list-url', reason);
+    return {
+      status: fmtStatus(identifyLabel, 'identify-job-list-url', inlineReason),
+      statusReason: terminalStatusReason(
+        identifyLabel,
+        identifyJobListUrlReason
+      ),
+    };
   }
 
   if (listId == null) {
     if (abortListingReason) {
-      return fmtStatus('Aborted', 'identify-job-list-url', abortListingReason);
+      return {
+        status: fmtStatus(
+          'Aborted',
+          'identify-job-list-url',
+          abortListingReason
+        ),
+        statusReason: abortListingReason,
+      };
     }
 
-    return fmtStatus('Queued', 'identify-job-list-url');
+    return {
+      status: fmtStatus('Queued', 'identify-job-list-url'),
+      statusReason: null,
+    };
   }
 
   const learnLabel = pendingStageLabel(learnToUseJobListState);
-  if (learnLabel) return fmtStatus(learnLabel, 'learn-to-use-job-list');
-  if (hasScript === 0) return fmtStatus('Queued', 'learn-to-use-job-list');
+  if (learnLabel)
+    return {
+      status: fmtStatus(learnLabel, 'learn-to-use-job-list'),
+      statusReason: terminalStatusReason(learnLabel, learnToUseJobListReason),
+    };
+  if (hasScript === 0)
+    return {
+      status: fmtStatus('Queued', 'learn-to-use-job-list'),
+      statusReason: null,
+    };
 
   const applyLabel = pendingStageLabel(applyFiltersState);
-  if (applyLabel) return fmtStatus(applyLabel, 'apply-filters');
+  if (applyLabel)
+    return {
+      status: fmtStatus(applyLabel, 'apply-filters'),
+      statusReason: terminalStatusReason(applyLabel, applyFiltersReason),
+    };
   // A list with no posts is only "queued" while apply-filters has never run
   // (no state row). Once it has run to `done`, zero posts is a terminal
   // success — the list simply had nothing matching — which the bar counts as
@@ -1249,8 +1363,11 @@ function computeSourceStatus(args: {
   // guards against. Unlike the upstream stages, done-with-empty-result is
   // legitimate here, so this stage alone needs the state check.
   if (applyFiltersState == null && jobPostCount === 0)
-    return fmtStatus('Queued', 'apply-filters');
-  return fmtStatus('Done', 'apply-filters');
+    return {
+      status: fmtStatus('Queued', 'apply-filters'),
+      statusReason: null,
+    };
+  return { status: fmtStatus('Done', 'apply-filters'), statusReason: null };
 }
 
 export async function toggleSourceActive(row: SourceRow): Promise<void> {
