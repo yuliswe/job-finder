@@ -1,303 +1,212 @@
-# Start development
+# job-finder
 
-## MacOS
+`jobfinder` is a command-line tool that finds jobs worth applying to, starting from a plain-language description of what you want. It discovers hiring companies, locates each company's own careers page, learns how to search that page, pulls the matching postings, and scores every posting against your interests and your CV. Everything it finds is stored in a local SQLite database and shown in a live terminal dashboard, from which you can review postings, tag them, generate a tailored résumé, and auto-fill application forms.
 
-If you are setting up the repo for the first time, following these steps:
+Most of the work is done by LLMs driving a real browser. Each stage can use a different model, and models can come from OpenRouter, Anthropic, a local Ollama daemon, or the local Claude Code CLI.
 
-1. Make sure your ~/.zshrc file has the following lines:
+## How it works
 
+The pipeline is a chain of stages. Each stage reads rows produced by the stage before it, records its outcome per row in `PipelineState`, and writes new rows for the next stage.
+
+| Stage                      | Reads           | Does                                                                                                                                                    | Writes                       |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| `explore-hiring-companies` | `interests.md`  | Translates your interests into a `python-jobspy` search and collects the companies that are hiring.                                                     | `SourceSeed`                 |
+| `approve-seeds`            | `SourceSeed`    | Promotes each seed company into a tracked company with no URL yet.                                                                                      | `JobSource`                  |
+| `research-company`         | `JobSource`     | Uses web search to find the company's website, then opens the page to verify it.                                                                        | `JobSource.url`              |
+| `identify-job-list-url`    | `JobSource`     | Crawls the company site breadth-first, following the links the LLM ranks as most likely to lead to a careers page, until it finds the job-listing page. | `JobListSource`              |
+| `learn-to-use-job-list`    | `JobListSource` | Has the LLM write a JavaScript parser (`listLocations`, `searchJobs`) for the listing page and iterates on it with feedback until it returns real jobs. | `JobListSource.parserScript` |
+| `apply-filters`            | `JobListSource` | Maps your division and location onto the page's own filter values, runs the parser, and inserts every matching posting.                                 | `JobPost`                    |
+| `view-job-detail`          | `JobPost`       | Opens each posting and extracts title, company, location, description, salary, remote status, and a summary.                                            | `JobPost` fields             |
+| `evaluate-skill-match`     | `JobPost`       | Scores the posting for interest, skill, and location fit against `interests.md` and `cv.md`.                                                            | `JobPostEval`                |
+| `fill-form`                | `JobPost`       | Generates a script that fills the posting's application form from your applicant profile. It never submits, and `start-pipeline` does not run it.       | `JobPost.fillFormScript`     |
+
+Postings whose title or location relevancy falls below the thresholds in `jobfinder.config.js` are dropped from scope, so the later and more expensive stages only spend effort on plausible matches.
+
+## Setup
+
+### 1. Development environment (macOS)
+
+The repo ships its own Python virtualenv and Node environment. Add these lines to `~/.zshrc` so that entering the repo activates them:
+
+```zsh
+if [ -f ./.zshrc ] && [ $(pwd) != ~ ]; then
+  source ./.zshrc
+fi
 ```
-   if [ -f ./.zshrc ] && [ \$(pwd) != ~ ]; then
-     source ./.zshrc
-   fi
-```
 
-2. Run the following commands: (You only need to do this once.)
-
-```
-   ./initenv.bash
-```
-
-3. Start a new terminal session.
-
-# CLI
-
-The CLI at `src/cli/bin/cli` wraps the `python-jobspy` library. Run via `npm run cli -- <args>` or directly with `./src/cli/bin/cli <args>`.
-
-## `pipeline listing`
-
-For each unprocessed `JobSource`, open the company URL and BFS the same-domain links the LLM ranks most likely to lead to a careers/jobs page (capped at `PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH`). The first page the LLM classifies as a listing page is inserted as a new `JobListSource` row with an empty `parserScript` placeholder. `pipeline learn-to-use-job-list` fills the script in later. The `JobSource` is always marked `isProcessed` after the attempt to avoid re-running BFS.
+Then run the one-time setup and open a new terminal in the repo:
 
 ```bash
-./src/cli/bin/cli pipeline listing --start
+./initenv.bash
 ```
 
-Requires:
+The activated shell puts `jobfinder` on your `PATH` and loads its Zsh completion. The `jobfinder` binary runs the compiled code in `dist/`, so build it once with `npm run build`, or keep `npm start` running to rebuild on every change.
 
-- A locally installed Chrome/Chromium (run `npx patchright install chromium` once if not).
-- `LLM_IDENTIFY_JOB_LIST_URL_MODEL` set in `jobfinder.config.js`.
+The browser stages need a local Chromium. Run `npx patchright install chromium` once if you do not have one.
 
-## `pipeline learn-to-use-job-list`
+### 2. Configuration
 
-For each unprocessed `JobListSource` (i.e. one whose `parserScript` has not yet been generated), reload the listing page and ask the LLM to emit a JavaScript snippet defining `listLocations()` and `async searchJobs(locations, keywords)`. The script is executed inside the page in a feedback loop — corrective feedback is fed back to the LLM until `searchJobs` returns a non-empty `{ jobTitle, url }[]`. On success, the script is stored in `JobListSource.parserScript` and the row is marked `isProcessed`. On failure, the row is left unprocessed so it can be retried (after tweaking prompts, raising `PIPELINE_IDENTIFY_JOB_LIST_URL_BFS_MAX_DEPTH`, etc.).
+All settings live in `jobfinder.config.js` at the repo root. It is plain JavaScript and is read on every run, so edits take effect immediately without a rebuild. To use a different file, set `CONFIG_FILE` to its path. The `examples/` directory contains ready-made configs for each LLM provider (`jobfinder-openrouter.config.js`, `jobfinder-anthropic.config.js`, `jobfinder-ollama.config.js`, and `jobfinder-claudecode.config.js`).
+
+The settings you will most likely touch are these:
+
+- **Credentials.** Set `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN`, and `SERPER_API_KEY` in the environment or in the config. You only need the keys for the providers your models use.
+- **Models.** Each `LLM_*_MODEL` setting is an array of model IDs tried in fallback order. Every ID carries a provider prefix, such as `openrouter-plugin/…`, `anthropic-plugin/…`, `ollama-plugin/…`, or `claudecode-plugin/…`. The comment above each setting lists the capabilities that stage needs.
+- **Data location.** `DATA_DIR` (default `./data`) holds your input files and the database file named by `DB_NAME` (default `jobs.db`).
+- **Thresholds and limits.** The `PIPELINE_*` settings control crawl depth and the relevancy cutoffs, and the `BROWSER_*` and `MAX_CONCURRENT_BROWSER_TABS` settings control scraping behavior.
+
+### 3. Your data
+
+Put the following files in `DATA_DIR`. For each one, a `*.local.md` copy takes precedence over the plain file and is gitignored, so your real details stay out of version control.
+
+- `interests.local.md` describes the roles, industries, companies, and locations you are looking for. It drives company discovery, the default division and location filters, and the interest score.
+- `cv.local.md` is your CV in Markdown, and it drives the skill score.
+- `profile.local.md` is your applicant profile (contact details, work authorization, and similar answers), which `fill-form` uses to fill application forms.
+- `cv-template.html` is the HTML template used to render tailored résumé PDFs into `RESUME_OUTPUT_DIR`.
+
+### 4. Create the database
 
 ```bash
-./src/cli/bin/cli pipeline learn-to-use-job-list --start
+jobfinder init
 ```
 
-Requires:
-
-- A locally installed Chrome/Chromium.
-- `LLM_IDENTIFY_JOB_LIST_URL_MODEL` set in `jobfinder.config.js`.
-
-## `pipeline apply-filters`
-
-For every `JobListSource` with a validated `parserScript`, reload the listing page, call the script's `listLocations()` and `listDivisions()` to enumerate the page's actual filter values, ask the LLM to map the user-supplied `--division` and `--location` strings to subsets of those values, then invoke `searchJobs()` with the picks and insert every returned `{ jobTitle, url }` into `JobPost` (ON CONFLICT(url) DO NOTHING). Each row is recorded in `PipelineState` with `task='apply-filters'` and state `script_error` / `no_result_found` / `success`.
+## Typical workflow
 
 ```bash
-./src/cli/bin/cli pipeline apply-filters -d engineering -l "Toronto, ON" --start
+# Discover hiring companies from interests.md, then promote them to tracked companies
+jobfinder pipeline explore-hiring-companies
+jobfinder pipeline approve-seeds
+
+# Run every stage concurrently until all queues drain
+jobfinder start-pipeline
+
+# In another terminal, watch progress and review results
+jobfinder tui
 ```
 
-Requires:
-
-- A locally installed Chrome/Chromium.
-- `LLM_IDENTIFY_JOB_LIST_URL_MODEL` set in `jobfinder.config.js`.
-
-## `pipeline view-job-detail`
-
-For each unprocessed `JobPost` (i.e. `isProcessed=false`), open the posting URL, clean the page HTML, and ask the LLM to extract structured fields (`title`, `company`, `location`, `description`, `isRemote`, `jobType`, `postedAt`, `salaryMin`/`salaryMax`/`salaryCurrency`/`salaryInterval`, `summary`). The row is updated with whatever fields the LLM populates and marked `isProcessed`. Each row is recorded in `PipelineState` with `task='view-job-detail'` and state `done` / `failed`.
+You can also add a single company or posting by URL. `jobfinder track <url>` asks the LLM whether the URL is a job posting or a careers page and queues the matching stages for it.
 
 ```bash
-jobfinder pipeline view-job-detail --start
+jobfinder track https://acme.example/careers
 ```
 
-Pass `--all` to re-queue every qualifying `JobPost` regardless of pipeline state — including ones already `done` / `not_a_job_posting` / `failed`. Useful after a prompt change.
+## Running the pipeline
+
+### Queueing and processing
+
+Every stage command (`jobfinder pipeline <stage>`) only queues the rows it selects by default, so you can stage work cheaply and process it later in one run. Pass `--start` to process the queue immediately instead.
 
 ```bash
-jobfinder pipeline view-job-detail --all --start
-```
-
-Requires:
-
-- A locally installed Chrome/Chromium.
-- `LLM_VIEW_JOB_DETAIL_MODEL` set in `jobfinder.config.js`.
-
-## `pipeline research-company`
-
-For each distinct `name` in `SourceSeed`, take the top 3 most recent rows (by `createdAt`), open each URL with headless Puppeteer, and ask the LLM to identify the hiring company. Insert each discovered company (hostname-normalized URL, unique) into `JobSource`.
-
-```bash
-jobfinder pipeline research-company --start
-```
-
-By default, `research-company`, `listing`, `learn-to-use-job-list`, `apply-filters`, `view-job-detail`, and `evaluate` only queue the rows they select — nothing is processed until you either pass `--start` or let `jobfinder start-pipeline` drain the queues. This makes it cheap to stage work first and process it later in one orchestrated run:
-
-```bash
-# Queue failed view-job-detail rows now, process everything queued later:
+# Queue now, process later along with everything else
 jobfinder pipeline view-job-detail --include-failed
 jobfinder start-pipeline
 
-# Or queue and process in one invocation:
+# Queue and process in one step
 jobfinder pipeline view-job-detail --include-failed --start
 ```
 
-All pipeline subcommands (except `explore-hiring-companies`) accept `--all` to re-queue every qualifying parent regardless of pipeline state — including ones already `done` / `failed` / `aborted`. Useful after a prompt change. Available on `research-company`, `listing`, `learn-to-use-job-list`, `apply-filters`, `view-job-detail`, `evaluate`:
+The stage commands share a common set of selectors:
 
-```bash
-jobfinder pipeline research-company --all --start
-jobfinder pipeline evaluate --all --start
-```
+- With no selector, the command queues rows that have not been processed yet.
+- `--include-failed` also retries rows whose last attempt failed, aborted, or found nothing.
+- `--all` re-queues every in-scope row regardless of its state, which is what you want after changing a prompt or a model.
+- `--job-source-id`, `--job-list-source-id`, or `--job-post-id` (whichever matches the stage) forces a single row onto the queue.
 
-Each of those subcommands also accepts a `--<parent-table>-id <id>` flag to force a single record onto the queue regardless of pipeline state or qualification (add `--start` to process it immediately):
+`apply-filters` also accepts `-d/--division` and `-l/--location`, which override the values it would otherwise extract from `interests.md`.
 
-- `research-company --source-seed-id <id>`
-- `listing --job-source-id <id>`
-- `learn-to-use-job-list --job-list-source-id <id>`
-- `apply-filters --job-list-source-id <id>`
-- `view-job-detail --job-post-id <id>`
-- `evaluate --job-post-id <id>`
+### `start-pipeline`
 
-```bash
-jobfinder pipeline view-job-detail --job-post-id 0192...abcd --start
-jobfinder pipeline apply-filters --job-list-source-id 0192...abcd --start
-```
-
-Requires:
-
-- A locally installed Chrome/Chromium (run `npx puppeteer browsers install chrome` once if not).
-- `LLM_RESEARCH_COMPANY_MODEL` set in `jobfinder.config.js`.
-
-## `pipeline explore-hiring-companies`
-
-Read `data/interests.md`, ask the LLM to translate the interests into a `python-jobspy` call, run the call in a feedback loop (the LLM gets a chance to fix failures), then insert each unique result into the `SourceSeed` table.
-
-```bash
-./src/cli/bin/cli pipeline explore-hiring-companies
-```
-
-Requires:
-
-- `OPENROUTER_API_KEY` set in the environment.
-- `LLM_EXPLORE_HIRING_COMPANIES_MODEL` set in `src/llm/config.ts` (empty by default).
-- `data/interests.md` populated with the user's job-search interests.
-
-## `start-pipeline`
-
-Run research-company, listing, learn-to-use-job-list, apply-filters, view-job-detail, and evaluate concurrently in independent loops until every queue drains. Each loop re-iterates immediately when its previous iteration processed ≥1 row, and sleeps 5s only when it found nothing to do. The orchestrator exits once every task has finished an idle iteration with no productive work happening anywhere in between — so it's the right thing to leave running unattended after `pipeline explore-hiring-companies` + `pipeline approve-seeds`.
+`start-pipeline` runs `research-company`, `identify-job-list-url`, `learn-to-use-job-list`, `apply-filters`, `view-job-detail`, and `evaluate-skill-match` concurrently, each in its own loop, and exits once every queue is empty. The two downstream stages take priority, which means the upstream stages pause while postings are still waiting to be fetched or scored. As a result, the current backlog is finished before more postings are generated. Each browser stage keeps one long-lived Chromium instance for the whole run.
 
 ```bash
 jobfinder start-pipeline
-
-# Also retry every in-scope row whose latest state is NOT done
-# (failed / aborted / no_result / etc.) — applied once on each task's
-# first iteration via the same picker semantics as
-# `jobfinder pipeline <task> --include-failed`. Subsequent iterations
-# run in default queued-only mode so a transient failure inside the
-# run is not retried forever.
-jobfinder start-pipeline --include-failed
-
-# Override the single-instance lock (below). Only when you are certain the
-# recorded holder process is actually dead.
-jobfinder start-pipeline --force
+jobfinder start-pipeline --include-failed   # retry failed rows once, on each stage's first pass
 ```
 
-Each browser-using task (research-company, listing, learn-to-use-job-list, apply-filters, view-job-detail) holds its own long-lived Chromium instance for the loop's lifetime — no per-poll cold starts. Per-row failures (`PIPELINE_STATE.FAILED`/`ABORTED`/etc.) stay failed; retry them with `--include-failed` on a fresh `start-pipeline`, or with the relevant subcommand and `--include-failed` / `--all`.
+Only one `start-pipeline` can run against a given database at a time, because two runs would process every queued row twice. The run holds a lock at `<db-path>.pipeline.lock`, which it releases on exit or Ctrl+C. If a run is killed hard, the next run notices that the recorded process is dead and reclaims the lock automatically. `--force` overrides a lock whose holder you have already confirmed is dead.
 
-Only one `start-pipeline` may run per database at a time. On startup it takes an exclusive lock at `<db-path>.pipeline.lock`; a second instance against the same database refuses to start and exits non-zero, because concurrent runs would double-process every queued row and each run's stale-`started` reap would requeue the other's legitimately in-flight rows as if they were crash orphans. The lock records the holder's PID and is released on normal exit and on Ctrl+C / `SIGTERM`. A run killed with `SIGKILL` (or a power loss) leaves the file behind, but the next start detects the dead PID and reclaims it automatically, so a stale lock never needs manual cleanup; `--force` is only for the rare case where you want to override a lock whose holder you have already confirmed is dead. Two pipelines pointed at _different_ databases run independently and never block each other.
+### `reset`
 
-Requires:
-
-- A locally installed Chrome/Chromium.
-- All `LLM_*` models that the individual subcommands need (research-company/listing/learn-to-use-job-list/view-job-detail/evaluate).
-
-## `reset`
-
-Requeue the tasks in one pipeline stage so the next run reprocesses them. `reset` writes fresh `queued` rows and does not process anything itself, so follow it with `jobfinder start-pipeline` (or the stage's own `--start`) to drain the queue. The stage argument is one of `research-company`, `listing`, `learn-to-use-job-list`, `apply-filters`, `view-job-detail`, `evaluate` (`explore-hiring-companies` is excluded because it generates new seeds rather than re-picking existing rows).
-
-Pick exactly one selector:
+`reset <stage>` re-queues the rows of one stage without processing them. Pick exactly one selector.
 
 ```bash
-# Requeue every in-scope entity for the stage, including ones already done
-# (equivalent to the stage's own --all). Use after a prompt or config change.
-jobfinder reset view-job-detail --all
-
-# Requeue only entities whose latest state produced no result
-# (e.g. not_a_job_posting, no_source_found, no_listing_found, no_result_found).
-jobfinder reset view-job-detail --no-result
-
-# Requeue only entities whose latest state is an error (failed, script_error, aborted).
-jobfinder reset apply-filters --failed
+jobfinder reset view-job-detail --all        # every in-scope row, including finished ones
+jobfinder reset view-job-detail --no-result  # rows whose last attempt found nothing
+jobfinder reset apply-filters --failed       # rows whose last attempt errored
 ```
 
-Unlike `--all`, the `--no-result` and `--failed` selectors key off each entity's current (latest) pipeline state, so they touch only the rows that actually reached one of those states.
-
-## `job bump`
-
-Manually prioritize a single JobPost so it clears the `view-job-detail` and `evaluate` stages ahead of the rest of the backlog. The two pickers order their eligible rows by the bump timestamp (most recently bumped first, unbumped last), so under contention a bumped post lands in the first concurrency batch and flows through both stages before its peers.
+## Working with individual jobs
 
 ```bash
-# Prioritize one post — it will be fetched and evaluated ahead of the others
-jobfinder job bump 0192...abcd
+# Process one posting ahead of the backlog (the most recent bump goes first)
+jobfinder job bump <job-post-id>
+jobfinder job bump <job-post-id> --clear
 
-# Bump a second post: because ordering is by recency, it now outranks the first
-jobfinder job bump 0192...ef01
+# Take a posting out of scope, or put it back
+jobfinder job exclude <id-or-url> --reason 'duplicate posting'
+jobfinder job include <id-or-url>
 
-# Remove the bump
-jobfinder job bump 0192...abcd --clear
+# Auto-fill an application form in a visible browser without submitting it
+jobfinder fill-form <id-or-url>
 ```
 
-Bumps are cumulative and persist until you clear them or the post finishes evaluating and drops out of the pickers. In the TUI, press `b` on a highlighted job to toggle its bump; bumped rows show a yellow `▲` in the `pri` column.
+A manual exclusion survives a bulk `--all` re-queue, so `job include` is the only way to bring the posting back into scope. When `fill-form` receives a URL that is not in the database yet, it creates the posting and queues the stages it needs first. The generated fill script is cached on the posting, and `--regenerate` discards it and generates a new one.
 
-## `export jobs`
-
-Dump fully-evaluated JobPost rows (status=`Done`) to a CSV file — i.e. posts in an active source tree, above the title-relevancy threshold, with view-job-detail + evaluate already populated. Useful for ad-hoc analysis in a spreadsheet / pandas.
+## The dashboard
 
 ```bash
-# Default output: ./jobs.out.csv (matches the *.out.* gitignore)
-jobfinder export jobs
+jobfinder tui
+```
 
-# Custom path + sort by skill × interest (ignore location)
+The dashboard shows the pipeline funnel, the Jobs and Sources tables, and a recent-activity feed, all of which refresh as the pipeline writes to the database. The footer lists the key bindings. The most useful ones are listed below.
+
+| Key           | Action                                                              |
+| ------------- | ------------------------------------------------------------------- |
+| `←` `→` `Tab` | Switch tab                                                          |
+| `Enter`       | Open the highlighted job or source                                  |
+| `s` / `S`     | Cycle the sort order                                                |
+| `o` / `O`     | Show all postings, or only out-of-scope ones                        |
+| `t` / `T`     | Tag or untag a job with one of the colors from `TAGS` in the config |
+| `b`           | Bump a job's priority                                               |
+| `x`           | Exclude or include a job (on the job detail screen)                 |
+| `p`           | Generate a tailored résumé PDF (on the job detail screen)           |
+| `l`           | Open the URL in your browser                                        |
+| `a`           | Toggle whether a source is active (on the Sources tab)              |
+| `q` / `Esc`   | Go back or quit                                                     |
+
+### Driving the dashboard from a script or agent
+
+`jobfinder tui --harness` opens the same dashboard and also starts a small HTTP control server, so that a script or an agent can read the screen and press keys on the instance you are watching. The server's URL is printed on startup and published to `/tmp/jobfinder/harness.<pid>.json`. Use `--harness-port` to pin the port.
+
+```bash
+jobfinder tui --harness --harness-port 5599
+
+curl -s http://127.0.0.1:5599/screen                                  # current frame as plain text
+curl -s http://127.0.0.1:5599/keys -d '{"keys":["down","down","enter"]}'  # press keys, get the new frame
+```
+
+The body of `POST /keys` accepts `keys` (named keys such as `up`, `enter`, or `escape`, or single characters), `text` (typed one character at a time), and an optional `settle` delay in milliseconds. `GET /` lists the key names.
+
+## Exporting results
+
+`export jobs` writes every fully evaluated posting to a CSV file for analysis in a spreadsheet or pandas. The `--sort` keys match the dashboard's sort orders (`all`, `interest`, `skill`, `location`, `excl. interest`, and `excl. location`).
+
+```bash
+jobfinder export jobs                                  # writes ./jobs.out.csv
 jobfinder export jobs ./shortlist.csv --sort 'excl. location'
 ```
 
-The sort keys are `all`, `interest`, `skill`, `location`, `excl. interest`, `excl. location`. If the output file already exists the command prompts before overwriting (`y` / `N`).
+## Development
 
-## `job exclude` / `job include`
+| Command                       | Purpose                                                                           |
+| ----------------------------- | --------------------------------------------------------------------------------- |
+| `npm run build` / `npm start` | Build `dist/` once, or rebuild on every change                                    |
+| `npm test`                    | Run the Jest tests                                                                |
+| `npm run db:migrate`          | Apply pending migrations                                                          |
+| `npm run db:migrate:create`   | Create a new migration                                                            |
+| `npm run db:codegen`          | Regenerate the Kysely database types                                              |
+| `npm run sql`                 | Open the database in `litecli`                                                    |
+| `jobfinder completion`        | Regenerate `__generated__/cli/_completion.zsh` after changing any command or flag |
+| `jobfinder help-menu-dump`    | Regenerate `__generated__/cli/help-menu.json`, the machine-readable command tree  |
 
-Manually override a single post's scope. Scope is otherwise derived entirely from active-tree membership and the LLM relevancy scores; `job exclude` is the one signal a human controls directly. Excluding a post pushes it out of scope for the view-job-detail and evaluate stages (so `start-pipeline` and the stage pickers skip it) and hides it from the TUI's default `in` filter, exactly as a below-threshold relevancy score would. `job include` reverses it, after which the usual active-tree and relevancy gates apply again. A post is identified by its `JobPost.id` or its `url`.
-
-```bash
-# Exclude by url, recording why
-jobfinder job exclude https://acme.example/jobs/123 --reason 'duplicate posting'
-
-# Exclude by id
-jobfinder job exclude 019f97e6-5c19-7658-9b61-5524a71c5485
-
-# Undo the exclusion
-jobfinder job include https://acme.example/jobs/123
-```
-
-An excluded post stays out of scope even across a `pipeline evaluate --all` requeue — a manual exclusion outranks a bulk requeue — so `job include` (or the TUI's `x` key) is the only way back into scope. The same toggle is available in the TUI: press `x` on a post's detail screen.
-
-## `tui`
-
-Open the live dashboard: the pipeline funnel, the JobPost / Sources tables, and a recent-activity feed, all refreshing as the pipeline writes to the DB. The dashboard opens on the Jobs tab; switch tabs and re-sort from inside the TUI.
-
-```bash
-# Live dashboard
-jobfinder tui
-
-# Harness mode: open the live dashboard AND expose an HTTP control server, so an
-# agent (or you) can read the screen and drive it with keystrokes
-jobfinder tui --harness
-jobfinder tui --harness --harness-port 5599
-```
-
-`--harness` opens the normal live dashboard in your terminal **and** attaches a small HTTP control server (its base URL is printed to stderr on startup) so an agent can observe and drive the very same instance you are watching. Your keyboard and injected keystrokes both flow into it, and every change is reflected on your screen and readable over HTTP. (If stdout is not a terminal — piped output, CI, a pure headless agent — it runs the same server without drawing anything.)
-
-While the harness is running it publishes its connection info to `/tmp/jobfinder/harness.<pid>.json` (`url`, `port`, `pid`, and the `screen` / `keys` endpoint URLs) and removes the file on exit, so an agent can discover a running instance without being told the port. The file is keyed by process id, so several TUIs can run at once without clobbering each other; each one also shows its `pid` in the top-right corner of its screen, and a starting instance sweeps discovery files left by processes that have since died.
-
-- `GET /screen` returns a plain-text (ANSI-stripped) snapshot of the current frame.
-- `POST /keys` injects keystrokes and returns the resulting frame. The JSON body accepts `keys` (an array of key tokens) and/or `text` (a literal string typed one character at a time), plus an optional `settle` in milliseconds to wait for the re-render. Keys in one request are applied in sequence, with a re-render between each, so a batch behaves like real successive presses. Key tokens are either named keys (`up`, `down`, `left`, `right`, `enter`, `escape`, `tab`, `pageup`, `pagedown`, `home`, `end`, `backspace`, `delete`, `space`, `ctrl+c`) or literal characters (`q`, `s`, `o`, …). `GET /` lists the available key names.
-
-```bash
-# Read the current screen
-curl -s http://127.0.0.1:5599/screen
-
-# Move the cursor down twice and open the highlighted row
-curl -s http://127.0.0.1:5599/keys -d '{"keys":["down","down","enter"]}'
-
-# Switch to the Sources tab and cycle its sort
-curl -s http://127.0.0.1:5599/keys -d '{"keys":["tab","s"]}'
-```
-
-Sending `q` (or `escape` from the top-level view) quits the TUI, which shuts the server down and ends the process.
-
-## `help-menu-dump`
-
-Dump the full command tree (commands, subcommands, options, choices, defaults) as JSON. Useful for tooling that needs a machine-readable view of the CLI surface.
-
-```bash
-# Print to stdout
-./src/cli/bin/cli help-menu-dump
-
-# Write canonical dump file
-./src/cli/bin/cli help-menu-dump -o __generated__/cli/help-menu.json
-
-# Compact (single-line) JSON
-./src/cli/bin/cli help-menu-dump --no-pretty
-```
-
-## `completion`
-
-Generate the Zsh completion script and write it to `__generated__/cli/_completion.zsh`.
-
-```bash
-# One-off for current shell
-source <(./src/cli/bin/cli completion)
-
-# Persistent — add to ~/.zshrc
-echo 'source ~/lab/job-finder/__generated__/cli/_completion.zsh' >> ~/.zshrc
-```
-
-Regenerate after adding or changing any command/flag — never hand-edit `_completion.zsh`.
+Never edit the files in `__generated__/` by hand. `jobfinder <command> --help` documents every command and option in full.
